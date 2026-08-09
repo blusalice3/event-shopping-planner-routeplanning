@@ -46,7 +46,6 @@ import {
   persistenceWriterId,
   prepareMetadataForPayload,
   readPersistenceSnapshotWithRetry,
-  readRawMapSnapshotWithRetry,
   readRuntimeCandidateSnapshots,
   retainRuntimeCandidatesForRecoveryAdoption,
   runtimeCandidateIsRetainedForRecoveryAdoption,
@@ -69,6 +68,7 @@ import {
 import {
   buildMapDataPuts,
   parseMapDataEntryKey,
+  readRawMapSnapshotWithRetry,
 } from "../repositories/mapRepository";
 import { validateCheckpointForRoot } from "./checkpoint";
 import {

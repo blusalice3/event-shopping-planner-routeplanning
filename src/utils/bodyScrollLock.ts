@@ -1,5 +1,3 @@
-import "./bodyScrollLock.css";
-
 export interface BodyScrollLockOptions {
   lockOverscroll?: boolean;
   lockTouchAction?: boolean;

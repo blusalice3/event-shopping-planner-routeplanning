@@ -18,9 +18,43 @@ const MAX_JWKS_BYTES = 512 * 1024;
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 const SOURCE_SHA = /^[0-9a-f]{40}$/;
 const RUN_ID = /^[1-9][0-9]*$/;
+const SHA256 = /^[0-9a-f]{64}$/;
+const OIDC_RECEIPT_KEYS = [
+  "audience",
+  "claims",
+  "issuer",
+  "kind",
+  "schemaVersion",
+  "signingKey",
+  "subject",
+  "tokenSha256",
+  "verifiedAt",
+];
+const OIDC_CLAIM_KEYS = [
+  "environment",
+  "eventName",
+  "expiresAt",
+  "issuedAt",
+  "jti",
+  "notBefore",
+  "ref",
+  "refProtected",
+  "repository",
+  "runAttempt",
+  "runId",
+  "sourceSha",
+  "workflowRef",
+  "workflowSha",
+];
+const SIGNING_KEY_KEYS = ["jwkThumbprintSha256", "kid"];
 
 const isRecord = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+
+const hasExactKeys = (value, keys) =>
+  isRecord(value) &&
+  Object.keys(value).length === keys.length &&
+  keys.every((key) => Object.hasOwn(value, key));
 
 const requireNonEmptyString = (value, label) => {
   if (typeof value !== "string" || value.length === 0) {
@@ -46,10 +80,10 @@ const assertPolicy = (policy) => {
     policy.trustedIssuer !== "https://token.actions.githubusercontent.com" ||
     typeof policy.repository !== "string" ||
     !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(policy.repository) ||
-    typeof policy.workflowRef !== "string" ||
-    !policy.workflowRef.endsWith(
-      "/.github/workflows/release.yml@refs/heads/main",
-    ) ||
+    ![
+      `${policy.repository}/.github/workflows/release.yml@refs/heads/main`,
+      `${policy.repository}/.github/workflows/performance-evidence.yml@refs/heads/main`,
+    ].includes(policy.workflowRef) ||
     typeof policy.protectedEnvironment !== "string" ||
     policy.protectedEnvironment.length === 0 ||
     typeof policy.oidcAudience !== "string" ||
@@ -112,6 +146,31 @@ const expectedSubject = (policy) =>
     ":",
     "%3A",
   )}`;
+
+export const deriveGitHubOidcPolicy = ({
+  basePolicy,
+  workflowPath,
+  protectedEnvironment,
+}) => {
+  if (
+    !isRecord(basePolicy) ||
+    ![
+      ".github/workflows/release.yml",
+      ".github/workflows/performance-evidence.yml",
+    ].includes(workflowPath) ||
+    typeof protectedEnvironment !== "string" ||
+    protectedEnvironment.length === 0
+  ) {
+    throw new Error("Derived GitHub OIDC policy options are invalid");
+  }
+  const policy = {
+    ...basePolicy,
+    workflowRef: `${basePolicy.repository}/${workflowPath}@refs/heads/main`,
+    protectedEnvironment,
+  };
+  assertPolicy(policy);
+  return policy;
+};
 
 const assertClaims = ({
   claims,
@@ -430,4 +489,56 @@ export const assertVerifiedGitHubOidcResult = (result) => {
     throw new Error("Approval OIDC result was not cryptographically verified");
   }
   return result;
+};
+
+export const assertStoredGitHubOidcReceipt = ({
+  receipt,
+  policy,
+  expectedSourceSha,
+  expectedRunId,
+  expectedRunAttempt = null,
+}) => {
+  assertPolicy(policy);
+  if (
+    !hasExactKeys(receipt, OIDC_RECEIPT_KEYS) ||
+    !hasExactKeys(receipt.claims, OIDC_CLAIM_KEYS) ||
+    !hasExactKeys(receipt.signingKey, SIGNING_KEY_KEYS) ||
+    receipt.schemaVersion !== 1 ||
+    receipt.kind !== "github-actions-oidc-verification/v1" ||
+    receipt.issuer !== policy.trustedIssuer ||
+    receipt.audience !== policy.oidcAudience ||
+    receipt.subject !== expectedSubject(policy) ||
+    !SHA256.test(receipt.tokenSha256 ?? "") ||
+    !SHA256.test(receipt.signingKey.jwkThumbprintSha256 ?? "") ||
+    typeof receipt.signingKey.kid !== "string" ||
+    receipt.signingKey.kid.length === 0 ||
+    receipt.claims.repository !== policy.repository ||
+    receipt.claims.workflowRef !== policy.workflowRef ||
+    receipt.claims.workflowSha !== expectedSourceSha ||
+    receipt.claims.environment !== policy.protectedEnvironment ||
+    receipt.claims.runId !== expectedRunId ||
+    !RUN_ID.test(receipt.claims.runAttempt ?? "") ||
+    (expectedRunAttempt !== null &&
+      receipt.claims.runAttempt !== expectedRunAttempt) ||
+    receipt.claims.sourceSha !== expectedSourceSha ||
+    receipt.claims.eventName !== "workflow_dispatch" ||
+    receipt.claims.ref !== "refs/heads/main" ||
+    receipt.claims.refProtected !== true ||
+    !["issuedAt", "notBefore", "expiresAt"]
+      .map((key) => receipt.claims[key])
+      .every(
+        (value) =>
+          typeof value === "string" &&
+          Number.isFinite(Date.parse(value)) &&
+          new Date(Date.parse(value)).toISOString() === value,
+      ) ||
+    !Number.isFinite(Date.parse(receipt.verifiedAt ?? "")) ||
+    new Date(Date.parse(receipt.verifiedAt)).toISOString() !==
+      receipt.verifiedAt
+  ) {
+    throw new Error(
+      "Stored GitHub OIDC receipt differs from verified authority",
+    );
+  }
+  return receipt;
 };

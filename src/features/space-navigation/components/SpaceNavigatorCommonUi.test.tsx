@@ -116,6 +116,12 @@ const dispatchPointer = (
   fireEvent(element, event);
 };
 
+const localSettingsPersistence = {
+  loadPreference: (key: string) => localStorage.getItem(key),
+  savePreference: (key: string, value: string) =>
+    localStorage.setItem(key, value),
+};
+
 describe("SpaceNavigatorPicker", () => {
   const originalInnerHeight = window.innerHeight;
   const originalInnerWidth = window.innerWidth;
@@ -746,30 +752,29 @@ describe("SpaceNavigatorHost and footer visibility", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders neither entry point when rail and footer button are both disabled", () => {
+  it("renders neither entry point when rail and footer button are both disabled", async () => {
     localStorage.setItem(
       "spaceNavigatorSettings",
       JSON.stringify({ railVisible: false, footerButtonVisible: false }),
     );
     render(
-      <SpaceNavigatorProvider>
+      <SpaceNavigatorProvider settingsPersistence={localSettingsPersistence}>
         <StaticRegistration />
         <SpaceNavigatorHost />
       </SpaceNavigatorProvider>,
     );
 
-    expect(
-      screen.queryByRole("slider", { name: "スペースナビ" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "スペース一覧を開く" }),
-    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("slider", { name: "スペースナビ" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "スペース一覧を開く" }),
+      ).not.toBeInTheDocument();
+    });
   });
 
-  it("keeps the traditional footer padding when only the rail is enabled", () => {
-    const dynamicRegistry = document.createElement("style");
-    dynamicRegistry.textContent = ".esp-dynamic-css-registry {}";
-    document.head.appendChild(dynamicRegistry);
+  it("keeps the traditional footer padding when only the rail is enabled", async () => {
     localStorage.setItem(
       "spaceNavigatorSettings",
       JSON.stringify({ railVisible: true, footerButtonVisible: false }),
@@ -778,7 +783,7 @@ describe("SpaceNavigatorHost and footer visibility", () => {
       .spyOn(HTMLElement.prototype, "offsetHeight", "get")
       .mockReturnValue(123);
     render(
-      <SpaceNavigatorProvider>
+      <SpaceNavigatorProvider settingsPersistence={localSettingsPersistence}>
         <StaticRegistration />
         <SummaryBar items={[]} />
         <FocusModeFooterPortal
@@ -800,12 +805,14 @@ describe("SpaceNavigatorHost and footer visibility", () => {
       </SpaceNavigatorProvider>,
     );
 
-    expect(
-      screen.getByRole("slider", { name: "スペースナビ" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "スペース一覧を開く" }),
-    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("slider", { name: "スペースナビ" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "スペース一覧を開く" }),
+      ).not.toBeInTheDocument();
+    });
     const summaryFooter = screen.getByText("残りの合計").closest(".fixed");
     expect((summaryFooter as HTMLElement).style.paddingBottom).toBe("");
     expect(
@@ -815,39 +822,33 @@ describe("SpaceNavigatorHost and footer visibility", () => {
     expect(
       screen.getByRole("contentinfo", { name: "集中モード操作" }),
     ).toHaveAttribute("id", "focus-mode-footer");
-    const footerHeightRule = Array.from(document.styleSheets)
-      .flatMap((styleSheet) => Array.from(styleSheet.cssRules))
-      .find(
-        (rule) =>
-          rule.type === CSSRule.STYLE_RULE &&
-          (rule as CSSStyleRule).selectorText ===
-            ":root:where(:not(.esp-dynamic-css-disabled))",
-      ) as CSSStyleRule | undefined;
-    expect(footerHeightRule?.style.getPropertyValue("--footer-height")).toBe(
+    expect(document.documentElement).toHaveAttribute(
+      "data-footer-height",
       "123px",
     );
     expect(
       document.documentElement.style.getPropertyValue("--footer-height"),
     ).toBe("");
-    dynamicRegistry.remove();
     offsetHeight.mockRestore();
   });
 
-  it("opens the picker from the footer button when the rail is disabled", () => {
+  it("opens the picker from the footer button when the rail is disabled", async () => {
     localStorage.setItem(
       "spaceNavigatorSettings",
       JSON.stringify({ railVisible: false, footerButtonVisible: true }),
     );
     render(
-      <SpaceNavigatorProvider>
+      <SpaceNavigatorProvider settingsPersistence={localSettingsPersistence}>
         <StaticRegistration />
         <SpaceNavigatorHost />
       </SpaceNavigatorProvider>,
     );
 
-    expect(
-      screen.queryByRole("slider", { name: "スペースナビ" }),
-    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("slider", { name: "スペースナビ" }),
+      ).not.toBeInTheDocument();
+    });
     fireEvent.click(screen.getByRole("button", { name: "スペース一覧を開く" }));
     expect(
       screen.getByRole("dialog", { name: "スペース一覧" }),
@@ -858,7 +859,7 @@ describe("SpaceNavigatorHost and footer visibility", () => {
     "opens a non-central clicked space action dialog directly in %s layout",
     (layoutMode) => {
       render(
-        <SpaceNavigatorProvider>
+        <SpaceNavigatorProvider settingsPersistence={localSettingsPersistence}>
           <StaticRegistration layoutMode={layoutMode} />
           <SpaceNavigatorHost />
         </SpaceNavigatorProvider>,
@@ -879,7 +880,7 @@ describe("SpaceNavigatorHost and footer visibility", () => {
 
   it("positions host notifications above the measured footer without adding safe-area twice", () => {
     render(
-      <SpaceNavigatorProvider>
+      <SpaceNavigatorProvider settingsPersistence={localSettingsPersistence}>
         <StaticRegistration />
         <NotificationTrigger />
         <SpaceNavigatorHost />
@@ -895,7 +896,7 @@ describe("SpaceNavigatorHost and footer visibility", () => {
 
   it("keeps information notifications slate and renders warnings in red", () => {
     render(
-      <SpaceNavigatorProvider>
+      <SpaceNavigatorProvider settingsPersistence={localSettingsPersistence}>
         <StaticRegistration />
         <NotificationTrigger />
         <SpaceNavigatorHost />
@@ -924,7 +925,7 @@ describe("SpaceNavigatorHost and footer visibility", () => {
     "closes action dialogs and releases the body scroll lock when %s",
     async (_caseName, invalidateRegistrationLabel) => {
       render(
-        <SpaceNavigatorProvider>
+        <SpaceNavigatorProvider settingsPersistence={localSettingsPersistence}>
           <MutableRegistration />
           <SpaceNavigatorHost />
         </SpaceNavigatorProvider>,

@@ -19,6 +19,7 @@ import {
   buildPublicResponseHashes,
   canonicalArtifactBytes,
   readAndVerifyCapability,
+  readAndVerifyOuterAgentGraph,
   readAndVerifyPublicIdentity,
   readAndVerifyRoleEntryGraph,
 } from "./lib/artifact-contract.mjs";
@@ -42,6 +43,7 @@ import {
 } from "./lib/file-manifest.mjs";
 import { verifyDeterministicZip } from "./deterministic-zip.mjs";
 import { providerConfigurationHash } from "./provider/providerConfiguration.mjs";
+import { readStaticApplicationStylesheetContract } from "./lib/application-stylesheet-contract.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -59,13 +61,20 @@ const assertCanonicalJsonBytes = (bytes, parsed, label) => {
   }
 };
 
-const readPackageIndex = async (packageRoot) => {
+const readPackageIndex = async (packageRoot, expectedBuildPurpose = null) => {
   const indexPath = path.join(packageRoot, "release-package-index.json");
   const bytes = await readFile(indexPath);
   const index = parseJsonStrict(bytes.toString("utf8"), indexPath);
   assertCanonicalJsonBytes(bytes, index, "ReleasePackageIndex");
-  assertReleasePackageIndex(index);
-  return { index, bytes, path: indexPath };
+  const resolvedBuildPurpose =
+    expectedBuildPurpose ??
+    (index.packageKind === "legacy-bootstrap-single"
+      ? "legacy-bootstrap"
+      : "production");
+  assertReleasePackageIndex(index, {
+    expectedBuildPurpose: resolvedBuildPurpose,
+  });
+  return { index, bytes, path: indexPath, resolvedBuildPurpose };
 };
 
 const extractVerifiedZip = async ({ archivePath, destination }) => {
@@ -231,6 +240,10 @@ const verifyArtifactReference = async ({
   environment,
   forbiddenRoots,
   cspPolicy,
+  providerPolicy,
+  providerObservation,
+  requireProductionBindings,
+  expectedBuildPurpose,
 }) => {
   const [manifestObject, archiveObject] = await Promise.all([
     resolveContentAddressedObject({
@@ -249,7 +262,12 @@ const verifyArtifactReference = async ({
     reference.manifest.uri,
   );
   assertCanonicalJsonBytes(manifestObject.bytes, manifest, "ArtifactManifest");
-  assertArtifactManifest(manifest, releasePolicy);
+  assertArtifactManifest(manifest, releasePolicy, { expectedBuildPurpose });
+  if (requireProductionBindings) {
+    assertProductionProviderContext(providerPolicy, providerObservation, {
+      cspMode: manifest.dimensions.cspMode,
+    });
+  }
   if (
     manifest.releaseRole !== reference.releaseRole ||
     manifest.variantId !== reference.variantId
@@ -269,20 +287,44 @@ const verifyArtifactReference = async ({
   await assertManifestMatchesOutput(outputRoot, manifest);
   await assertVercelOutputShape(outputRoot, {
     publicIdentityKind: manifest.publicIdentityKind,
+    cspMode:
+      manifest.publicIdentityKind === "release-identity-v1"
+        ? manifest.dimensions.cspMode
+        : "enforced",
     cspPolicy,
   });
   await assertPublicResponseHashes({ outputRoot, manifest });
   await readAndVerifyRoleEntryGraph({ outputRoot, manifest });
+  await readAndVerifyOuterAgentGraph({ outputRoot, manifest });
+  if (manifest.publicIdentityKind === "release-identity-v1") {
+    const stylesheet =
+      await readStaticApplicationStylesheetContract(outputRoot);
+    if (
+      manifest.publicResponseHashes[stylesheet.publicPath] !== stylesheet.sha256
+    ) {
+      throw new Error(
+        "Static application stylesheet public response binding differs",
+      );
+    }
+  }
   await scanArtifactOutput({
     outputRoot,
     outputFiles: manifest.outputFiles,
     environment,
     forbiddenRoots,
   });
-  const capability = await readAndVerifyCapability({ outputRoot, manifest });
+  const capability = await readAndVerifyCapability({
+    outputRoot,
+    manifest,
+    expectedBuildPurpose,
+  });
   const publicIdentity =
     manifest.publicIdentityKind === "release-identity-v1"
-      ? await readAndVerifyPublicIdentity({ outputRoot, manifest })
+      ? await readAndVerifyPublicIdentity({
+          outputRoot,
+          manifest,
+          expectedBuildPurpose,
+        })
       : null;
   return {
     manifest,
@@ -462,11 +504,15 @@ export const verifyReleasePackage = async ({
   requireProductionBindings = false,
   root = repositoryRoot,
   environment = process.env,
+  expectedBuildPurpose = null,
 }) => {
   const resolvedPackageRoot = path.resolve(packageRoot);
   await assertContractSchemas(root);
-  const { index, bytes: indexBytes } =
-    await readPackageIndex(resolvedPackageRoot);
+  const {
+    index,
+    bytes: indexBytes,
+    resolvedBuildPurpose,
+  } = await readPackageIndex(resolvedPackageRoot, expectedBuildPurpose);
   assertExpectedContext({
     index,
     releasePolicy,
@@ -489,6 +535,10 @@ export const verifyReleasePackage = async ({
         environment,
         forbiddenRoots: [resolvedPackageRoot, root],
         cspPolicy,
+        providerPolicy,
+        providerObservation,
+        requireProductionBindings,
+        expectedBuildPurpose: resolvedBuildPurpose,
       });
       const containment = await verifyArtifactReference({
         packageRoot: resolvedPackageRoot,
@@ -498,6 +548,10 @@ export const verifyReleasePackage = async ({
         environment,
         forbiddenRoots: [resolvedPackageRoot, root],
         cspPolicy,
+        providerPolicy,
+        providerObservation,
+        requireProductionBindings,
+        expectedBuildPurpose: resolvedBuildPurpose,
       });
       assertPairRelationship({
         index,
@@ -538,6 +592,10 @@ export const verifyReleasePackage = async ({
         environment,
         forbiddenRoots: [resolvedPackageRoot, root],
         cspPolicy,
+        providerPolicy,
+        providerObservation,
+        requireProductionBindings,
+        expectedBuildPurpose: resolvedBuildPurpose,
       });
       const bootstrapInput = parseJsonStrict(
         bootstrapObject.bytes.toString("utf8"),

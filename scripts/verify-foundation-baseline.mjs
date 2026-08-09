@@ -17,6 +17,10 @@ const baselinePath = "config/foundation-baseline.json";
 const measurementSourceSha = "638dc0d2b05a09da9ea09e3f25e00bb36e1b2994";
 const implementationTreeBaselineSha =
   "806794df6222053235139e7ef6684f4aa6538b3d";
+// Baseline evidence is historical. Reproduce its policy snapshot from the
+// clean commit that recorded it instead of rebinding it to mutable policies.
+const baselinePolicyEvidenceSourceSha =
+  "4de2708817236550fe7570db78239b4d7389b707";
 const policyPaths = [
   "config/architecture-baseline.json",
   "config/architecture-policy.json",
@@ -60,6 +64,11 @@ const buildInputPath = (file) =>
   file === "scripts/verify-release-a-build.mjs";
 
 const readGitFile = (sha, file) => git(["show", `${sha}:${file}`]);
+
+const readGitJson = (sha, file) =>
+  JSON.parse(
+    new TextDecoder("utf-8", { fatal: true }).decode(readGitFile(sha, file)),
+  );
 
 const calculateBuildInputClosure = (sha) => {
   const treeBytes = git(["ls-tree", "-r", "--name-only", "-z", sha]);
@@ -140,19 +149,20 @@ const projectPhase0Policy = (policyPath, policy) => {
 
 const calculatePolicyHashes = async () =>
   Object.fromEntries(
-    await Promise.all(
-      policyPaths.map(async (policyPath) => {
-        const policy = await readJson(policyPath);
-        return [
-          policyPath,
-          sha256(canonicalize(projectPhase0Policy(policyPath, policy))),
-        ];
-      }),
-    ),
+    policyPaths.map((policyPath) => {
+      const policy = readGitJson(baselinePolicyEvidenceSourceSha, policyPath);
+      return [
+        policyPath,
+        sha256(canonicalize(projectPhase0Policy(policyPath, policy))),
+      ];
+    }),
   );
 
 const verifyScenarioFixtures = async () => {
-  const scenarios = await readJson("config/ui-scenarios.json");
+  const scenarios = readGitJson(
+    baselinePolicyEvidenceSourceSha,
+    "config/ui-scenarios.json",
+  );
   if (scenarios.baselineFixtureSourceSha !== measurementSourceSha) {
     errors.push("baselineFixtureSourceSha changed unexpectedly");
     return;
@@ -178,6 +188,10 @@ const verifyScenarioFixtures = async () => {
 
 verifyCommit(measurementSourceSha, "measurementSourceSha");
 verifyCommit(implementationTreeBaselineSha, "implementationTreeBaselineSha");
+verifyCommit(
+  baselinePolicyEvidenceSourceSha,
+  "baselinePolicyEvidenceSourceSha",
+);
 
 if (writeBaseline && errors.length === 0) {
   const buildInputClosure = calculateBuildInputClosure(measurementSourceSha);
@@ -318,6 +332,16 @@ if (writeBaseline && errors.length === 0) {
   process.stdout.write(`WROTE ${baselinePath}\n`);
 } else if (!writeBaseline && errors.length === 0) {
   const baseline = await readJson(baselinePath);
+  const recordedBaseline = readGitJson(
+    baselinePolicyEvidenceSourceSha,
+    baselinePath,
+  );
+  if (
+    sha256(canonicalize(baseline.baselineEvidence)) !==
+    sha256(canonicalize(recordedBaseline.baselineEvidence))
+  ) {
+    errors.push("historical baseline evidence differs from its clean source");
+  }
   if (
     baseline.implementationTreeBaselineSha !== implementationTreeBaselineSha
   ) {

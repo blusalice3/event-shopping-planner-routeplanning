@@ -17,6 +17,19 @@ import {
   projectContainmentDimensions,
   RELEASE_DIMENSION_KEYS,
 } from "./release-policy.mjs";
+import {
+  POLICY_ACTIVATION_QA_BUILD_PURPOSE,
+  RELEASE_BUILD_PURPOSES,
+} from "./release-build-input.mjs";
+import {
+  OUTER_AGENT_GRAPH_URL,
+  OUTER_AGENT_URL,
+  parseIndependentOuterAgentGraph,
+} from "./outer-agent-contract.mjs";
+import {
+  NORMAL_POLICY_ACTIVATION_GATES,
+  RELEASE_PHASE_GATES,
+} from "../release-state/phaseGates.mjs";
 
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const SOURCE_SHA_PATTERN = /^[0-9a-f]{40}$/;
@@ -24,6 +37,19 @@ const SEMVER_PATTERN = /^v?[0-9]+\.[0-9]+\.[0-9]+$/;
 const PUBLIC_PATH_PATTERN = /^\/(?!\/)[^\\]*$/;
 const PLACEHOLDER_PATTERN =
   /(?:^|[-_.:/])(placeholder|change[-_ ]?me|example|todo|tbd|unknown|unconfigured)(?:$|[-_.:/])/i;
+const LEGACY_BOOTSTRAP_BUILD_PURPOSE = "legacy-bootstrap";
+const RELEASE_BUILD_PURPOSE_SET = new Set([
+  ...RELEASE_BUILD_PURPOSES,
+  LEGACY_BOOTSTRAP_BUILD_PURPOSE,
+]);
+const SOURCE_HARDENED_BUILD_PURPOSES = new Set([
+  "production",
+  POLICY_ACTIVATION_QA_BUILD_PURPOSE,
+]);
+const RELEASE_PHASE_GATE_SET = new Set(RELEASE_PHASE_GATES);
+const POLICY_ACTIVATION_GATE_SET = new Set(NORMAL_POLICY_ACTIVATION_GATES);
+const RELEASE_STATE_EVIDENCE_URI_PATTERN =
+  /^release-state:\/\/([a-z0-9][a-z0-9-]{2,62})\/evidence\/([0-9a-f]{64})$/;
 
 const compareUtf8 = (left, right) =>
   Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
@@ -93,6 +119,90 @@ const assertImmutableReference = (value, label) => {
   assertExactKeys(value, ["uri", "sha256"], label);
   assertString(value.uri, `${label}.uri`);
   assertSha256(value.sha256, `${label}.sha256`);
+  return value;
+};
+
+const assertBuildAuthorityReference = (value, label) => {
+  assertImmutableReference(value, label);
+  const match = RELEASE_STATE_EVIDENCE_URI_PATTERN.exec(value.uri);
+  if (match === null || match[2] !== value.sha256) {
+    throw new Error(
+      `${label} is not a closed Release State evidence reference`,
+    );
+  }
+  return value;
+};
+
+const assertExpectedBuildPurpose = (expectedBuildPurpose) => {
+  if (!RELEASE_BUILD_PURPOSE_SET.has(expectedBuildPurpose)) {
+    throw new Error("Expected release build purpose is invalid");
+  }
+  return expectedBuildPurpose;
+};
+
+const assertBuildPurposeMarker = (value, expectedBuildPurpose, label) => {
+  assertExpectedBuildPurpose(expectedBuildPurpose);
+  if (
+    expectedBuildPurpose === "production" ||
+    expectedBuildPurpose === LEGACY_BOOTSTRAP_BUILD_PURPOSE
+  ) {
+    if (value.nonPromotable !== undefined || value.buildPurpose !== undefined) {
+      throw new Error(`${label} is a nonpromotable QA build`);
+    }
+    return [];
+  }
+  if (
+    value.nonPromotable !== true ||
+    value.buildPurpose !== expectedBuildPurpose
+  ) {
+    throw new Error(
+      `${label} build purpose differs from the expected QA build`,
+    );
+  }
+  return ["buildPurpose", "nonPromotable"];
+};
+
+const assertArtifactBuildAuthority = (
+  value,
+  { bootstrap, expectedBuildPurpose, label },
+) => {
+  if (bootstrap) {
+    if (
+      !["production", LEGACY_BOOTSTRAP_BUILD_PURPOSE].includes(
+        expectedBuildPurpose,
+      ) ||
+      value.buildAuthority !== null ||
+      value.targetGate !== null ||
+      value.buildPurpose !== LEGACY_BOOTSTRAP_BUILD_PURPOSE ||
+      value.promotable !== false
+    ) {
+      throw new Error(`${label} legacy bootstrap build authority is invalid`);
+    }
+    return value;
+  }
+  assertExpectedBuildPurpose(expectedBuildPurpose);
+  if (!SOURCE_HARDENED_BUILD_PURPOSES.has(value.buildPurpose)) {
+    throw new Error(`${label}.buildPurpose is invalid`);
+  }
+  if (
+    value.buildPurpose !== expectedBuildPurpose ||
+    value.promotable !== (value.buildPurpose === "production")
+  ) {
+    throw new Error(`${label} purpose/promotable binding is invalid`);
+  }
+  assertBuildAuthorityReference(
+    value.buildAuthority,
+    `${label}.buildAuthority`,
+  );
+  if (!RELEASE_PHASE_GATE_SET.has(value.targetGate)) {
+    throw new Error(`${label}.targetGate is invalid`);
+  }
+  if (
+    value.buildPurpose === POLICY_ACTIVATION_QA_BUILD_PURPOSE &&
+    !POLICY_ACTIVATION_GATE_SET.has(value.targetGate)
+  ) {
+    throw new Error(`${label}.targetGate is invalid for policy activation QA`);
+  }
   return value;
 };
 
@@ -352,6 +462,10 @@ const ARTIFACT_MANIFEST_KEYS = Object.freeze([
   "variantId",
   "releaseRole",
   "dimensions",
+  "buildAuthority",
+  "targetGate",
+  "buildPurpose",
+  "promotable",
   "buildInputClosureHash",
   "lockfileSha256",
   "toolchainPolicyHash",
@@ -371,7 +485,11 @@ const ARTIFACT_MANIFEST_KEYS = Object.freeze([
 export const computeRoleEntryGraphHash = (roleEntryGraph) =>
   sha256Json(roleEntryGraph);
 
-export const assertArtifactManifest = (manifest, releasePolicy) => {
+export const assertArtifactManifest = (
+  manifest,
+  releasePolicy,
+  { expectedBuildPurpose = "production" } = {},
+) => {
   assertExactKeys(manifest, ARTIFACT_MANIFEST_KEYS, "ArtifactManifest");
   if (manifest.schemaVersion !== 1) {
     throw new Error("ArtifactManifest schemaVersion must be 1");
@@ -418,6 +536,11 @@ export const assertArtifactManifest = (manifest, releasePolicy) => {
   ) {
     throw new Error("ArtifactManifest publicIdentityKind is invalid");
   }
+  assertArtifactBuildAuthority(manifest, {
+    bootstrap: manifest.publicIdentityKind === "legacy-bootstrap-v1",
+    expectedBuildPurpose,
+    label: "ArtifactManifest",
+  });
   if (manifest.publicIdentityKind === "release-identity-v1") {
     if (manifest.bootstrap !== null) {
       throw new Error("Source-hardened artifact cannot contain bootstrap data");
@@ -462,6 +585,10 @@ const COMMON_INDEX_KEYS = Object.freeze([
   "packageKind",
   "sourceSha",
   "buildId",
+  "buildAuthority",
+  "targetGate",
+  "buildPurpose",
+  "promotable",
   "toolchainPolicyHash",
   "providerConfigurationHash",
   "providerPolicyHash",
@@ -483,7 +610,10 @@ const assertArtifactReference = (reference, expectedRole, label) => {
   assertImmutableReference(reference.archive, `${label}.archive`);
 };
 
-export const assertReleasePackageIndex = (index) => {
+export const assertReleasePackageIndex = (
+  index,
+  { expectedBuildPurpose = "production" } = {},
+) => {
   const packageSpecificKeys =
     index?.packageKind === "source-hardened-pair"
       ? ["artifacts"]
@@ -515,6 +645,11 @@ export const assertReleasePackageIndex = (index) => {
     index.requiredDbCompatibility,
     "ReleasePackageIndex.requiredDbCompatibility",
   );
+  assertArtifactBuildAuthority(index, {
+    bootstrap: index.packageKind === "legacy-bootstrap-single",
+    expectedBuildPurpose,
+    label: "ReleasePackageIndex",
+  });
   if (index.packageKind === "source-hardened-pair") {
     if (!Array.isArray(index.artifacts) || index.artifacts.length !== 2) {
       throw new Error("Source-hardened package requires exactly two artifacts");
@@ -589,12 +724,14 @@ export const assertBootstrapInput = (input) => {
 
 export const assertReleaseIdentity = (
   identity,
-  { manifest, outputFilesByPath },
+  { manifest, outputFilesByPath, expectedBuildPurpose = "production" },
 ) => {
   assertRecord(identity, "ReleaseIdentity");
-  if (identity.nonPromotable === true || identity.buildPurpose !== undefined) {
-    throw new Error("Nonpromotable QA identity cannot enter an artifact");
-  }
+  const buildPurposeKeys = assertBuildPurposeMarker(
+    identity,
+    expectedBuildPurpose,
+    "ReleaseIdentity",
+  );
   const lifecycle = identity.pwaLifecycle;
   const lifecycleKeys =
     lifecycle === "legacy-auto-update-v1"
@@ -626,6 +763,7 @@ export const assertReleaseIdentity = (
       "variantId",
       "releaseRole",
       "requiredDbCompatibilityFingerprint",
+      ...buildPurposeKeys,
       "pwaLifecycle",
       ...lifecycleKeys,
     ],
@@ -723,7 +861,56 @@ export const readAndVerifyRoleEntryGraph = async ({ outputRoot, manifest }) => {
   return graph;
 };
 
-export const readAndVerifyPublicIdentity = async ({ outputRoot, manifest }) => {
+export const readAndVerifyOuterAgentGraph = async ({
+  outputRoot,
+  manifest,
+}) => {
+  if (manifest.publicIdentityKind !== "release-identity-v1") {
+    if (
+      manifest.publicResponseHashes[OUTER_AGENT_URL] !== undefined ||
+      manifest.publicResponseHashes[OUTER_AGENT_GRAPH_URL] !== undefined
+    ) {
+      throw new Error(
+        "Legacy bootstrap must not bind an independent outer agent",
+      );
+    }
+    return null;
+  }
+  const [outerAgentBytes, graphBytes] = await Promise.all([
+    readFile(
+      path.join(
+        outputRoot,
+        ...publicPathToOutputPath(OUTER_AGENT_URL).split("/"),
+      ),
+    ),
+    readFile(
+      path.join(
+        outputRoot,
+        ...publicPathToOutputPath(OUTER_AGENT_GRAPH_URL).split("/"),
+      ),
+    ),
+  ]);
+  const graph = parseIndependentOuterAgentGraph({
+    graphBytes,
+    sourceSha: manifest.sourceSha,
+    outerAgentBytes,
+  });
+  if (
+    manifest.publicResponseHashes[OUTER_AGENT_URL] !==
+      sha256Bytes(outerAgentBytes) ||
+    manifest.publicResponseHashes[OUTER_AGENT_GRAPH_URL] !==
+      sha256Bytes(graphBytes)
+  ) {
+    throw new Error("Independent outer agent public response binding differs");
+  }
+  return { graph, graphBytes, outerAgentBytes };
+};
+
+export const readAndVerifyPublicIdentity = async ({
+  outputRoot,
+  manifest,
+  expectedBuildPurpose = "production",
+}) => {
   const stablePath = path.join(outputRoot, "static", "release-identity.json");
   const versionedRelativePath = `release-identity.${manifest.sourceSha}.${manifest.variantId}.json`;
   const versionedPath = path.join(outputRoot, "static", versionedRelativePath);
@@ -741,7 +928,11 @@ export const readAndVerifyPublicIdentity = async ({ outputRoot, manifest }) => {
   const outputFilesByPath = new Map(
     manifest.outputFiles.map((file) => [file.path, file]),
   );
-  assertReleaseIdentity(identity, { manifest, outputFilesByPath });
+  assertReleaseIdentity(identity, {
+    manifest,
+    outputFilesByPath,
+    expectedBuildPurpose,
+  });
   for (const publicPath of [
     "/release-identity.json",
     `/${versionedRelativePath}`,
@@ -754,15 +945,14 @@ export const readAndVerifyPublicIdentity = async ({ outputRoot, manifest }) => {
   return { identity, bytes: stableBytes };
 };
 
-const parseCapability = (bytes, source) => {
+const parseCapability = (
+  bytes,
+  source,
+  expectedBuildPurpose = "production",
+) => {
   const capability = parseJsonStrict(bytes.toString("utf8"), source);
   assertRecord(capability, source);
-  if (
-    capability.nonPromotable === true ||
-    capability.buildPurpose !== undefined
-  ) {
-    throw new Error(`${source} is a nonpromotable QA build`);
-  }
+  assertBuildPurposeMarker(capability, expectedBuildPurpose, source);
   if (
     capability.kind !== "event-shopping-planner-release-capabilities" ||
     capability.version !== 1 ||
@@ -774,7 +964,11 @@ const parseCapability = (bytes, source) => {
   return capability;
 };
 
-export const readAndVerifyCapability = async ({ outputRoot, manifest }) => {
+export const readAndVerifyCapability = async ({
+  outputRoot,
+  manifest,
+  expectedBuildPurpose = "production",
+}) => {
   const stablePath = path.join(
     outputRoot,
     "static",
@@ -792,7 +986,11 @@ export const readAndVerifyCapability = async ({ outputRoot, manifest }) => {
   if (!stableBytes.equals(versionedBytes)) {
     throw new Error("Stable and source-addressed capability bytes differ");
   }
-  const capability = parseCapability(stableBytes, "release capability");
+  const capability = parseCapability(
+    stableBytes,
+    "release capability",
+    expectedBuildPurpose,
+  );
   if (
     capability.buildId !== manifest.buildId ||
     capability.sourceSha !== manifest.sourceSha ||
@@ -825,11 +1023,21 @@ export const assertPairRelationship = ({
     "providerConfigurationHash",
     "providerPolicyHash",
     "releasePolicyHash",
+    "targetGate",
+    "buildPurpose",
+    "promotable",
   ];
   for (const field of commonFields) {
     if (standardManifest[field] !== containmentManifest[field]) {
       throw new Error(`Artifact pair differs at ${field}`);
     }
+  }
+  if (
+    canonicalJsonBytes(standardManifest.buildAuthority).compare(
+      canonicalJsonBytes(containmentManifest.buildAuthority),
+    ) !== 0
+  ) {
+    throw new Error("Artifact pair build authority differs");
   }
   if (
     canonicalJsonBytes(standardManifest.requiredDbCompatibility).compare(
@@ -854,11 +1062,21 @@ export const assertPairRelationship = ({
     "providerConfigurationHash",
     "providerPolicyHash",
     "releasePolicyHash",
+    "targetGate",
+    "buildPurpose",
+    "promotable",
   ];
   for (const field of indexCommonFields) {
     if (index[field] !== standardManifest[field]) {
       throw new Error(`Package index differs from manifests at ${field}`);
     }
+  }
+  if (
+    canonicalJsonBytes(index.buildAuthority).compare(
+      canonicalJsonBytes(standardManifest.buildAuthority),
+    ) !== 0
+  ) {
+    throw new Error("Package index build authority differs from manifests");
   }
   if (
     canonicalJsonBytes(index.requiredDbCompatibility).compare(
@@ -872,6 +1090,19 @@ export const assertPairRelationship = ({
     index.artifacts[1].variantId !== containmentManifest.variantId
   ) {
     throw new Error("Package artifact variant reference differs");
+  }
+  if (
+    standardManifest.publicResponseHashes[OUTER_AGENT_URL] === undefined ||
+    standardManifest.publicResponseHashes[OUTER_AGENT_GRAPH_URL] ===
+      undefined ||
+    standardManifest.publicResponseHashes[OUTER_AGENT_URL] !==
+      containmentManifest.publicResponseHashes[OUTER_AGENT_URL] ||
+    standardManifest.publicResponseHashes[OUTER_AGENT_GRAPH_URL] !==
+      containmentManifest.publicResponseHashes[OUTER_AGENT_GRAPH_URL]
+  ) {
+    throw new Error(
+      "Artifact pair independent outer agent bytes or closure graph differ",
+    );
   }
 };
 
@@ -887,10 +1118,20 @@ export const assertBootstrapRelationship = ({
     "providerConfigurationHash",
     "providerPolicyHash",
     "releasePolicyHash",
+    "targetGate",
+    "buildPurpose",
+    "promotable",
   ]) {
     if (index[field] !== manifest[field]) {
       throw new Error(`Bootstrap package index differs at ${field}`);
     }
+  }
+  if (
+    canonicalJsonBytes(index.buildAuthority).compare(
+      canonicalJsonBytes(manifest.buildAuthority),
+    ) !== 0
+  ) {
+    throw new Error("Bootstrap package build authority differs");
   }
   if (
     canonicalJsonBytes(index.requiredDbCompatibility).compare(

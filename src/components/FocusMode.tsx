@@ -94,7 +94,6 @@ import {
   computeLimitedBulkCancelDecision,
   computeLimitedBulkSubmitDecision,
 } from "../utils/limitedBulkFlow";
-import { useDynamicCssClass } from "../styles/useDynamicCssClass";
 import PostEventDistributionCheckDialog, {
   type PostEventDistributionCheckMode,
 } from "./PostEventDistributionCheckDialog";
@@ -789,30 +788,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
     16 + (activeNavigatorRailSide === "right" ? railClearance : 0);
   const completionPrevLeftPx =
     16 + (activeNavigatorRailSide === "left" ? railClearance : 0);
-  const navPrevClassName = useDynamicCssClass({
-    left: `${navPrevLeftPx}px`,
-  });
-  const navNextClassName = useDynamicCssClass({
-    right: `${navNextRightPx}px`,
-  });
-  const splitMapNextClassName = useDynamicCssClass({
-    right: `${splitMapNextRightPx}px`,
-  });
-  const completionPrevClassName = useDynamicCssClass({
-    left: `${completionPrevLeftPx}px`,
-  });
-  const smartphoneFocusHeightClassName = useDynamicCssClass({
-    height: `calc((100dvh - ${measuredFooterHeight + FOOTER_OVERLAP_GUARD_PX}px) / ${safeAppScale})`,
-  });
-  const desktopFocusHeightClassName = useDynamicCssClass({
-    height: `calc((100dvh - ${HEADER_HEIGHT + measuredFooterHeight + FOOTER_OVERLAP_GUARD_PX}px) / ${safeAppScale})`,
-  });
-  const splitMapHeightClassName = useDynamicCssClass({
-    height: `${splitRatio}%`,
-  });
-  const splitListHeightClassName = useDynamicCssClass({
-    height: `${100 - splitRatio}%`,
-  });
+  const smartphoneFocusHeight = `calc((100dvh - ${measuredFooterHeight + FOOTER_OVERLAP_GUARD_PX}px) / ${safeAppScale})`;
+  const desktopFocusHeight = `calc((100dvh - ${HEADER_HEIGHT + measuredFooterHeight + FOOTER_OVERLAP_GUARD_PX}px) / ${safeAppScale})`;
   useEffect(() => {
     if (!isInspecting) return;
     closeNavigatorEditableSurfaces();
@@ -3011,7 +2988,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
             onLimitedMissingClick={() =>
               setCompletionSubView("limitedMissingList")
             }
-            prevButtonClassName={completionPrevClassName}
+            prevButtonLeft={`${completionPrevLeftPx}px`}
           />
         )}
         {resumeChoiceDialogJSX}
@@ -3143,7 +3120,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
   ) {
     return (
       <div
-        className={`relative flex flex-col ${smartphoneFocusHeightClassName}`}
+        data-layout-height={smartphoneFocusHeight}
+        className="esp-layout-height relative flex flex-col"
         data-focus-inspecting={isInspecting || undefined}
       >
         {visibleNotification && (
@@ -3154,7 +3132,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
           </div>
         )}
         <div
-          className={`relative flex min-h-0 flex-col ${splitMapHeightClassName}`}
+          data-layout-height={`${splitRatio}%`}
+          className="esp-layout-height relative flex min-h-0 flex-col"
         >
           <FocusModeMapControls
             compact
@@ -3218,7 +3197,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
           <div className="w-12 h-1 bg-slate-500 dark:bg-slate-400 rounded-full" />
         </div>
         <div
-          className={`min-h-0 overflow-y-auto ${splitListHeightClassName}`}
+          data-layout-height={`${100 - splitRatio}%`}
+          className="esp-layout-height min-h-0 overflow-y-auto"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
@@ -3297,7 +3277,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
   if (layoutMode === "pc" && isMapVisible && currentMapData && !isCompleted) {
     return (
       <div
-        className={`relative flex ${desktopFocusHeightClassName}`}
+        data-layout-height={desktopFocusHeight}
+        className="esp-layout-height relative flex"
         data-focus-inspecting={isInspecting || undefined}
       >
         {visibleNotification && (
@@ -3410,7 +3391,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         <button
           onClick={handleNext}
           data-nav-right={`${splitMapNextRightPx}px`}
-          className={`fixed top-1/2 h-12 w-12 -translate-y-1/2 transform rounded-full text-xl shadow-lg transition-[right] duration-200 ease-out flex items-center justify-center z-40 ${splitMapNextClassName} ${
+          className={`esp-layout-nav-right fixed top-1/2 h-12 w-12 -translate-y-1/2 transform rounded-full text-xl shadow-lg transition-[right] duration-200 ease-out flex items-center justify-center z-40 ${
             nextButtonBlockTone === "both" || nextButtonBlockTone === "price"
               ? "bg-red-700 hover:bg-red-800 text-white"
               : nextButtonBlockTone === "limited"
@@ -3515,7 +3496,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
           <button
             onClick={handlePrev}
             data-nav-left={`${navPrevLeftPx}px`}
-            className={`fixed top-1/2 h-14 w-14 -translate-y-1/2 transform rounded-full bg-slate-600 text-2xl text-white shadow-lg transition-[left] duration-200 ease-out flex items-center justify-center z-40 hover:bg-slate-700 ${navPrevClassName}`}
+            className="esp-layout-nav-left fixed top-1/2 h-14 w-14 -translate-y-1/2 transform rounded-full bg-slate-600 text-2xl text-white shadow-lg transition-[left] duration-200 ease-out flex items-center justify-center z-40 hover:bg-slate-700"
             title="前の訪問先"
           >
             ◀
@@ -3523,7 +3504,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
           <button
             onClick={handleNext}
             data-nav-right={`${navNextRightPx}px`}
-            className={`fixed top-1/2 h-14 w-14 -translate-y-1/2 transform rounded-full text-2xl shadow-lg transition-[right] duration-200 ease-out flex items-center justify-center z-40 ${navNextClassName} ${
+            className={`esp-layout-nav-right fixed top-1/2 h-14 w-14 -translate-y-1/2 transform rounded-full text-2xl shadow-lg transition-[right] duration-200 ease-out flex items-center justify-center z-40 ${
               nextButtonBlockTone === "both" || nextButtonBlockTone === "price"
                 ? "bg-red-700 hover:bg-red-800 text-white"
                 : nextButtonBlockTone === "limited"

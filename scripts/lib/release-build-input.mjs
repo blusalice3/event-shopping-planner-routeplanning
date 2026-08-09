@@ -10,10 +10,14 @@ import {
 } from "./release-policy.mjs";
 
 export const RELEASE_BUILD_INPUT_ENV = "FOUNDATION_RELEASE_BUILD_INPUT_JSON";
+export const RELEASE_BUILD_PURPOSE_ENV = "FOUNDATION_CANONICAL_BUILD_PURPOSE";
+export const POLICY_ACTIVATION_QA_BUILD_PURPOSE =
+  "non-promotable-policy-activation-qa";
 export const RELEASE_BUILD_PURPOSES = Object.freeze([
   "production",
   "qa-xlsx-main",
   "qa-list-force-full",
+  POLICY_ACTIVATION_QA_BUILD_PURPOSE,
 ]);
 
 const SOURCE_SHA_PATTERN = /^[0-9a-f]{40}$/;
@@ -121,7 +125,11 @@ export const assertReleaseBuildInput = (input, policy) => {
       "ReleaseBuildInput.nonPromotable differs from buildPurpose",
     );
   }
-  if (input.nonPromotable && input.releaseRole !== "standard") {
+  if (
+    input.nonPromotable &&
+    input.releaseRole !== "standard" &&
+    input.buildPurpose !== POLICY_ACTIVATION_QA_BUILD_PURPOSE
+  ) {
     throw new Error("Nonproduction QA builds must use the standard role");
   }
   return input;
@@ -238,6 +246,17 @@ export const resolveReleaseBuildInput = ({
     ["FOUNDATION_RELEASE_DB_FINGERPRINT", "FOUNDATION_DB_FINGERPRINT"],
     "release DB fingerprint",
   );
+  const environmentBuildPurpose = selectEnvironmentBinding(
+    environment,
+    [RELEASE_BUILD_PURPOSE_ENV],
+    "release build purpose",
+  );
+  if (
+    environmentBuildPurpose !== null &&
+    !BUILD_PURPOSES.has(environmentBuildPurpose)
+  ) {
+    throw new Error(`${RELEASE_BUILD_PURPOSE_ENV} is invalid`);
+  }
   const serializedDimensions = selectEnvironmentBinding(
     environment,
     ["FOUNDATION_RELEASE_DIMENSIONS_JSON"],
@@ -270,6 +289,11 @@ export const resolveReleaseBuildInput = ({
       input.buildPurpose,
       cliBuildPurpose,
       "CLI build purpose",
+    );
+    assertScalarConflict(
+      input.buildPurpose,
+      environmentBuildPurpose,
+      "environment build purpose",
     );
     assertScalarConflict(input.variantId, environmentVariantId, "variant ID");
     assertScalarConflict(
@@ -309,7 +333,7 @@ export const resolveReleaseBuildInput = ({
       dimensions,
       variantId: environmentVariantId ?? computeVariantId(policy, dimensions),
       dbFingerprint: environmentDbFingerprint ?? defaultDbFingerprint,
-      buildPurpose: cliBuildPurpose ?? "production",
+      buildPurpose: cliBuildPurpose ?? environmentBuildPurpose ?? "production",
     });
   }
 
@@ -356,6 +380,7 @@ export const releaseBuildInputEnvironment = (input, policy) => ({
     input.dimensions,
   ).toString("utf8"),
   FOUNDATION_RELEASE_DB_FINGERPRINT: input.dbFingerprint,
+  [RELEASE_BUILD_PURPOSE_ENV]: input.buildPurpose,
 });
 
 export const releaseBuildInputHash = (input, policy) =>

@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { navigationCommand } from "./navigationCommand";
 import { navigationReducer } from "./navigationReducer";
-import {
-  screenStateFromLegacy,
-  screenStateToLegacy,
-  type ScreenState,
-} from "./screenState";
+import type { ScreenState } from "./screenState";
 
 describe("typed screen navigation", () => {
   it("moves through event, map, import, and event-list states by command", () => {
@@ -77,55 +73,5 @@ describe("typed screen navigation", () => {
     expect(
       navigationReducer(renamed, navigationCommand.removeEvent("イベントC")),
     ).toEqual({ kind: "event-list" });
-  });
-});
-
-describe("legacy screen state adapter", () => {
-  it("round-trips every valid typed state", () => {
-    const states: ScreenState[] = [
-      { kind: "event-list" },
-      { kind: "import", eventName: null },
-      { kind: "import", eventName: "イベントA" },
-      {
-        kind: "event",
-        eventName: "イベントA",
-        day: "1日目",
-        surface: "list",
-      },
-      {
-        kind: "event",
-        eventName: "イベントA",
-        day: "2日目",
-        surface: "map",
-      },
-    ];
-
-    states.forEach((state) => {
-      expect(screenStateFromLegacy(screenStateToLegacy(state))).toEqual(state);
-    });
-  });
-
-  it("normalizes invalid legacy combinations without preserving booleans", () => {
-    expect(
-      screenStateFromLegacy({
-        activeEventName: null,
-        activeTab: "1日目",
-        mapViewActive: true,
-      }),
-    ).toEqual({ kind: "event-list" });
-    expect(
-      screenStateFromLegacy({
-        activeEventName: "イベントA",
-        activeTab: "eventList",
-        mapViewActive: true,
-      }),
-    ).toEqual({ kind: "event-list" });
-    expect(
-      screenStateFromLegacy({
-        activeEventName: null,
-        activeTab: "import",
-        mapViewActive: true,
-      }),
-    ).toEqual({ kind: "import", eventName: null });
   });
 });

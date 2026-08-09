@@ -56,6 +56,15 @@ const itemIdSet = (model: ShoppingListReadModel): ReadonlySet<string> =>
 const rowKeySet = (model: ShoppingListReadModel): ReadonlySet<string> =>
   new Set(model.rows.map((row) => row.rowKey));
 
+const hasSameStringValues = (
+  current: readonly string[],
+  next: readonly string[],
+): boolean => {
+  if (current.length !== next.length) return false;
+  const nextValues = new Set(next);
+  return current.every((value) => nextValues.has(value));
+};
+
 export const shoppingListControllerReducer = (
   model: ShoppingListReadModel,
   state: ShoppingListControllerState,
@@ -64,11 +73,15 @@ export const shoppingListControllerReducer = (
   switch (command.type) {
     case "replace-selection": {
       const availableItemIds = itemIdSet(model);
+      const selectedItemIds = Array.from(new Set(command.itemIds)).filter(
+        (itemId) => availableItemIds.has(itemId),
+      );
+      if (hasSameStringValues(state.selectedItemIds, selectedItemIds)) {
+        return state;
+      }
       return {
         ...state,
-        selectedItemIds: Array.from(new Set(command.itemIds)).filter((itemId) =>
-          availableItemIds.has(itemId),
-        ),
+        selectedItemIds,
       };
     }
 
@@ -84,6 +97,7 @@ export const shoppingListControllerReducer = (
     }
 
     case "focus-row":
+      if (state.focusedRowKey === command.rowKey) return state;
       if (command.rowKey !== null && !rowKeySet(model).has(command.rowKey)) {
         return state;
       }
@@ -119,6 +133,13 @@ export const shoppingListControllerReducer = (
         state.scrollRequest && availableRowKeys.has(state.scrollRequest.rowKey)
           ? state.scrollRequest
           : null;
+      if (
+        hasSameStringValues(state.selectedItemIds, selectedItemIds) &&
+        state.focusedRowKey === focusedRowKey &&
+        state.scrollRequest === scrollRequest
+      ) {
+        return state;
+      }
       return {
         ...state,
         selectedItemIds,

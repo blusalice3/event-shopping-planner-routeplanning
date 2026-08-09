@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
+import type { PreferencePersistencePort } from "../app/ports/PersistenceCommandPort";
 
 export type ThemeMode = "system" | "light" | "dark";
 
-export function useThemeMode() {
+export function useThemeMode(preferences: PreferencePersistencePort) {
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
-    if (typeof window !== "undefined") {
-      return (localStorage.getItem("themeMode") as ThemeMode) || "system";
+    try {
+      return (preferences.loadPreference("themeMode") as ThemeMode) || "system";
+    } catch {
+      return "system";
     }
-    return "system";
   });
 
   useEffect(() => {
@@ -27,7 +29,7 @@ export function useThemeMode() {
     };
 
     applyTheme();
-    localStorage.setItem("themeMode", themeMode);
+    preferences.savePreference("themeMode", themeMode);
 
     if (themeMode === "system") {
       const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
@@ -35,7 +37,7 @@ export function useThemeMode() {
       mediaQuery.addEventListener("change", handler);
       return () => mediaQuery.removeEventListener("change", handler);
     }
-  }, [themeMode]);
+  }, [preferences, themeMode]);
 
   return { themeMode, setThemeMode } as const;
 }

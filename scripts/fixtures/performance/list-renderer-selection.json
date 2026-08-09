@@ -65,14 +65,16 @@
       "dragActive": false,
       "modalActive": false,
       "recoveryActive": true,
-      "expectedRenderer": "full"
+      "expectedRenderer": "disabled",
+      "expectedSurface": "recovery-screen"
     }
   ],
   "requiredAssertions": [
     "all-eligibility-cases-match",
     "unknown-state-selects-full",
     "drag-selects-full-before-reorder",
-    "selection-reason-exposed"
+    "selection-reason-exposed",
+    "recovery-disables-list-graph"
   ],
   "requiredTelemetry": ["durationMs", "rendererMismatchCount"]
 }

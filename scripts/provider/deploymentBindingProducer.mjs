@@ -13,12 +13,20 @@ import {
   sha256Json,
 } from "../lib/canonical-json.mjs";
 import {
+  CSP_HEADER_NAMES,
+  renderCspHeaders,
+  resolveProviderEnvironmentContract,
+} from "../lib/csp-delivery.mjs";
+import {
   contentAddressedObjectPath,
   parseContentAddressedUri,
 } from "../lib/content-addressed-store.mjs";
 import { verifyReleasePackage } from "../verify-release-artifact.mjs";
 import {
+  ARTIFACT_ARCHIVE_AVAILABILITY_MEDIA_TYPE,
+  ARTIFACT_ARCHIVE_MEDIA_TYPE,
   NAMESPACE_PATTERN,
+  assertArtifactArchiveAvailable,
   assertDeploymentBinding,
   assertEvidenceObjectAvailable,
   assertExactKeys,
@@ -416,18 +424,15 @@ const securityHeaderProjection = (headers) =>
     SECURITY_HEADER_NAMES.map((name) => [name, headers.get(name)]),
   );
 
-const expectedCspHeader = (cspPolicy) =>
-  Object.entries(cspPolicy.directives)
-    .map(([directive, values]) => `${directive} ${values.join(" ")}`)
-    .join("; ");
-
 const expectedSecurityHeaders = (manifest, cspPolicy) => {
   if (manifest.publicIdentityKind !== "release-identity-v1") return {};
   return Object.fromEntries(
-    Object.entries({
-      "Content-Security-Policy": expectedCspHeader(cspPolicy),
-      ...cspPolicy.securityHeaders,
-    }).map(([name, value]) => [name.toLowerCase(), value]),
+    Object.entries(
+      renderCspHeaders({
+        cspMode: manifest.dimensions.cspMode,
+        cspPolicy,
+      }),
+    ).map(([name, value]) => [name.toLowerCase(), value]),
   );
 };
 
@@ -599,11 +604,18 @@ const probeOneRoute = async ({
     throw new Error(`Public route cache policy differs: ${publicPath}`);
   }
   const securityHeaders = securityHeaderProjection(response.headers);
-  for (const [name, expected] of Object.entries(
-    expectedSecurityHeaders(manifest, cspPolicy),
-  )) {
-    if (securityHeaders[name] !== expected) {
+  const expectedHeaders = expectedSecurityHeaders(manifest, cspPolicy);
+  for (const [name, expected] of Object.entries(expectedHeaders)) {
+    if (response.headers.get(name) !== expected) {
       throw new Error(`Public route security header differs: ${publicPath}`);
+    }
+  }
+  for (const name of CSP_HEADER_NAMES.map((value) => value.toLowerCase())) {
+    if (
+      !Object.hasOwn(expectedHeaders, name) &&
+      response.headers.get(name) !== null
+    ) {
+      throw new Error(`Public route has an inactive CSP header: ${publicPath}`);
     }
   }
   assertHsts(securityHeaders["strict-transport-security"], providerPolicy);
@@ -659,8 +671,13 @@ const parseRuntimeHtmlIdentity = (bytes, index) => {
   return identity;
 };
 
-const parseCapability = (bytes, manifest) => {
+const parseCapability = (
+  bytes,
+  manifest,
+  expectedBuildPurpose = "production",
+) => {
   const capability = parseCanonicalJson(bytes, "Deployed release capability");
+  const expectedNonPromotable = expectedBuildPurpose !== "production";
   if (
     capability.kind !== "event-shopping-planner-release-capabilities" ||
     capability.version !== 1 ||
@@ -669,8 +686,8 @@ const parseCapability = (bytes, manifest) => {
     capability.sourceState !== "clean" ||
     capability.releaseChannel !== "release-a" ||
     capability.legacyLocalStorageCleanup !== "forced-off" ||
-    capability.nonPromotable === true ||
-    capability.buildPurpose !== undefined
+    (capability.nonPromotable === true) !== expectedNonPromotable ||
+    (capability.buildPurpose ?? "production") !== expectedBuildPurpose
   ) {
     throw new Error("Deployed release capability differs from manifest");
   }
@@ -683,6 +700,7 @@ const derivePublicIdentity = async ({
   packageRoot,
   routeResults,
   probeAdditionalRoute,
+  expectedBuildPurpose,
 }) => {
   const rootResult = routeResults.get("/");
   const capabilityResult = routeResults.get("/release-capabilities.json");
@@ -691,7 +709,7 @@ const derivePublicIdentity = async ({
     throw new Error("Required public identity routes are incomplete");
   }
   const runtimeHtmlIdentity = parseRuntimeHtmlIdentity(rootResult.bytes, index);
-  parseCapability(capabilityResult.bytes, manifest);
+  parseCapability(capabilityResult.bytes, manifest, expectedBuildPurpose);
   if (manifest.publicIdentityKind === "release-identity-v1") {
     const identityResult = routeResults.get("/release-identity.json");
     if (!identityResult) {
@@ -704,7 +722,11 @@ const derivePublicIdentity = async ({
     const outputFilesByPath = new Map(
       manifest.outputFiles.map((file) => [file.path, file]),
     );
-    assertReleaseIdentity(identity, { manifest, outputFilesByPath });
+    assertReleaseIdentity(identity, {
+      manifest,
+      outputFilesByPath,
+      expectedBuildPurpose,
+    });
     for (const [key, publicPath] of Object.entries(identity).filter(([key]) =>
       key.endsWith("Url"),
     )) {
@@ -776,6 +798,7 @@ export const probeImmutableDeployment = async ({
   fetchImpl,
   nowMilliseconds,
   secrets,
+  expectedBuildPurpose = "production",
 }) => {
   if (typeof fetchImpl !== "function") {
     throw new Error("Immutable deployment fetch is unavailable");
@@ -828,6 +851,7 @@ export const probeImmutableDeployment = async ({
     packageRoot,
     routeResults,
     probeAdditionalRoute,
+    expectedBuildPurpose,
   });
   return {
     routes: [...routeResults.values()]
@@ -846,7 +870,7 @@ const immutableReferenceFor = (namespace, bytes) => {
   };
 };
 
-const putVerifiedEvidence = async ({
+const putVerifiedEvidenceWithReceipt = async ({
   store,
   namespace,
   bytes,
@@ -860,6 +884,7 @@ const putVerifiedEvidence = async ({
     receipt?.sha256 !== expected.sha256 ||
     receipt.mediaType !== mediaType ||
     receipt.byteLength !== bytes.length ||
+    !Number.isFinite(Date.parse(receipt.committedAt)) ||
     typeof receipt.replayed !== "boolean"
   ) {
     throw new Error(`${label} immutable-store receipt differs`);
@@ -873,16 +898,27 @@ const putVerifiedEvidence = async ({
   if (!stored.bytes.equals(bytes) || stored.mediaType !== mediaType) {
     throw new Error(`${label} immutable-store replay differs`);
   }
-  return expected;
+  return { reference: expected, receipt: structuredClone(receipt) };
 };
 
-const assertEnvironmentPresence = (observation, policy) => {
+const putVerifiedEvidence = async (options) =>
+  (await putVerifiedEvidenceWithReceipt(options)).reference;
+
+const assertEnvironmentPresence = (observation, policy, cspMode) => {
   const receipt = observation.evidenceReceipts.filter(
     (candidate) => candidate.kind === "environment-presence",
   );
   const present = [...observation.presentEnvironmentNames].sort(compareUtf8);
-  const required = [...policy.requiredEnvironmentNames].sort(compareUtf8);
-  const forbidden = [...policy.forbiddenEnvironmentNames].sort(compareUtf8);
+  const environmentContract = resolveProviderEnvironmentContract(
+    policy,
+    cspMode,
+  );
+  const required = [...environmentContract.requiredEnvironmentNames].sort(
+    compareUtf8,
+  );
+  const forbidden = [...environmentContract.forbiddenEnvironmentNames].sort(
+    compareUtf8,
+  );
   if (
     receipt.length !== 1 ||
     required.some((name) => !present.includes(name)) ||
@@ -1123,6 +1159,7 @@ export const produceDeploymentBinding = async (
   const environmentPresence = assertEnvironmentPresence(
     providerObservation,
     providerPolicy,
+    manifest.dimensions.cspMode,
   );
 
   const releasePolicyBytes = canonicalJsonBytes(releasePolicy);
@@ -1206,6 +1243,10 @@ export const produceDeploymentBinding = async (
     namespace,
     providerPolicyBytes,
   );
+  const artifactArchiveReference = immutableReferenceFor(
+    namespace,
+    archiveObject.bytes,
+  );
   const bindingId =
     "deployment-binding:" +
     sha256Json({
@@ -1215,7 +1256,45 @@ export const produceDeploymentBinding = async (
       sourceSha: index.sourceSha,
       variantId: artifactReference.variantId,
       releaseRole: selectedRole,
+      artifactArchiveSha256: artifactArchiveReference.sha256,
     });
+  assertNoSecretBytes(
+    archiveObject.bytes,
+    secrets,
+    "Selected artifact archive",
+  );
+  const artifactArchiveStorage = await putVerifiedEvidenceWithReceipt({
+    store,
+    namespace,
+    bytes: archiveObject.bytes,
+    mediaType: ARTIFACT_ARCHIVE_MEDIA_TYPE,
+    label: "Selected artifact archive",
+  });
+  const artifactArchiveAvailability = {
+    schemaVersion: 1,
+    evidenceKind: "artifact-archive-availability/v1",
+    availability: "available",
+    namespace,
+    bindingId,
+    sourceSha: index.sourceSha,
+    variantId: artifactReference.variantId,
+    releaseRole: selectedRole,
+    artifactManifest: artifactManifestReference,
+    artifactArchive: {
+      uri: artifactArchiveStorage.reference.uri,
+      sha256: artifactArchiveStorage.reference.sha256,
+      mediaType: artifactArchiveStorage.receipt.mediaType,
+      byteLength: artifactArchiveStorage.receipt.byteLength,
+      committedAt: artifactArchiveStorage.receipt.committedAt,
+    },
+  };
+  const artifactArchiveAvailabilityBytes = canonicalJsonBytes(
+    artifactArchiveAvailability,
+  );
+  const artifactArchiveAvailabilityReference = immutableReferenceFor(
+    namespace,
+    artifactArchiveAvailabilityBytes,
+  );
   const binding = {
     bindingId,
     sourceSha: index.sourceSha,
@@ -1226,6 +1305,8 @@ export const produceDeploymentBinding = async (
     providerProjectId: providerEvidence.providerProjectId,
     providerDeploymentId: providerEvidence.providerDeploymentId,
     deploymentUrl,
+    artifactArchive: artifactArchiveReference,
+    artifactArchiveAvailability: artifactArchiveAvailabilityReference,
     packageIndex: packageIndexReference,
     artifactManifest: artifactManifestReference,
     providerEvidence: providerEvidenceReference,
@@ -1293,6 +1374,11 @@ export const produceDeploymentBinding = async (
       "Provider deployment evidence",
     ],
     [
+      artifactArchiveAvailabilityBytes,
+      ARTIFACT_ARCHIVE_AVAILABILITY_MEDIA_TYPE,
+      "Artifact archive availability receipt",
+    ],
+    [
       bindingBytes,
       "application/vnd.event-shopping-planner.deployment-binding+json;version=1",
       "Deployment binding",
@@ -1315,6 +1401,12 @@ export const produceDeploymentBinding = async (
     ]);
   }
   await validateProviderEvidenceForBinding({
+    store,
+    namespace,
+    binding,
+    label: "Produced DeploymentBinding",
+  });
+  await assertArtifactArchiveAvailable({
     store,
     namespace,
     binding,
@@ -1343,5 +1435,7 @@ export const produceDeploymentBinding = async (
     deploymentReceiptReference: receiptReference,
     providerObservationReference,
     cspPolicyReference,
+    artifactArchiveReference,
+    artifactArchiveAvailabilityReference,
   };
 };

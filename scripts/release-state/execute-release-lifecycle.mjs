@@ -11,9 +11,16 @@ import {
 } from "../lib/canonical-json.mjs";
 import {
   acceptPendingStandardRelease,
+  preparePendingStandardAcceptanceBundle,
   recordPreparedPromotionAssignment,
   recordPreparedPromotionLifecycle,
+  resolvePendingAcceptanceRequirements,
 } from "./lifecycleExecution.mjs";
+import { readCurrentReleaseState } from "./currentReleaseState.mjs";
+import {
+  activateP8MinimumSafetyFloor,
+  activateReleasePolicy,
+} from "./policyActivation.mjs";
 import { createPostgresReleaseStateStore } from "./postgresStore.mjs";
 import { assertProtectedWorkflowEnvironment } from "./protected-release.mjs";
 import {
@@ -29,6 +36,19 @@ const root = path.resolve(
   "..",
 );
 const MAX_INPUT_BYTES = 16 * 1024 * 1024;
+const MAX_TERMINAL_OBJECT_SET_BYTES = 512 * 1024 * 1024;
+const ACCEPTANCE_INPUT_FLAGS = [
+  "--continuous-probe",
+  "--continuous-probe-sha256",
+  "--evidence",
+  "--evidence-sha256",
+  "--namespace",
+  "--output",
+];
+const ACCEPTANCE_PERFORMANCE_FLAGS = [
+  "--performance-evidence",
+  "--performance-evidence-sha256",
+];
 const COMMAND_FLAGS = {
   "record-assignment": [
     "--assignment-authority",
@@ -46,14 +66,31 @@ const COMMAND_FLAGS = {
     "--production-probe",
     "--promotion-receipt",
   ],
+  "prepare-acceptance-bundle": [
+    ...ACCEPTANCE_INPUT_FLAGS,
+    "--terminal-bundle-output",
+    "--terminal-object-set-output",
+  ],
   "accept-standard": [
-    "--continuous-probe",
-    "--continuous-probe-sha256",
-    "--evidence",
-    "--evidence-sha256",
+    ...ACCEPTANCE_INPUT_FLAGS,
+    "--terminal-bundle",
+    "--terminal-bundle-sha256",
+    "--terminal-object-set",
+    "--terminal-object-set-sha256",
+  ],
+  "activate-policy-floor": [
     "--namespace",
     "--output",
+    "--subject",
+    "--subject-sha256",
   ],
+  "activate-policy": [
+    "--namespace",
+    "--output",
+    "--subject",
+    "--subject-sha256",
+  ],
+  "describe-acceptance-requirements": ["--namespace", "--output"],
 };
 const ACCEPTANCE_RECOVERY_FLAGS = [
   "--companion-recovery-drill",
@@ -63,15 +100,25 @@ const ACCEPTANCE_RECOVERY_FLAGS = [
 export const parseReleaseLifecycleArguments = (arguments_) => {
   if (!Array.isArray(arguments_) || arguments_.length === 0) {
     throw new Error(
-      "Usage: execute-release-lifecycle.mjs <record-assignment|record-promotion|accept-standard> [strict flags]",
+      "Usage: execute-release-lifecycle.mjs <record-assignment|record-promotion|prepare-acceptance-bundle|accept-standard|activate-policy|activate-policy-floor|describe-acceptance-requirements> [strict flags]",
     );
   }
   const [command, ...tokens] = arguments_;
   const baseFlags = COMMAND_FLAGS[command];
-  const flagSets =
-    command === "accept-standard"
-      ? [baseFlags, [...baseFlags, ...ACCEPTANCE_RECOVERY_FLAGS]]
-      : [baseFlags];
+  const flagSets = ["accept-standard", "prepare-acceptance-bundle"].includes(
+    command,
+  )
+    ? [
+        baseFlags,
+        [...baseFlags, ...ACCEPTANCE_PERFORMANCE_FLAGS],
+        [...baseFlags, ...ACCEPTANCE_RECOVERY_FLAGS],
+        [
+          ...baseFlags,
+          ...ACCEPTANCE_PERFORMANCE_FLAGS,
+          ...ACCEPTANCE_RECOVERY_FLAGS,
+        ],
+      ]
+    : [baseFlags];
   if (
     !baseFlags ||
     !flagSets.some((flags) => tokens.length === flags.length * 2)
@@ -105,11 +152,18 @@ export const parseReleaseLifecycleArguments = (arguments_) => {
   if (
     !exactFlagSet ||
     !NAMESPACE_PATTERN.test(values["--namespace"]) ||
-    (command === "accept-standard" &&
+    (["accept-standard", "prepare-acceptance-bundle"].includes(command) &&
       (!SHA256_PATTERN.test(values["--evidence-sha256"]) ||
         !SHA256_PATTERN.test(values["--continuous-probe-sha256"]) ||
+        (Object.hasOwn(values, "--performance-evidence-sha256") &&
+          !SHA256_PATTERN.test(values["--performance-evidence-sha256"])) ||
         (Object.hasOwn(values, "--companion-recovery-drill-sha256") &&
-          !SHA256_PATTERN.test(values["--companion-recovery-drill-sha256"]))))
+          !SHA256_PATTERN.test(values["--companion-recovery-drill-sha256"])) ||
+        (command === "accept-standard" &&
+          (!SHA256_PATTERN.test(values["--terminal-bundle-sha256"]) ||
+            !SHA256_PATTERN.test(values["--terminal-object-set-sha256"]))))) ||
+    (["activate-policy", "activate-policy-floor"].includes(command) &&
+      !SHA256_PATTERN.test(values["--subject-sha256"]))
   ) {
     throw new Error("Release lifecycle arguments are incomplete or invalid");
   }
@@ -119,24 +173,38 @@ export const parseReleaseLifecycleArguments = (arguments_) => {
 const resolveDistinctPaths = ({ command, values }, workingDirectory) => {
   const inputFlags = command.startsWith("record-")
     ? ["--prepared-result", "--promotion-receipt", "--assignment-authority"]
-    : ["--evidence"];
+    : ["activate-policy", "activate-policy-floor"].includes(command)
+      ? ["--subject"]
+      : command === "describe-acceptance-requirements"
+        ? []
+        : ["--evidence", "--continuous-probe"];
+  const outputFlags = ["--output"];
   if (command === "record-promotion") {
     inputFlags.push("--assignment-validation", "--production-probe");
   }
-  if (
-    command === "accept-standard" &&
-    Object.hasOwn(values, "--continuous-probe")
-  ) {
-    inputFlags.push("--continuous-probe");
+  if (command === "accept-standard") {
+    inputFlags.push("--terminal-bundle", "--terminal-object-set");
+  }
+  if (command === "prepare-acceptance-bundle") {
+    outputFlags.push(
+      "--terminal-bundle-output",
+      "--terminal-object-set-output",
+    );
   }
   if (
-    command === "accept-standard" &&
+    ["accept-standard", "prepare-acceptance-bundle"].includes(command) &&
+    Object.hasOwn(values, "--performance-evidence")
+  ) {
+    inputFlags.push("--performance-evidence");
+  }
+  if (
+    ["accept-standard", "prepare-acceptance-bundle"].includes(command) &&
     Object.hasOwn(values, "--companion-recovery-drill")
   ) {
     inputFlags.push("--companion-recovery-drill");
   }
   const paths = Object.fromEntries(
-    [...inputFlags, "--output"].map((flag) => [
+    [...inputFlags, ...outputFlags].map((flag) => [
       flag,
       path.resolve(workingDirectory, values[flag]),
     ]),
@@ -153,13 +221,14 @@ const resolveDistinctPaths = ({ command, values }, workingDirectory) => {
 const readBoundedRegularFile = async (
   filePath,
   { lstatImpl = lstat, readFileImpl = readFile } = {},
+  maximumBytes = MAX_INPUT_BYTES,
 ) => {
   const metadata = await lstatImpl(filePath);
   if (
     !metadata.isFile() ||
     metadata.isSymbolicLink() ||
     metadata.size <= 0 ||
-    metadata.size > MAX_INPUT_BYTES
+    metadata.size > maximumBytes
   ) {
     throw new Error("Lifecycle input path, type, or size is invalid");
   }
@@ -167,7 +236,7 @@ const readBoundedRegularFile = async (
   if (
     !Buffer.isBuffer(bytes) ||
     bytes.length !== metadata.size ||
-    bytes.length > MAX_INPUT_BYTES
+    bytes.length > maximumBytes
   ) {
     throw new Error("Lifecycle input changed while being read");
   }
@@ -214,10 +283,13 @@ const createBoundStore = async ({
   });
 };
 
-const sourceFromPreparedResult = (bytes) => {
+const sourceFromPreparedResult = (bytes, executorSourceSha) => {
   const result = parseCanonicalJsonBytes(bytes, "Prepared promotion result");
+  const operation = result.event?.payload?.pendingOperation;
   const sourceSha =
-    result.event?.payload?.pendingOperation?.targetBinding?.sourceSha;
+    operation?.kind === "promote-standard"
+      ? operation?.targetBinding?.sourceSha
+      : executorSourceSha;
   if (!SOURCE_SHA_PATTERN.test(sourceSha)) {
     throw new Error("Prepared promotion source identity is invalid");
   }
@@ -232,6 +304,15 @@ const sourceFromAcceptanceEvidence = (bytes) => {
   const sourceSha = evidence.release?.commitSha;
   if (!SOURCE_SHA_PATTERN.test(sourceSha)) {
     throw new Error("Acceptance evidence source identity is invalid");
+  }
+  return sourceSha;
+};
+
+const sourceFromPolicyActivationSubject = (bytes) => {
+  const subject = parseCanonicalJsonBytes(bytes, "Policy activation subject");
+  const sourceSha = subject.executorSourceSha;
+  if (!SOURCE_SHA_PATTERN.test(sourceSha)) {
+    throw new Error("Policy activation subject source identity is invalid");
   }
   return sourceSha;
 };
@@ -251,12 +332,28 @@ export const runReleaseLifecycleCli = async (
     createStore = createPostgresReleaseStateStore,
     recordAssignment = recordPreparedPromotionAssignment,
     recordLifecycle = recordPreparedPromotionLifecycle,
+    prepareAcceptance = preparePendingStandardAcceptanceBundle,
     acceptRelease = acceptPendingStandardRelease,
+    describeAcceptanceRequirements = resolvePendingAcceptanceRequirements,
+    activatePolicy = activateReleasePolicy,
+    activatePolicyFloor = activateP8MinimumSafetyFloor,
+    readState = readCurrentReleaseState,
   } = {},
 ) => {
   const parsed = parseReleaseLifecycleArguments(arguments_);
   const paths = resolveDistinctPaths(parsed, workingDirectory);
-  await assertOutputAvailable(paths["--output"], lstatImpl);
+  const outputPaths = [paths["--output"]];
+  if (parsed.command === "prepare-acceptance-bundle") {
+    outputPaths.push(
+      paths["--terminal-bundle-output"],
+      paths["--terminal-object-set-output"],
+    );
+  }
+  await Promise.all(
+    outputPaths.map((outputPath) =>
+      assertOutputAvailable(outputPath, lstatImpl),
+    ),
+  );
   const namespace = parsed.values["--namespace"];
   const [storePolicy, approvalPolicy] = await Promise.all([
     loadJson(path.join(root, "config", "release-state-store.json")),
@@ -278,7 +375,10 @@ export const runReleaseLifecycleCli = async (
       assignmentAuthorityBytes,
       providerPolicy,
     ] = commonInputs;
-    sourceSha = sourceFromPreparedResult(preparedResultBytes);
+    sourceSha = sourceFromPreparedResult(
+      preparedResultBytes,
+      environment.GITHUB_SHA,
+    );
     input = {
       preparedResultBytes,
       promotionReceiptBytes,
@@ -297,6 +397,24 @@ export const runReleaseLifecycleCli = async (
       input.assignmentValidationBytes = assignmentValidationBytes;
       input.productionProbeBytes = productionProbeBytes;
     }
+  } else if (
+    ["activate-policy", "activate-policy-floor"].includes(parsed.command)
+  ) {
+    const subjectBytes = await readBoundedRegularFile(
+      paths["--subject"],
+      inputOptions,
+    );
+    const expectedSubjectSha256 = parsed.values["--subject-sha256"];
+    if (sha256Bytes(subjectBytes) !== expectedSubjectSha256) {
+      throw new Error(
+        "Policy activation subject differs from the reviewed SHA-256",
+      );
+    }
+    sourceSha = sourceFromPolicyActivationSubject(subjectBytes);
+    input = { subjectBytes, expectedSubjectSha256 };
+  } else if (parsed.command === "describe-acceptance-requirements") {
+    sourceSha = requireEnvironment(environment, "GITHUB_SHA");
+    input = {};
   } else {
     const [evidenceBytes, continuousProbeBytes] = await Promise.all([
       readBoundedRegularFile(paths["--evidence"], inputOptions),
@@ -319,7 +437,61 @@ export const runReleaseLifecycleCli = async (
       expectedEvidenceSha256,
       continuousProbeBytes,
       expectedContinuousProbeSha256,
+      performanceEvidenceBytes: null,
+      expectedPerformanceEvidenceSha256: null,
     };
+    if (Object.hasOwn(parsed.values, "--performance-evidence")) {
+      const performanceEvidenceBytes = await readBoundedRegularFile(
+        paths["--performance-evidence"],
+        inputOptions,
+      );
+      const expectedPerformanceEvidenceSha256 =
+        parsed.values["--performance-evidence-sha256"];
+      if (
+        sha256Bytes(performanceEvidenceBytes) !==
+        expectedPerformanceEvidenceSha256
+      ) {
+        throw new Error(
+          "Performance evidence differs from the reviewed SHA-256",
+        );
+      }
+      input.performanceEvidenceBytes = performanceEvidenceBytes;
+      input.expectedPerformanceEvidenceSha256 =
+        expectedPerformanceEvidenceSha256;
+    }
+    if (parsed.command === "prepare-acceptance-bundle") {
+      const dbCompatibilityContract = await loadJson(
+        path.join(root, "config", "db-compatibility-contract.json"),
+      );
+      input.dbCompatibilityContractBytes = canonicalJsonBytes(
+        dbCompatibilityContract,
+      );
+    } else {
+      const [terminalBundleBytes, terminalObjectSetBytes] = await Promise.all([
+        readBoundedRegularFile(paths["--terminal-bundle"], inputOptions),
+        readBoundedRegularFile(
+          paths["--terminal-object-set"],
+          inputOptions,
+          MAX_TERMINAL_OBJECT_SET_BYTES,
+        ),
+      ]);
+      input.terminalBundleBytes = terminalBundleBytes;
+      input.expectedTerminalBundleSha256 =
+        parsed.values["--terminal-bundle-sha256"];
+      input.terminalObjectSetBytes = terminalObjectSetBytes;
+      input.expectedTerminalObjectSetSha256 =
+        parsed.values["--terminal-object-set-sha256"];
+      if (
+        sha256Bytes(terminalBundleBytes) !==
+          input.expectedTerminalBundleSha256 ||
+        sha256Bytes(terminalObjectSetBytes) !==
+          input.expectedTerminalObjectSetSha256
+      ) {
+        throw new Error(
+          "Acceptance terminal artifact differs from its reviewed SHA-256",
+        );
+      }
+    }
     if (Object.hasOwn(parsed.values, "--companion-recovery-drill")) {
       const companionRecoveryDrillBytes = await readBoundedRegularFile(
         paths["--companion-recovery-drill"],
@@ -356,20 +528,77 @@ export const runReleaseLifecycleCli = async (
   });
   try {
     let result;
-    if (parsed.command === "record-assignment") {
+    if (parsed.command === "describe-acceptance-requirements") {
+      result = await describeAcceptanceRequirements({ store });
+      if (result.sourceSha !== sourceSha) {
+        throw new Error(
+          "Acceptance requirements source differs from the workflow source",
+        );
+      }
+    } else if (parsed.command === "record-assignment") {
       result = await recordAssignment({
         store,
         ...input,
         environment,
       });
     } else if (parsed.command === "record-promotion") {
-      result = await recordLifecycle({
-        store,
-        ...input,
-        environment,
-      });
-    } else {
-      result = await acceptRelease({
+      try {
+        result = await recordLifecycle({
+          store,
+          ...input,
+          environment,
+        });
+      } catch (error) {
+        const prepared = parseCanonicalJsonBytes(
+          input.preparedResultBytes,
+          "Prepared recovery result",
+        );
+        const operation = prepared.event?.payload?.pendingOperation;
+        const recoveryKinds = new Set([
+          "rollback-standard",
+          "activate-containment",
+          "redeploy-standard",
+          "redeploy-containment",
+        ]);
+        if (recoveryKinds.has(operation?.kind)) {
+          const current = await readState({ store, requireInitialized: true });
+          const assignmentRecorded = current.records.some(
+            (record) =>
+              record.event.eventType === "deployment-assigned" &&
+              record.event.operationId === operation.operationId,
+          );
+          if (
+            assignmentRecorded &&
+            current.snapshot.pendingOperation?.operationId ===
+              operation.operationId &&
+            current.snapshot.pendingOperation?.targetBinding?.bindingId ===
+              operation.targetBinding.bindingId
+          ) {
+            const reconcileRequired = {
+              schemaVersion: 1,
+              resultKind: "recovery-reconcile-required/v1",
+              status: "pending-provider-reconcile",
+              reasonCode: "terminal-cas-not-committed-after-assignment",
+              namespace,
+              operationId: operation.operationId,
+              operationKind: operation.kind,
+              targetBindingId: operation.targetBinding.bindingId,
+              expectedState: current.head,
+              promotionReceiptSha256: sha256Bytes(input.promotionReceiptBytes),
+              providerObservationRequired: true,
+              reconcileOperation: "reconcile",
+            };
+            await writeFileImpl(
+              paths["--output"],
+              canonicalJsonBytes(reconcileRequired),
+              { flag: "wx", mode: 0o600 },
+            );
+          }
+        }
+        throw error;
+      }
+    } else if (parsed.command === "prepare-acceptance-bundle") {
+      result = await prepareAcceptance({
         store,
         ...input,
         approvalPolicy,
@@ -384,12 +613,70 @@ export const runReleaseLifecycleCli = async (
         ),
         githubToken: requireEnvironment(environment, "GITHUB_TOKEN"),
       });
+    } else if (
+      ["activate-policy", "activate-policy-floor"].includes(parsed.command)
+    ) {
+      const activate =
+        parsed.command === "activate-policy"
+          ? activatePolicy
+          : activatePolicyFloor;
+      result = await activate({
+        store,
+        ...input,
+        approvalPolicy,
+        expectedExecutorSourceSha: sourceSha,
+        expectedRunId: runId,
+        oidcRequestUrl: requireEnvironment(
+          environment,
+          "ACTIONS_ID_TOKEN_REQUEST_URL",
+        ),
+        oidcRequestToken: requireEnvironment(
+          environment,
+          "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+        ),
+        githubToken: requireEnvironment(environment, "GITHUB_TOKEN"),
+      });
+    } else {
+      result = await acceptRelease({
+        store,
+        ...input,
+        approvalPolicy,
+        expectedRunId: runId,
+      });
     }
-    const outputBytes = canonicalJsonBytes(result);
-    await writeFileImpl(paths["--output"], outputBytes, {
-      flag: "wx",
-      mode: 0o600,
-    });
+    let outputValue = result;
+    const writes = [];
+    if (parsed.command === "prepare-acceptance-bundle") {
+      outputValue = Object.fromEntries(
+        Object.entries(result).filter(
+          ([key]) =>
+            !["bundle", "bundleBytes", "objectSet", "objectSetBytes"].includes(
+              key,
+            ),
+        ),
+      );
+      writes.push(
+        writeFileImpl(paths["--terminal-bundle-output"], result.bundleBytes, {
+          flag: "wx",
+          mode: 0o600,
+        }),
+        writeFileImpl(
+          paths["--terminal-object-set-output"],
+          result.objectSetBytes,
+          {
+            flag: "wx",
+            mode: 0o600,
+          },
+        ),
+      );
+    }
+    writes.push(
+      writeFileImpl(paths["--output"], canonicalJsonBytes(outputValue), {
+        flag: "wx",
+        mode: 0o600,
+      }),
+    );
+    await Promise.all(writes);
     stdout.write(
       `PASS release lifecycle ${parsed.command}: ${result.operationId}\n`,
     );

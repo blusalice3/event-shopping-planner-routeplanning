@@ -4,15 +4,22 @@ import {
   sha256Bytes,
 } from "../lib/canonical-json.mjs";
 import { readCurrentReleaseState } from "./currentReleaseState.mjs";
+import {
+  assertNamedPrePromotionEvidence,
+  resolveNamedPrePromotionEvidence,
+} from "./prePromotionEvidence.mjs";
 import { validatePromotionSubject } from "./promotionPreparation.mjs";
 import {
   PROVIDER_ALIAS_OBSERVATION_KIND,
   decideProviderReconciliation,
+  resolvePendingProviderAuthority,
   storeProviderAliasObservation,
 } from "./reconcileDecision.mjs";
 import {
   NAMESPACE_PATTERN,
   OPERATION_ID_PATTERN,
+  SHA256_PATTERN,
+  SOURCE_SHA_PATTERN,
   assertDeploymentBinding,
   assertEvidenceObjectAvailable,
   assertExactKeys,
@@ -23,8 +30,14 @@ import {
   sortAndDedupeReferences,
   validateProviderEvidenceForBinding,
 } from "./releaseWorkflowValidation.mjs";
+import {
+  collectReviewedWorkflowRunAuthority,
+  readBoundReviewedWorkflowRunAuthority,
+} from "./reviewedWorkflowRunAuthority.mjs";
 
-export const PRE_PROMOTION_EVIDENCE_SET_KIND = "pre-promotion-evidence-set/v1";
+export const PRE_PROMOTION_EVIDENCE_SET_KIND = "pre-promotion-evidence-set/v2";
+export const PRE_PROMOTION_EVIDENCE_SOURCE_KIND =
+  "pre-promotion-evidence-source/v2";
 const VERCEL_API_ORIGIN = "https://api.vercel.com";
 const MAX_PROVIDER_RESPONSE_BYTES = 512 * 1024;
 const MAX_PROVIDER_TOKEN_LENGTH = 4096;
@@ -60,35 +73,143 @@ const deriveEmergencyRecovery = (snapshot) => {
   return snapshot.containmentCompanion ?? snapshot.bootstrapRecovery;
 };
 
-const parseEvidenceSet = ({ bytes, namespace }) => {
+const parseEvidenceSet = async ({
+  bytes,
+  namespace,
+  sourceSha,
+  repository,
+  store,
+}) => {
   const evidenceSet = parseCanonicalJsonBytes(
     bytes,
     "Pre-promotion evidence set",
   );
   assertExactKeys(
     evidenceSet,
-    ["evidenceKind", "evidenceRefs", "namespace", "schemaVersion"],
+    [
+      "evidence",
+      "evidenceKind",
+      "namespace",
+      "schemaVersion",
+      "workflowRunAuthority",
+    ],
     "Pre-promotion evidence set",
   );
   if (
     evidenceSet.schemaVersion !== 1 ||
     evidenceSet.evidenceKind !== PRE_PROMOTION_EVIDENCE_SET_KIND ||
-    evidenceSet.namespace !== namespace ||
-    !Array.isArray(evidenceSet.evidenceRefs) ||
-    evidenceSet.evidenceRefs.length === 0
+    evidenceSet.namespace !== namespace
   ) {
     throw new Error("Pre-promotion evidence set identity is invalid");
   }
-  const sorted = sortAndDedupeReferences(evidenceSet.evidenceRefs, namespace);
+  assertNamedPrePromotionEvidence(evidenceSet.evidence, namespace);
+  await readBoundReviewedWorkflowRunAuthority({
+    namespace,
+    repository,
+    expectedSourceSha: sourceSha,
+    expectedWorkflowPath: ".github/workflows/release.yml",
+    reference: evidenceSet.workflowRunAuthority,
+    store,
+  });
+  return evidenceSet;
+};
+
+export const buildAuthoritativePrePromotionEvidenceSet = async (
+  options,
+  {
+    readState = readCurrentReleaseState,
+    collectRunAuthority = collectReviewedWorkflowRunAuthority,
+  } = {},
+) => {
+  assertNoDerivedInput(options);
+  const {
+    store,
+    namespace,
+    sourceSha,
+    sourceBytes,
+    expectedSourceSha256,
+    currentRunId,
+    githubToken,
+    repository,
+  } = options;
   if (
-    sorted.length !== evidenceSet.evidenceRefs.length ||
-    !sameCanonicalValue(sorted, evidenceSet.evidenceRefs)
+    !store ||
+    typeof store.readEvidence !== "function" ||
+    !NAMESPACE_PATTERN.test(namespace) ||
+    !SOURCE_SHA_PATTERN.test(sourceSha) ||
+    !Buffer.isBuffer(sourceBytes) ||
+    !SHA256_PATTERN.test(expectedSourceSha256) ||
+    sha256Bytes(sourceBytes) !== expectedSourceSha256 ||
+    !/^[1-9][0-9]{0,19}$/.test(currentRunId ?? "") ||
+    typeof githubToken !== "string" ||
+    githubToken.length < 8 ||
+    !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository ?? "")
+  ) {
+    throw new Error("Pre-promotion evidence source binding is invalid");
+  }
+  const current = await readState({ store });
+  if (
+    replayedNamespace(current) !== namespace ||
+    (typeof store.namespace === "string" && store.namespace !== namespace)
   ) {
     throw new Error(
-      "Pre-promotion evidence references must be distinct and UTF-8 sorted",
+      "Pre-promotion evidence namespace differs from replayed Release State",
     );
   }
-  return evidenceSet;
+  const source = parseCanonicalJsonBytes(
+    sourceBytes,
+    "Pre-promotion evidence source",
+  );
+  assertExactKeys(
+    source,
+    ["evidence", "namespace", "schemaVersion", "sourceKind", "sourceSha"],
+    "Pre-promotion evidence source",
+  );
+  if (
+    source.schemaVersion !== 1 ||
+    source.sourceKind !== PRE_PROMOTION_EVIDENCE_SOURCE_KIND ||
+    source.namespace !== namespace ||
+    source.sourceSha !== sourceSha
+  ) {
+    throw new Error("Pre-promotion evidence source identity is invalid");
+  }
+  assertNamedPrePromotionEvidence(source.evidence, namespace);
+  const resolved = await resolveNamedPrePromotionEvidence({
+    store,
+    namespace,
+    namedEvidence: source.evidence,
+    snapshot: current.snapshot,
+  });
+  if (resolved.workflowRun.workflowRunId === currentRunId) {
+    throw new Error(
+      "Pre-promotion evidence source must come from a distinct prior run",
+    );
+  }
+  const workflowRunAuthority = await collectRunAuthority({
+    githubToken,
+    namespace,
+    repository,
+    expectedRunId: resolved.workflowRun.workflowRunId,
+    expectedRunAttempt: String(resolved.workflowRun.runAttempt),
+    expectedSourceSha: sourceSha,
+    expectedWorkflowPath: ".github/workflows/release.yml",
+    store,
+  });
+  const evidenceSet = {
+    schemaVersion: 1,
+    evidenceKind: PRE_PROMOTION_EVIDENCE_SET_KIND,
+    namespace,
+    evidence: source.evidence,
+    workflowRunAuthority: workflowRunAuthority.receipt,
+  };
+  const evidenceSetBytes = canonicalJsonBytes(evidenceSet);
+  return {
+    evidenceSet,
+    evidenceSetBytes,
+    evidenceSetSha256: sha256Bytes(evidenceSetBytes),
+    sourceSha,
+    sourceEvidenceSha256: expectedSourceSha256,
+  };
 };
 
 const verifyBindingEvidence = async ({
@@ -177,9 +298,19 @@ export const buildAuthoritativePromotionSubject = async (
   if (emergencyRecoveryBinding === null) {
     throw new Error("Replayed state has no emergency recovery binding");
   }
-  const evidenceSet = parseEvidenceSet({
+  const evidenceSet = await parseEvidenceSet({
     bytes: evidenceSetBytes,
     namespace,
+    sourceSha: standard.sourceSha,
+    repository: null,
+    store,
+  });
+  const resolvedPrePromotionEvidence = await resolveNamedPrePromotionEvidence({
+    store,
+    namespace,
+    namedEvidence: evidenceSet.evidence,
+    bindings: { standard, containment: companion },
+    snapshot: current.snapshot,
   });
   const subject = {
     schemaVersion: 1,
@@ -195,7 +326,7 @@ export const buildAuthoritativePromotionSubject = async (
     companionBinding: companion,
     previousBinding: current.snapshot.activeProduction,
     emergencyRecoveryBinding,
-    evidenceRefs: evidenceSet.evidenceRefs,
+    evidenceRefs: resolvedPrePromotionEvidence.references,
   };
   validatePromotionSubject({ subject, snapshot: current.snapshot });
   await verifyBindingEvidence({
@@ -209,7 +340,10 @@ export const buildAuthoritativePromotionSubject = async (
         : [["Promotion previous", subject.previousBinding]]),
       ["Promotion emergency recovery", emergencyRecoveryBinding],
     ],
-    extraReferences: evidenceSet.evidenceRefs,
+    extraReferences: [
+      ...resolvedPrePromotionEvidence.references,
+      evidenceSet.workflowRunAuthority,
+    ],
   });
   const subjectBytes = canonicalJsonBytes(subject);
   return {
@@ -356,33 +490,6 @@ const putVerifiedEvidence = async ({
   return { uri: receipt.uri, sha256: receipt.sha256 };
 };
 
-const assertProviderPolicy = (policy) => {
-  if (
-    policy?.bindingStatus !== "configured" ||
-    typeof policy.expectedProjectId !== "string" ||
-    policy.expectedProjectId.length === 0 ||
-    typeof policy.expectedTeamId !== "string" ||
-    policy.expectedTeamId.length === 0 ||
-    !Array.isArray(policy.ownedProductionDomains) ||
-    policy.ownedProductionDomains.length === 0 ||
-    policy.ownedProductionDomains.some(
-      (domain) => typeof domain !== "string" || !DOMAIN_PATTERN.test(domain),
-    ) ||
-    new Set(policy.ownedProductionDomains).size !==
-      policy.ownedProductionDomains.length ||
-    !Number.isSafeInteger(policy.observationPolicy?.maxResponseAgeSeconds) ||
-    policy.observationPolicy.maxResponseAgeSeconds < 0 ||
-    !Number.isSafeInteger(
-      policy.observationPolicy?.maxFutureClockSkewSeconds,
-    ) ||
-    policy.observationPolicy.maxFutureClockSkewSeconds < 0
-  ) {
-    throw new Error(
-      `Provider policy is not configured: ${(policy?.blockerCodes ?? []).join(", ")}`,
-    );
-  }
-};
-
 export const buildAuthoritativeProviderAliasObservation = async (
   options,
   {
@@ -398,20 +505,14 @@ export const buildAuthoritativeProviderAliasObservation = async (
   if (
     Object.hasOwn(options, "assignments") ||
     Object.hasOwn(options, "observedBinding") ||
-    Object.hasOwn(options, "snapshot")
+    Object.hasOwn(options, "snapshot") ||
+    Object.hasOwn(options, "providerPolicy")
   ) {
     throw new Error(
-      "Caller-supplied assignments, binding, or snapshot are forbidden",
+      "Caller-supplied assignments, binding, snapshot, or provider policy are forbidden",
     );
   }
-  const {
-    store,
-    namespace,
-    providerPolicy,
-    providerToken,
-    fetchImpl = fetch,
-  } = options;
-  assertProviderPolicy(providerPolicy);
+  const { store, namespace, providerToken, fetchImpl = fetch } = options;
   if (
     !store ||
     typeof store.readEvidence !== "function" ||
@@ -433,17 +534,8 @@ export const buildAuthoritativeProviderAliasObservation = async (
   if (pending === null) {
     throw new Error("Provider observation requires a pending operation");
   }
-  const target = pending.targetBinding;
-  assertDeploymentBinding(target, {
-    namespace,
-    label: "Pending provider target",
-  });
-  await verifyBindingEvidence({
-    store,
-    namespace,
-    bindings: [["Pending provider target", target]],
-    extraReferences: [],
-  });
+  const authority = await resolvePendingProviderAuthority({ store, current });
+  const { providerPolicy } = authority;
   const collected = await collectAssignments({
     domains: providerPolicy.ownedProductionDomains,
     expectedProjectId: providerPolicy.expectedProjectId,
@@ -532,19 +624,30 @@ export const buildAuthoritativeProviderAliasObservation = async (
   const deploymentIds = new Set(
     assignments.map(({ assignedDeploymentId }) => assignedDeploymentId),
   );
-  if (
-    deploymentIds.size !== 1 ||
-    !deploymentIds.has(target.providerDeploymentId)
-  ) {
+  if (deploymentIds.size !== 1) {
     throw new Error("Provider alias deployment is ambiguous or unknown");
   }
+  const [observedDeploymentId] = deploymentIds;
+  const matchingBindings = [
+    ...new Map(
+      Object.values(authority.candidateBindings)
+        .filter(
+          (binding) => binding.providerDeploymentId === observedDeploymentId,
+        )
+        .map((binding) => [binding.bindingId, binding]),
+    ).values(),
+  ];
+  if (matchingBindings.length !== 1) {
+    throw new Error("Provider alias deployment is ambiguous or unknown");
+  }
+  const observedBinding = matchingBindings[0];
   const observation = {
     schemaVersion: 1,
     observationKind: PROVIDER_ALIAS_OBSERVATION_KIND,
     namespace,
     providerProjectId: providerPolicy.expectedProjectId,
     assignments,
-    observedBinding: target,
+    observedBinding,
     providerReceiptReferences: receiptReferences.sort((left, right) =>
       compareUtf8(left.uri, right.uri),
     ),
@@ -558,7 +661,6 @@ export const buildAuthoritativeProviderAliasObservation = async (
     {
       store,
       observationBytes,
-      providerPolicy,
     },
     {
       now: () => observedAt,

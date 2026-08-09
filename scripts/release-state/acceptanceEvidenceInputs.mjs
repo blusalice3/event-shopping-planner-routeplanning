@@ -9,6 +9,19 @@ import {
   parseCanonicalJsonBytes,
   sameCanonicalValue,
 } from "./releaseWorkflowValidation.mjs";
+import {
+  COMPANION_RECOVERY_SOURCE_KIND,
+  CONTINUOUS_PROBE_SOURCE_KIND,
+  resolveCompanionRecoverySource,
+  resolveContinuousProbeSource,
+} from "./acceptanceEvidenceAuthority.mjs";
+import {
+  assertCompanionRecoveryEvidenceSchema,
+  assertCompanionRecoverySourceSchema,
+  assertContinuousProbeEvidenceSchema,
+  assertContinuousProbeSourceSchema,
+} from "./acceptanceEvidenceSchemas.mjs";
+import { readBoundReviewedWorkflowRunAuthority } from "./reviewedWorkflowRunAuthority.mjs";
 
 export const CONTINUOUS_PROBE_MAXIMUM_GAP_SECONDS = 300;
 export const COMPANION_RECOVERY_STEPS = [
@@ -17,7 +30,12 @@ export const COMPANION_RECOVERY_STEPS = [
   "standard-return",
 ];
 
-const CONTINUOUS_SOURCE_KEYS = ["samples", "schemaVersion", "sourceKind"];
+const CONTINUOUS_SOURCE_KEYS = [
+  "authorityBundle",
+  "sampleChainHead",
+  "schemaVersion",
+  "sourceKind",
+];
 const CONTINUOUS_EVIDENCE_KEYS = [
   "assignmentValidationEvidence",
   "buildId",
@@ -30,29 +48,44 @@ const CONTINUOUS_EVIDENCE_KEYS = [
   "ownedProductionDomains",
   "providerDeploymentId",
   "providerProjectId",
+  "releaseAEvidenceAuthority",
   "releaseAEvidenceSha256",
   "sampleCount",
   "samples",
   "schemaVersion",
   "sourceEvidenceSha256",
+  "sourceWorkflowAuthority",
   "sourceSha",
   "standardBindingId",
   "startedAt",
 ];
-const SAMPLE_KEYS = ["observedAt", "results"];
+const SAMPLE_KEYS = [
+  "observedAt",
+  "results",
+  "sampleChainCommit",
+  "sampleEvidence",
+];
 const SAMPLE_RESULT_KEYS = [
+  "httpReceipt",
   "productionDomain",
   "providerDeploymentId",
+  "providerLookupReceipt",
   "responseSha256",
   "status",
 ];
 const RECOVERY_SOURCE_KEYS = [
+  "authorityBundle",
+  "packageRedeployTerminalEvent",
+  "schemaVersion",
+  "sourceKind",
+  "standardReturnEvent",
+];
+const RECOVERY_RESOLVED_KEYS = [
+  "authorityBundle",
   "command",
   "companion",
   "completedAt",
   "drillEvidenceRef",
-  "schemaVersion",
-  "sourceKind",
   "startedAt",
   "status",
   "steps",
@@ -67,9 +100,11 @@ const RECOVERY_EVIDENCE_KEYS = [
   "namespace",
   "operationId",
   "releaseAEvidenceSha256",
+  "releaseAEvidenceAuthority",
   "releasePolicy",
   "schemaVersion",
   "sourceEvidenceSha256",
+  "sourceWorkflowAuthority",
   "sourceSha",
   "startedAt",
   "status",
@@ -90,7 +125,7 @@ const RECOVERY_STEP_KEYS = ["evidenceRef", "status", "step"];
 const EVENT_REFERENCE_PATTERN = (namespace, sha256) =>
   new RegExp(`^release-state://${namespace}/events/[1-9][0-9]*/${sha256}$`);
 const EVIDENCE_REFERENCE_PATTERN =
-  /^(?:https:\/\/|artifact:\/\/|run:\/\/|dashboard:\/\/|ticket:\/\/)[^\s]{1,500}$/;
+  /^(?:https:\/\/|artifact:\/\/|run:\/\/|dashboard:\/\/|ticket:\/\/|release-state:\/\/)[^\s]{1,500}$/;
 
 const assertCanonicalTimestamp = (value, label) => {
   const milliseconds = Date.parse(value);
@@ -240,6 +275,7 @@ const assertProviderPolicy = (providerPolicy, pendingAcceptance) => {
 };
 
 const assertContinuousSamples = ({
+  namespace,
   samples,
   pendingAcceptance,
   releaseAEvidence,
@@ -266,6 +302,16 @@ const assertContinuousSamples = ({
     const observedAt = assertCanonicalTimestamp(
       sample.observedAt,
       `Continuous production sample ${sampleIndex} observedAt`,
+    );
+    assertImmutableObjectReference(
+      sample.sampleEvidence,
+      namespace,
+      `Continuous production sample ${sampleIndex} evidence`,
+    );
+    assertImmutableObjectReference(
+      sample.sampleChainCommit,
+      namespace,
+      `Continuous production sample ${sampleIndex} chain commit`,
     );
     if (
       previous !== null &&
@@ -301,6 +347,16 @@ const assertContinuousSamples = ({
           "Continuous production probe differs from the pending deployment",
         );
       }
+      assertImmutableObjectReference(
+        result.httpReceipt,
+        namespace,
+        `Continuous production sample ${sampleIndex} HTTP receipt ${resultIndex}`,
+      );
+      assertImmutableObjectReference(
+        result.providerLookupReceipt,
+        namespace,
+        `Continuous production sample ${sampleIndex} provider receipt ${resultIndex}`,
+      );
     }
   }
   if (
@@ -331,7 +387,9 @@ const continuousIdentity = ({
   namespace,
   pendingAcceptance,
   releaseAEvidenceSha256,
+  releaseAEvidenceAuthority,
   sourceEvidenceSha256,
+  sourceWorkflowAuthority,
   coverage,
   samples,
 }) => {
@@ -353,7 +411,9 @@ const continuousIdentity = ({
       pendingAcceptance.observationStartedEvent,
     ),
     releaseAEvidenceSha256,
+    releaseAEvidenceAuthority: structuredClone(releaseAEvidenceAuthority),
     sourceEvidenceSha256,
+    sourceWorkflowAuthority: structuredClone(sourceWorkflowAuthority),
     maximumGapSeconds: CONTINUOUS_PROBE_MAXIMUM_GAP_SECONDS,
     startedAt: coverage.startedAt,
     endedAt: coverage.endedAt,
@@ -363,13 +423,17 @@ const continuousIdentity = ({
   };
 };
 
-export const produceContinuousProductionProbe = ({
+export const produceContinuousProductionProbe = async ({
+  store,
+  current,
   namespace,
   pendingAcceptance,
   releaseAEvidenceBytes,
   expectedReleaseAEvidenceSha256,
   sourceBytes,
   expectedSourceSha256,
+  sourceWorkflowAuthority,
+  approvalPolicy,
   providerPolicy,
   nowMilliseconds,
 }) => {
@@ -387,19 +451,40 @@ export const produceContinuousProductionProbe = ({
     expectedSha256: expectedSourceSha256,
     label: "Continuous production probe source",
   });
+  assertContinuousProbeSourceSchema(source);
   assertExactKeys(
     source,
     CONTINUOUS_SOURCE_KEYS,
     "Continuous production probe source",
   );
   if (
-    source.schemaVersion !== 1 ||
-    source.sourceKind !== "continuous-production-probe-source/v1"
+    source.schemaVersion !== 2 ||
+    source.sourceKind !== CONTINUOUS_PROBE_SOURCE_KIND
   ) {
     throw new Error("Continuous production probe source identity is invalid");
   }
+  const resolved = await resolveContinuousProbeSource({
+    store,
+    current,
+    namespace,
+    pendingAcceptance,
+    providerPolicy,
+    releaseAEvidence,
+    releaseAEvidenceSha256: expectedReleaseAEvidenceSha256,
+    source,
+    maximumGapSeconds: CONTINUOUS_PROBE_MAXIMUM_GAP_SECONDS,
+  });
+  await readBoundReviewedWorkflowRunAuthority({
+    namespace,
+    repository: approvalPolicy?.repository ?? null,
+    expectedSourceSha: pendingAcceptance.standardBinding.sourceSha,
+    expectedWorkflowPath: ".github/workflows/release.yml",
+    reference: sourceWorkflowAuthority,
+    store,
+  });
   const coverage = assertContinuousSamples({
-    samples: source.samples,
+    namespace,
+    samples: resolved.samples,
     pendingAcceptance,
     releaseAEvidence,
     providerPolicy,
@@ -409,10 +494,13 @@ export const produceContinuousProductionProbe = ({
     namespace,
     pendingAcceptance,
     releaseAEvidenceSha256: expectedReleaseAEvidenceSha256,
+    releaseAEvidenceAuthority: resolved.authorityBundle,
     sourceEvidenceSha256: expectedSourceSha256,
+    sourceWorkflowAuthority,
     coverage,
-    samples: source.samples,
+    samples: resolved.samples,
   });
+  assertContinuousProbeEvidenceSchema(evidence);
   const evidenceBytes = canonicalJsonBytes(evidence);
   return {
     evidence,
@@ -421,7 +509,9 @@ export const produceContinuousProductionProbe = ({
   };
 };
 
-export const validateContinuousProductionProbe = ({
+export const validateContinuousProductionProbe = async ({
+  store,
+  current,
   bytes,
   expectedSha256,
   namespace,
@@ -429,6 +519,7 @@ export const validateContinuousProductionProbe = ({
   releaseAEvidence,
   releaseAEvidenceSha256,
   providerPolicy,
+  approvalPolicy,
   nowMilliseconds,
 }) => {
   assertPendingAcceptance(pendingAcceptance, namespace);
@@ -437,13 +528,53 @@ export const validateContinuousProductionProbe = ({
     expectedSha256,
     label: "Continuous production probe evidence",
   });
+  assertContinuousProbeEvidenceSchema(evidence);
   assertExactKeys(
     evidence,
     CONTINUOUS_EVIDENCE_KEYS,
     "Continuous production probe evidence",
   );
+  if (
+    evidence.schemaVersion !== 1 ||
+    evidence.evidenceKind !== "continuous-production-probe/v1" ||
+    evidence.releaseAEvidenceSha256 !== releaseAEvidenceSha256 ||
+    !SHA256_PATTERN.test(evidence.sourceEvidenceSha256)
+  ) {
+    throw new Error("Continuous production probe evidence identity is invalid");
+  }
+  await readBoundReviewedWorkflowRunAuthority({
+    namespace,
+    repository: approvalPolicy?.repository ?? null,
+    expectedSourceSha: pendingAcceptance.standardBinding.sourceSha,
+    expectedWorkflowPath: ".github/workflows/release.yml",
+    reference: evidence.sourceWorkflowAuthority,
+    store,
+  });
+  const source = {
+    schemaVersion: 2,
+    sourceKind: CONTINUOUS_PROBE_SOURCE_KIND,
+    authorityBundle: evidence.releaseAEvidenceAuthority,
+    sampleChainHead: evidence.samples?.at(-1)?.sampleChainCommit,
+  };
+  if (
+    sha256Bytes(canonicalJsonBytes(source)) !== evidence.sourceEvidenceSha256
+  ) {
+    throw new Error("Continuous production probe source authority differs");
+  }
+  const resolved = await resolveContinuousProbeSource({
+    store,
+    current,
+    namespace,
+    pendingAcceptance,
+    providerPolicy,
+    releaseAEvidence,
+    releaseAEvidenceSha256,
+    source,
+    maximumGapSeconds: CONTINUOUS_PROBE_MAXIMUM_GAP_SECONDS,
+  });
   const coverage = assertContinuousSamples({
-    samples: evidence.samples,
+    namespace,
+    samples: resolved.samples,
     pendingAcceptance,
     releaseAEvidence,
     providerPolicy,
@@ -453,14 +584,13 @@ export const validateContinuousProductionProbe = ({
     namespace,
     pendingAcceptance,
     releaseAEvidenceSha256,
+    releaseAEvidenceAuthority: resolved.authorityBundle,
     sourceEvidenceSha256: evidence.sourceEvidenceSha256,
+    sourceWorkflowAuthority: evidence.sourceWorkflowAuthority,
     coverage,
-    samples: evidence.samples,
+    samples: resolved.samples,
   });
-  if (
-    !SHA256_PATTERN.test(evidence.sourceEvidenceSha256) ||
-    !sameCanonicalValue(evidence, expected)
-  ) {
+  if (!sameCanonicalValue(evidence, expected)) {
     throw new Error("Continuous production probe identity or coverage differs");
   }
   return evidence;
@@ -479,6 +609,7 @@ const recoveryCompanionIdentity = (binding) => ({
 });
 
 const assertRecoverySource = ({
+  namespace,
   source,
   pendingAcceptance,
   releaseAEvidence,
@@ -487,17 +618,20 @@ const assertRecoverySource = ({
 }) => {
   assertExactKeys(
     source,
-    RECOVERY_SOURCE_KEYS,
+    RECOVERY_RESOLVED_KEYS,
     "Companion recovery drill source",
   );
   if (
-    source.schemaVersion !== 1 ||
-    source.sourceKind !== "companion-recovery-drill-source/v1" ||
     source.status !== "PASS" ||
     source.command !== "npm run test:release-a-rollback"
   ) {
     throw new Error("Companion recovery drill source identity is invalid");
   }
+  assertImmutableObjectReference(
+    source.authorityBundle,
+    namespace,
+    "Release A authority bundle",
+  );
   assertExactKeys(
     source.companion,
     RECOVERY_COMPANION_KEYS,
@@ -565,7 +699,7 @@ const assertRecoverySource = ({
     rollback.command !== source.command ||
     rollback.commitSha !== pendingAcceptance.standardBinding.sourceSha ||
     rollback.completedAt !== source.completedAt ||
-    rollback.evidenceRef !== source.drillEvidenceRef
+    source.drillEvidenceRef !== source.steps?.[0]?.evidenceRef
   ) {
     throw new Error(
       "Companion recovery drill differs from frozen rollback evidence",
@@ -578,6 +712,7 @@ const recoveryIdentity = ({
   pendingAcceptance,
   releaseAEvidenceSha256,
   sourceEvidenceSha256,
+  sourceWorkflowAuthority,
   source,
 }) => ({
   schemaVersion: 1,
@@ -590,7 +725,9 @@ const recoveryIdentity = ({
     pendingAcceptance.standardBinding.releasePolicy,
   ),
   releaseAEvidenceSha256,
+  releaseAEvidenceAuthority: structuredClone(source.authorityBundle),
   sourceEvidenceSha256,
+  sourceWorkflowAuthority: structuredClone(sourceWorkflowAuthority),
   status: source.status,
   command: source.command,
   startedAt: source.startedAt,
@@ -600,15 +737,20 @@ const recoveryIdentity = ({
   steps: structuredClone(source.steps),
 });
 
-export const produceCompanionRecoveryDrill = ({
+export const produceCompanionRecoveryDrill = async ({
+  store,
+  current,
   namespace,
   pendingAcceptance,
   releaseAEvidenceBytes,
   expectedReleaseAEvidenceSha256,
   sourceBytes,
   expectedSourceSha256,
+  sourceWorkflowAuthority,
+  approvalPolicy,
   nowMilliseconds,
   futureClockSkewSeconds,
+  providerPolicy,
 }) => {
   if (
     !NAMESPACE_PATTERN.test(namespace) ||
@@ -634,8 +776,37 @@ export const produceCompanionRecoveryDrill = ({
     expectedSha256: expectedSourceSha256,
     label: "Companion recovery drill source",
   });
-  assertRecoverySource({
+  assertCompanionRecoverySourceSchema(source);
+  assertExactKeys(source, RECOVERY_SOURCE_KEYS, "Companion recovery source");
+  if (
+    source.schemaVersion !== 2 ||
+    source.sourceKind !== COMPANION_RECOVERY_SOURCE_KIND
+  ) {
+    throw new Error("Companion recovery source identity is invalid");
+  }
+  const resolved = await resolveCompanionRecoverySource({
+    store,
+    current,
+    namespace,
+    pendingAcceptance,
+    providerPolicy,
+    releaseAEvidence,
+    releaseAEvidenceSha256: expectedReleaseAEvidenceSha256,
     source,
+    nowMilliseconds,
+    futureClockSkewSeconds,
+  });
+  await readBoundReviewedWorkflowRunAuthority({
+    namespace,
+    repository: approvalPolicy?.repository ?? null,
+    expectedSourceSha: pendingAcceptance.standardBinding.sourceSha,
+    expectedWorkflowPath: ".github/workflows/release.yml",
+    reference: sourceWorkflowAuthority,
+    store,
+  });
+  assertRecoverySource({
+    namespace,
+    source: resolved,
     pendingAcceptance,
     releaseAEvidence,
     nowMilliseconds,
@@ -646,8 +817,10 @@ export const produceCompanionRecoveryDrill = ({
     pendingAcceptance,
     releaseAEvidenceSha256: expectedReleaseAEvidenceSha256,
     sourceEvidenceSha256: expectedSourceSha256,
-    source,
+    sourceWorkflowAuthority,
+    source: resolved,
   });
+  assertCompanionRecoveryEvidenceSchema(evidence);
   const evidenceBytes = canonicalJsonBytes(evidence);
   return {
     evidence,
@@ -656,7 +829,24 @@ export const produceCompanionRecoveryDrill = ({
   };
 };
 
-export const validateCompanionRecoveryDrill = ({
+const eventReferenceFromUri = ({ uri, namespace, label }) => {
+  if (typeof uri !== "string") {
+    throw new Error(`${label} is invalid`);
+  }
+  const match = uri.match(
+    new RegExp(
+      `^release-state://${namespace}/events/[1-9][0-9]*/([0-9a-f]{64})$`,
+    ),
+  );
+  if (!match) {
+    throw new Error(`${label} is not a Release State event reference`);
+  }
+  return { uri, sha256: match[1] };
+};
+
+export const validateCompanionRecoveryDrill = async ({
+  store,
+  current,
   bytes,
   expectedSha256,
   namespace,
@@ -665,6 +855,8 @@ export const validateCompanionRecoveryDrill = ({
   releaseAEvidenceSha256,
   nowMilliseconds,
   futureClockSkewSeconds,
+  providerPolicy,
+  approvalPolicy,
 }) => {
   assertPendingAcceptance(pendingAcceptance, namespace);
   const evidence = assertReviewedCanonicalBytes({
@@ -672,6 +864,7 @@ export const validateCompanionRecoveryDrill = ({
     expectedSha256,
     label: "Companion recovery drill evidence",
   });
+  assertCompanionRecoveryEvidenceSchema(evidence);
   assertExactKeys(
     evidence,
     RECOVERY_EVIDENCE_KEYS,
@@ -685,19 +878,49 @@ export const validateCompanionRecoveryDrill = ({
   ) {
     throw new Error("Companion recovery drill evidence identity is invalid");
   }
+  await readBoundReviewedWorkflowRunAuthority({
+    namespace,
+    repository: approvalPolicy?.repository ?? null,
+    expectedSourceSha: pendingAcceptance.standardBinding.sourceSha,
+    expectedWorkflowPath: ".github/workflows/release.yml",
+    reference: evidence.sourceWorkflowAuthority,
+    store,
+  });
   const source = {
-    schemaVersion: 1,
-    sourceKind: "companion-recovery-drill-source/v1",
-    status: evidence.status,
-    command: evidence.command,
-    startedAt: evidence.startedAt,
-    completedAt: evidence.completedAt,
-    drillEvidenceRef: evidence.drillEvidenceRef,
-    companion: evidence.companion,
-    steps: evidence.steps,
+    schemaVersion: 2,
+    sourceKind: COMPANION_RECOVERY_SOURCE_KIND,
+    authorityBundle: evidence.releaseAEvidenceAuthority,
+    packageRedeployTerminalEvent: eventReferenceFromUri({
+      uri: evidence.steps?.[0]?.evidenceRef,
+      namespace,
+      label: "Companion package-redeploy terminal",
+    }),
+    standardReturnEvent: eventReferenceFromUri({
+      uri: evidence.steps?.[2]?.evidenceRef,
+      namespace,
+      label: "Companion standard-return event",
+    }),
   };
-  assertRecoverySource({
+  if (
+    sha256Bytes(canonicalJsonBytes(source)) !== evidence.sourceEvidenceSha256
+  ) {
+    throw new Error("Companion recovery source authority differs");
+  }
+  const resolved = await resolveCompanionRecoverySource({
+    store,
+    current,
+    namespace,
+    pendingAcceptance,
+    providerPolicy,
+    releaseAEvidence,
+    releaseAEvidenceSha256,
     source,
+    nowMilliseconds,
+    futureClockSkewSeconds,
+  });
+  assertRecoverySource({
+    namespace,
+    source: resolved,
     pendingAcceptance,
     releaseAEvidence,
     nowMilliseconds,
@@ -708,7 +931,8 @@ export const validateCompanionRecoveryDrill = ({
     pendingAcceptance,
     releaseAEvidenceSha256,
     sourceEvidenceSha256: evidence.sourceEvidenceSha256,
-    source,
+    sourceWorkflowAuthority: evidence.sourceWorkflowAuthority,
+    source: resolved,
   });
   if (!sameCanonicalValue(evidence, expected)) {
     throw new Error("Companion recovery drill evidence differs");

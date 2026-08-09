@@ -6,13 +6,29 @@ import process from "node:process";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import cspReportHandler from "./api/csp-report.mjs";
+import notFoundHandler from "./api/not-found.mjs";
+import {
+  assertCspMode,
+  cspReportSinkContract,
+  renderCspHeaders,
+} from "./scripts/lib/csp-delivery.mjs";
 import {
   assertReleaseBuildLauncherBinding,
   resolveReleaseBuildInput,
 } from "./scripts/lib/release-build-input.mjs";
+import {
+  OUTER_AGENT_BUNDLE_ENV,
+  OUTER_AGENT_GRAPH_ENV,
+  OUTER_AGENT_GRAPH_URL,
+  OUTER_AGENT_URL,
+  parseIndependentOuterAgentGraph,
+} from "./scripts/lib/outer-agent-contract.mjs";
+import { injectStaticApplicationStylesheetLink } from "./scripts/lib/application-stylesheet-contract.mjs";
 
 type ReleaseDimensions = Record<string, string>;
 type CspPolicy = {
+  readonly reportEndpoint: string;
   readonly directives: Record<string, string[]>;
   readonly securityHeaders: Record<string, string>;
 };
@@ -37,9 +53,6 @@ const dbContract = JSON.parse(
 const cspPolicy = JSON.parse(
   readFileSync(path.join(projectRoot, "config", "csp-policy.json"), "utf8"),
 ) as CspPolicy;
-const contentSecurityPolicy = Object.entries(cspPolicy.directives)
-  .map(([directive, values]) => `${directive} ${values.join(" ")}`)
-  .join("; ");
 
 const canonicalize = (value: unknown): string => {
   if (value === null || typeof value === "boolean")
@@ -117,7 +130,6 @@ const getBuildIdentity = () => {
 };
 
 const RELEASE_CAPABILITY_MANIFEST = "release-capabilities.json";
-const OUTER_AGENT_URL = "/assets/outer-recovery-agent.js";
 const ROLE_ENTRY_URL = "/assets/release-role.js";
 const ROLE_ENTRY_GRAPH_URL = "/release-role-graph.json";
 const QA_XLSX_VIRTUAL_MODULE = "\0foundation-qa-xlsx-main";
@@ -145,6 +157,147 @@ const normalizeModuleId = (moduleId: string): string => {
   }
   return normalized;
 };
+
+const createIndependentOuterAgentInjectionPlugin = (
+  identity: ReturnType<typeof getBuildIdentity>,
+): Plugin => {
+  const bundlePath = process.env[OUTER_AGENT_BUNDLE_ENV];
+  const graphPath = process.env[OUTER_AGENT_GRAPH_ENV];
+  if (!bundlePath || !graphPath) {
+    throw new Error(
+      "Release build requires an independently built outer agent and graph",
+    );
+  }
+  const outerAgentBytes = readFileSync(path.resolve(bundlePath));
+  const graphBytes = readFileSync(path.resolve(graphPath));
+  parseIndependentOuterAgentGraph({
+    graphBytes,
+    sourceSha: identity.sourceSha,
+    outerAgentBytes,
+  });
+  return {
+    name: "independent-outer-agent-injection",
+    enforce: "pre",
+    transformIndexHtml: {
+      order: "pre",
+      handler(html) {
+        const sourceEntry =
+          /<script\s+type=["']module["']\s+src=["']\/src\/pwa\/recovery\/outerAgentEntry\.ts["']\s*><\/script>/g;
+        const matches = html.match(sourceEntry);
+        if (matches?.length !== 1) {
+          throw new Error(
+            "HTML must contain exactly one source outer-agent entry",
+          );
+        }
+        return html.replace(
+          sourceEntry,
+          "<!-- foundation-independent-outer-agent-entry -->",
+        );
+      },
+    },
+    buildStart() {
+      this.emitFile({
+        type: "asset",
+        fileName: OUTER_AGENT_URL.slice(1),
+        source: outerAgentBytes,
+      });
+      this.emitFile({
+        type: "asset",
+        fileName: OUTER_AGENT_GRAPH_URL.slice(1),
+        source: graphBytes,
+      });
+    },
+    generateBundle(_options, bundle) {
+      const htmlShell = Object.entries(bundle).find(
+        ([, entry]) =>
+          entry.type === "chunk" && entry.isEntry && entry.name === "app",
+      );
+      if (htmlShell) {
+        const [fileName, chunk] = htmlShell;
+        const htmlShellModules =
+          chunk.type === "chunk" ? Object.keys(chunk.modules) : [];
+        if (
+          chunk.type !== "chunk" ||
+          chunk.imports.length !== 0 ||
+          chunk.dynamicImports.length !== 0 ||
+          htmlShellModules.some((moduleId) => {
+            const normalized = normalizeModuleId(moduleId);
+            return (
+              normalized.startsWith("src/") && !normalized.endsWith(".css")
+            );
+          })
+        ) {
+          throw new Error(
+            "HTML shell unexpectedly contains role-dependent code",
+          );
+        }
+        delete bundle[fileName];
+      }
+      const roleDependentOuterEntry = Object.values(bundle).find(
+        (entry) =>
+          entry.type === "chunk" &&
+          entry.facadeModuleId
+            ?.replaceAll("\\", "/")
+            .endsWith("/src/pwa/recovery/outerAgentEntry.ts"),
+      );
+      if (roleDependentOuterEntry) {
+        throw new Error(
+          "Role build regenerated the independent outer-agent entry",
+        );
+      }
+    },
+  };
+};
+
+const createIndependentOuterAgentHtmlPlugin = (): Plugin => ({
+  name: "independent-outer-agent-html",
+  transformIndexHtml: {
+    order: "post",
+    handler(html) {
+      const marker = "<!-- foundation-independent-outer-agent-entry -->";
+      if (html.split(marker).length !== 2) {
+        throw new Error(
+          "Built HTML has no unique independent outer-agent marker",
+        );
+      }
+      return html.replace(
+        marker,
+        `<script type="module" src="${OUTER_AGENT_URL}"></script>`,
+      );
+    },
+  },
+});
+
+const createStaticApplicationStylesheetPlugin = (): Plugin => ({
+  name: "static-application-stylesheet",
+  enforce: "post",
+  generateBundle(_options, bundle) {
+    const htmlAssets = Object.values(bundle).filter(
+      (entry) => entry.type === "asset" && entry.fileName === "index.html",
+    );
+    if (htmlAssets.length !== 1 || htmlAssets[0]?.type !== "asset") {
+      throw new Error(
+        `Built output must contain exactly one index HTML asset; found ${htmlAssets.length}`,
+      );
+    }
+    const htmlAsset = htmlAssets[0];
+    const result = injectStaticApplicationStylesheetLink({
+      html:
+        typeof htmlAsset.source === "string"
+          ? htmlAsset.source
+          : Buffer.from(htmlAsset.source).toString("utf8"),
+      cssAssets: Object.values(bundle)
+        .filter(
+          (entry) => entry.type === "asset" && entry.fileName.endsWith(".css"),
+        )
+        .map((entry) => ({
+          fileName: entry.fileName,
+          source: entry.type === "asset" ? entry.source : "",
+        })),
+    });
+    htmlAsset.source = result.html;
+  },
+});
 
 const createRoleEntryGraphPlugin = (
   identity: ReturnType<typeof getBuildIdentity>,
@@ -399,8 +552,35 @@ const createQaBuildProfilePlugin = (
   },
 });
 
+const createCspPreviewDeliveryPlugin = (cspModeValue: string): Plugin => {
+  const cspMode = assertCspMode(cspModeValue);
+  const reportSink = cspReportSinkContract({ cspMode, cspPolicy });
+  return {
+    name: "csp-preview-delivery",
+    configurePreviewServer(server) {
+      server.middlewares.use((request, response, next) => {
+        const pathname = new URL(request.url ?? "/", "http://preview.invalid")
+          .pathname;
+        if (pathname !== reportSink.path) {
+          next();
+          return;
+        }
+        const handler = reportSink.enabled ? cspReportHandler : notFoundHandler;
+        void Promise.resolve(handler(request, response)).catch(() => {
+          if (!response.headersSent) {
+            response.statusCode = 500;
+            response.setHeader("cache-control", "no-store");
+          }
+          if (!response.writableEnded) response.end();
+        });
+      });
+    },
+  };
+};
+
 export default defineConfig(({ command, mode }) => {
   const identity = getBuildIdentity();
+  const cspMode = assertCspMode(identity.dimensions.cspMode);
   const isReleaseABuild = mode === "release-a";
   const releaseChannel = isReleaseABuild
     ? "release-a"
@@ -449,7 +629,15 @@ export default defineConfig(({ command, mode }) => {
       "import.meta.env.VITE_APP_BUILD_ID": JSON.stringify(identity.sourceSha),
     },
     plugins: [
+      ...(command === "build"
+        ? [
+            createIndependentOuterAgentInjectionPlugin(identity),
+            createIndependentOuterAgentHtmlPlugin(),
+            createStaticApplicationStylesheetPlugin(),
+          ]
+        : []),
       createQaBuildProfilePlugin(identity),
+      createCspPreviewDeliveryPlugin(cspMode),
       react(),
       createReleaseMetadataPlugin(capabilitySource, identity),
       createRoleEntryGraphPlugin(identity, roleEntry),
@@ -529,10 +717,7 @@ export default defineConfig(({ command, mode }) => {
         output: {
           entryFileNames: (chunk) => {
             const facade = chunk.facadeModuleId?.replaceAll("\\", "/") ?? "";
-            if (
-              (chunk.isEntry && chunk.name === "app") ||
-              facade.endsWith("/src/bootstrap.ts")
-            ) {
+            if (facade.endsWith("/src/pwa/recovery/outerAgentEntry.ts")) {
               return OUTER_AGENT_URL.slice(1);
             }
             if (facade === roleEntry.replaceAll("\\", "/")) {
@@ -550,10 +735,7 @@ export default defineConfig(({ command, mode }) => {
       open: command === "serve",
     },
     preview: {
-      headers: {
-        "Content-Security-Policy": contentSecurityPolicy,
-        ...cspPolicy.securityHeaders,
-      },
+      headers: renderCspHeaders({ cspMode, cspPolicy }),
     },
   };
 });

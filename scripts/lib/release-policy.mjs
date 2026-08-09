@@ -23,6 +23,49 @@ const hasExactKeys = (value, keys) => {
   );
 };
 
+const isRecord = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+const verifyMinimumSafetyFloorChange = (
+  policy,
+  phase,
+  activatedSafetyFloorKeys,
+) => {
+  const change = phase.minimumSafetyFloorChange;
+  if (change === undefined) return;
+  if (!isRecord(policy.minimumSafetyFloors)) {
+    throw new Error("Release policy minimumSafetyFloors must be an object");
+  }
+  if (!isRecord(change) || Object.keys(change).length === 0) {
+    throw new Error(
+      `${phase.gate} minimumSafetyFloorChange must be a non-empty object`,
+    );
+  }
+  if (phase.change !== null) {
+    throw new Error(
+      `${phase.gate} cannot change a behavior dimension and a minimum safety floor together`,
+    );
+  }
+  for (const [key, value] of Object.entries(change)) {
+    if (!Object.hasOwn(policy.minimumSafetyFloors, key)) {
+      throw new Error(
+        `${phase.gate} changes unknown minimum safety floor ${key}`,
+      );
+    }
+    if (policy.minimumSafetyFloors[key] !== value) {
+      throw new Error(
+        `${phase.gate} minimum safety floor ${key} does not reach the policy target`,
+      );
+    }
+    if (activatedSafetyFloorKeys.has(key)) {
+      throw new Error(
+        `${phase.gate} activates minimum safety floor ${key} more than once`,
+      );
+    }
+    activatedSafetyFloorKeys.add(key);
+  }
+};
+
 export const assertDimensionObject = (policy, dimensions) => {
   if (!hasExactKeys(dimensions, RELEASE_DIMENSION_KEYS)) {
     throw new Error(
@@ -100,8 +143,10 @@ export const countBehaviorDimensionChanges = (before, after) =>
 
 export const verifyPhaseSequence = (policy) => {
   let current = { ...policy.initialStandard };
+  const activatedSafetyFloorKeys = new Set();
   assertDimensionObject(policy, current);
   for (const phase of policy.phaseSequence ?? []) {
+    verifyMinimumSafetyFloorChange(policy, phase, activatedSafetyFloorKeys);
     if (phase.change === null) continue;
     if (
       phase.change === undefined ||

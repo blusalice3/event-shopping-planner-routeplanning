@@ -14,22 +14,17 @@ import {
   HallOrderPanel,
   SimpleHallDefinitionPanel,
   MapImportDialog,
-  loadBlockDetectionSettings,
 } from "../../../components/map";
-import type { PendingEventUpdate } from "../../../features/events/updateFlow";
+import type { AppOverlayCommands } from "../../../app/state/useAppOverlayController";
+import type { AppOverlayReadModel } from "../../../app/state/appOverlayState";
 import {
   formatMovePlanCount,
   type MovePlan,
 } from "../../lists/domain/movePlan";
 import type {
   BulkSortDirection,
-  CellSelectionMode,
   LayoutMode,
-  PendingCellSelection,
-  PendingVertexSelection,
-  SortState,
   VertexGuideOptions,
-  VertexSelectionMode,
 } from "../types";
 import type {
   EventMetadata,
@@ -67,8 +62,7 @@ type HallOrderPanelProps = React.ComponentProps<typeof HallOrderPanel>;
 type VisitListPanelProps = React.ComponentProps<typeof VisitListPanel>;
 type MapImportDialogProps = React.ComponentProps<typeof MapImportDialog>;
 
-type AppOverlayLayerProps = {
-  editDialogItem: ShoppingItem | null;
+type AppOverlayLayerFields = {
   items: ShoppingItem[];
   getHallsForDate: (eventDate: string) => HallDefinition[];
   handleUpdateItem: (item: ShoppingItem) => void;
@@ -77,47 +71,20 @@ type AppOverlayLayerProps = {
     newPriorityLevel: PriorityLevel,
     oldPriorityLevel: PriorityLevel,
   ) => void;
-  setEditDialogItem: React.Dispatch<React.SetStateAction<ShoppingItem | null>>;
-  itemToDelete: ShoppingItem | null;
   handleConfirmDelete: DeleteConfirmationModalProps["onConfirm"];
-  setItemToDelete: React.Dispatch<React.SetStateAction<ShoppingItem | null>>;
-  pendingEventUpdate: PendingEventUpdate | null;
   handleConfirmUpdate: UpdateConfirmationModalProps["onConfirm"];
   handleCancelUpdate: UpdateConfirmationModalProps["onCancel"];
-  showUrlUpdateDialog: boolean;
-  pendingUpdateEventName: string | null;
   eventMetadata: Record<string, EventMetadata>;
   handleUrlUpdate: UrlUpdateDialogProps["onConfirm"];
-  setShowUrlUpdateDialog: React.Dispatch<React.SetStateAction<boolean>>;
-  setPendingUpdateEventName: React.Dispatch<
-    React.SetStateAction<string | null>
-  >;
   onShowEventList: () => void;
-  showRenameDialog: boolean;
-  eventToRename: string | null;
   handleConfirmRename: EventRenameDialogProps["onConfirm"];
-  setShowRenameDialog: React.Dispatch<React.SetStateAction<boolean>>;
-  setEventToRename: React.Dispatch<React.SetStateAction<string | null>>;
-  showExportOptions: boolean;
-  exportEventName: string | null;
-  setShowExportOptions: React.Dispatch<React.SetStateAction<boolean>>;
-  setExportEventName: React.Dispatch<React.SetStateAction<string | null>>;
   handleConfirmExport: ExportOptionsDialogProps["onExport"];
   mapData: MapDataStore;
-  blockDefinitionMode: boolean;
   currentMapData: BlockDefinitionPanelProps["mapData"] | null;
-  setBlockDefinitionMode: React.Dispatch<React.SetStateAction<boolean>>;
-  setPendingCellSelection: React.Dispatch<
-    React.SetStateAction<PendingCellSelection>
-  >;
   handleUpdateBlocks: BlockDefinitionPanelProps["onUpdateBlocks"];
   handleStartCellSelection: BlockDefinitionPanelProps["onStartCellSelection"];
-  pendingCellSelection: PendingCellSelection;
-  cellSelectionMode: CellSelectionMode;
   handleConfirmCellSelection: () => void;
   handleCancelCellSelection: () => void;
-  simpleHallDefinitionMode: boolean;
-  setSimpleHallDefinitionMode: React.Dispatch<React.SetStateAction<boolean>>;
   currentMaplessHalls: HallDefinition[];
   handleUpdateMaplessHalls: SimpleHallDefinitionPanelProps["onUpdateHalls"];
   allBlocksForHallDefinition: string[];
@@ -126,8 +93,6 @@ type AppOverlayLayerProps = {
   handleSyncMaplessHallsToOtherDates: NonNullable<
     SimpleHallDefinitionPanelProps["onSyncToOtherDates"]
   >;
-  globalHallOrderPanelOpen: boolean;
-  setGlobalHallOrderPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
   globalHallOrderHalls: HallDefinition[];
   globalHallOrderRouteSettings: HallRouteSettings;
   handleUpdateGlobalHallRouteSettings: HallOrderPanelProps["onUpdateHallRouteSettings"];
@@ -135,20 +100,13 @@ type AppOverlayLayerProps = {
   handleReorderExecuteListByHallOrder: NonNullable<
     HallOrderPanelProps["onReorderExecuteList"]
   >;
-  hallDefinitionMode: boolean;
-  setHallDefinitionMode: React.Dispatch<React.SetStateAction<boolean>>;
-  setPendingVertexSelection: React.Dispatch<
-    React.SetStateAction<PendingVertexSelection>
-  >;
   currentHalls: HallDefinition[];
   handleUpdateHalls: HallDefinitionPanelProps["onUpdateHalls"];
   handleStartVertexSelection: HallDefinitionPanelProps["onStartVertexSelection"];
-  pendingVertexSelection: PendingVertexSelection;
   mapTabDates: string[];
   handleSyncPolygonHallsToOtherDates: NonNullable<
     HallDefinitionPanelProps["onSyncToOtherDates"]
   >;
-  visitListPanelOpen: boolean;
   handleVisitListClose: VisitListPanelProps["onClose"];
   visitListItems: ShoppingItem[];
   handleVisitListOrderUpdate: VisitListPanelProps["onUpdateOrder"];
@@ -156,16 +114,13 @@ type AppOverlayLayerProps = {
   layoutMode: LayoutMode;
   handleHighlightMapCell: VisitListPanelProps["onHighlightCell"];
   handleClearMapCellHighlight: VisitListPanelProps["onClearHighlight"];
-  visitListHasUnsavedChanges: boolean;
   handleVisitListConfirm: VisitListPanelProps["onConfirm"];
   handleVisitListCancel: VisitListPanelProps["onCancel"];
   handleUpdateItemPriority: NonNullable<
     VisitListPanelProps["onUpdateItemPriority"]
   >;
-  showVisitListConfirmDialog: boolean;
   handleVisitListDialogCancel: () => void;
   handleVisitListDialogConfirm: () => void;
-  vertexSelectionMode: VertexSelectionMode;
   vertexGuideOptions: VertexGuideOptions;
   setVertexGuideOptions: React.Dispatch<
     React.SetStateAction<VertexGuideOptions>
@@ -176,9 +131,7 @@ type AppOverlayLayerProps = {
   handleMapFileChange: (
     e: React.ChangeEvent<HTMLInputElement>,
   ) => void | Promise<void>;
-  mapImportDialogOpen: boolean;
-  mapImportPendingFile: File | null;
-  mapImportPendingEventName: string;
+  mapImportSavedSettings: MapImportDialogProps["savedSettings"];
   handleMapImportConfirm: MapImportDialogProps["onImport"];
   handleMapImportClose: MapImportDialogProps["onClose"];
   xlsxExecutionPort: MapImportDialogProps["xlsxExecutionPort"];
@@ -191,9 +144,7 @@ type AppOverlayLayerProps = {
   currentMode: ViewMode;
   visibleItems: ShoppingItem[];
   showHeaderBar: boolean;
-  sortLabels: Record<SortState, string>;
   sortDisplayLabel: string;
-  sortState: SortState;
   handleSortToggle: () => void;
   selectedItemIds: Set<string>;
   handleBulkSort: (direction: BulkSortDirection) => void;
@@ -205,125 +156,249 @@ type AppOverlayLayerProps = {
   hasExecuteSelection: boolean;
   executeMovePlan: MovePlan;
   handleRemoveFromExecuteColumn: (itemIds: string[]) => void;
-  smartInsertToast: string | null;
-  smartInsertToastType: "success" | "error";
+};
+
+export type AppOverlayLayerModel = {
+  readonly item: Pick<AppOverlayLayerFields, "items">;
+  readonly event: Pick<
+    AppOverlayLayerFields,
+    "activeEventDate" | "activeEventName" | "eventDates" | "eventMetadata"
+  >;
+  readonly mapEditor: Pick<
+    AppOverlayLayerFields,
+    | "allBlocksForHallDefinition"
+    | "currentHalls"
+    | "currentMapData"
+    | "currentMaplessHalls"
+    | "getGlobalHallItemCount"
+    | "getHallsForDate"
+    | "globalHallOrderHalls"
+    | "globalHallOrderRouteSettings"
+    | "mapData"
+    | "mapTabDates"
+    | "vertexGuideOptions"
+  >;
+  readonly visitList: Pick<
+    AppOverlayLayerFields,
+    "layoutMode" | "visitListHallOrder" | "visitListItems"
+  >;
+  readonly imports: Pick<
+    AppOverlayLayerFields,
+    "exportFileInputRef" | "mapFileInputRef" | "mapImportSavedSettings"
+  >;
+  readonly list: Pick<
+    AppOverlayLayerFields,
+    | "candidateMovePlan"
+    | "currentMode"
+    | "executeMovePlan"
+    | "hasCandidateSelection"
+    | "hasExecuteSelection"
+    | "mainContentVisible"
+    | "selectedItemIds"
+    | "showHeaderBar"
+    | "showMoveButtons"
+    | "sortDisplayLabel"
+    | "visibleItems"
+  >;
+};
+
+export type AppOverlayLayerActions = {
+  readonly item: Pick<
+    AppOverlayLayerFields,
+    | "handleCancelUpdate"
+    | "handleConfirmDelete"
+    | "handleConfirmUpdate"
+    | "handleUpdateHallOrderForPriorityChangeFromEdit"
+    | "handleUpdateItem"
+  >;
+  readonly event: Pick<
+    AppOverlayLayerFields,
+    | "handleConfirmExport"
+    | "handleConfirmRename"
+    | "handleUrlUpdate"
+    | "onShowEventList"
+  >;
+  readonly mapEditor: Pick<
+    AppOverlayLayerFields,
+    | "handleCancelCellSelection"
+    | "handleCancelVertexSelection"
+    | "handleConfirmCellSelection"
+    | "handleConfirmVertexSelection"
+    | "handleReorderExecuteListByHallOrder"
+    | "handleStartCellSelection"
+    | "handleStartVertexSelection"
+    | "handleSyncMaplessHallsToOtherDates"
+    | "handleSyncPolygonHallsToOtherDates"
+    | "handleUpdateBlocks"
+    | "handleUpdateGlobalHallRouteSettings"
+    | "handleUpdateHalls"
+    | "handleUpdateMaplessHalls"
+    | "setVertexGuideOptions"
+  >;
+  readonly visitList: Pick<
+    AppOverlayLayerFields,
+    | "handleClearMapCellHighlight"
+    | "handleHighlightMapCell"
+    | "handleUpdateItemPriority"
+    | "handleVisitListCancel"
+    | "handleVisitListClose"
+    | "handleVisitListConfirm"
+    | "handleVisitListDialogCancel"
+    | "handleVisitListDialogConfirm"
+    | "handleVisitListOrderUpdate"
+  >;
+  readonly imports: Pick<
+    AppOverlayLayerFields,
+    | "handleExportFileImport"
+    | "handleMapFileChange"
+    | "handleMapImportClose"
+    | "handleMapImportConfirm"
+    | "xlsxExecutionPort"
+  >;
+  readonly list: Pick<
+    AppOverlayLayerFields,
+    | "handleBulkSort"
+    | "handleClearSelection"
+    | "handleMoveToExecuteColumn"
+    | "handleRemoveFromExecuteColumn"
+    | "handleSortToggle"
+  >;
+};
+
+export type AppOverlayLayerProps = {
+  readonly overlay: AppOverlayReadModel;
+  readonly overlayCommands: AppOverlayCommands;
+  readonly model: AppOverlayLayerModel;
+  readonly actions: AppOverlayLayerActions;
 };
 
 const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
-  editDialogItem,
-  items,
-  getHallsForDate,
-  handleUpdateItem,
-  handleUpdateHallOrderForPriorityChangeFromEdit,
-  setEditDialogItem,
-  itemToDelete,
-  handleConfirmDelete,
-  setItemToDelete,
-  pendingEventUpdate,
-  handleConfirmUpdate,
-  handleCancelUpdate,
-  showUrlUpdateDialog,
-  pendingUpdateEventName,
-  eventMetadata,
-  handleUrlUpdate,
-  setShowUrlUpdateDialog,
-  setPendingUpdateEventName,
-  onShowEventList,
-  showRenameDialog,
-  eventToRename,
-  handleConfirmRename,
-  setShowRenameDialog,
-  setEventToRename,
-  showExportOptions,
-  exportEventName,
-  setShowExportOptions,
-  setExportEventName,
-  handleConfirmExport,
-  mapData,
-  blockDefinitionMode,
-  currentMapData,
-  setBlockDefinitionMode,
-  setPendingCellSelection,
-  handleUpdateBlocks,
-  handleStartCellSelection,
-  pendingCellSelection,
-  cellSelectionMode,
-  handleConfirmCellSelection,
-  handleCancelCellSelection,
-  simpleHallDefinitionMode,
-  setSimpleHallDefinitionMode,
-  currentMaplessHalls,
-  handleUpdateMaplessHalls,
-  allBlocksForHallDefinition,
-  eventDates,
-  activeEventDate,
-  handleSyncMaplessHallsToOtherDates,
-  globalHallOrderPanelOpen,
-  setGlobalHallOrderPanelOpen,
-  globalHallOrderHalls,
-  globalHallOrderRouteSettings,
-  handleUpdateGlobalHallRouteSettings,
-  getGlobalHallItemCount,
-  handleReorderExecuteListByHallOrder,
-  hallDefinitionMode,
-  setHallDefinitionMode,
-  setPendingVertexSelection,
-  currentHalls,
-  handleUpdateHalls,
-  handleStartVertexSelection,
-  pendingVertexSelection,
-  mapTabDates,
-  handleSyncPolygonHallsToOtherDates,
-  visitListPanelOpen,
-  handleVisitListClose,
-  visitListItems,
-  handleVisitListOrderUpdate,
-  visitListHallOrder,
-  layoutMode,
-  handleHighlightMapCell,
-  handleClearMapCellHighlight,
-  visitListHasUnsavedChanges,
-  handleVisitListConfirm,
-  handleVisitListCancel,
-  handleUpdateItemPriority,
-  showVisitListConfirmDialog,
-  handleVisitListDialogCancel,
-  handleVisitListDialogConfirm,
-  vertexSelectionMode,
-  vertexGuideOptions,
-  setVertexGuideOptions,
-  handleConfirmVertexSelection,
-  handleCancelVertexSelection,
-  mapFileInputRef,
-  handleMapFileChange,
-  mapImportDialogOpen,
-  mapImportPendingFile,
-  mapImportPendingEventName,
-  handleMapImportConfirm,
-  handleMapImportClose,
-  xlsxExecutionPort,
-  exportFileInputRef,
-  handleExportFileImport,
-  activeEventName,
-  mainContentVisible,
-  currentMode,
-  visibleItems,
-  showHeaderBar,
-  sortDisplayLabel,
-  handleSortToggle,
-  selectedItemIds,
-  handleBulkSort,
-  handleClearSelection,
-  showMoveButtons,
-  hasCandidateSelection,
-  candidateMovePlan,
-  handleMoveToExecuteColumn,
-  hasExecuteSelection,
-  executeMovePlan,
-  handleRemoveFromExecuteColumn,
-  smartInsertToast,
-  smartInsertToastType,
+  overlay,
+  overlayCommands,
+  model,
+  actions,
 }) => {
+  const {
+    item: { items },
+    event: { activeEventDate, activeEventName, eventDates, eventMetadata },
+    mapEditor: {
+      allBlocksForHallDefinition,
+      currentHalls,
+      currentMapData,
+      currentMaplessHalls,
+      getGlobalHallItemCount,
+      getHallsForDate,
+      globalHallOrderHalls,
+      globalHallOrderRouteSettings,
+      mapData,
+      mapTabDates,
+      vertexGuideOptions,
+    },
+    visitList: { layoutMode, visitListHallOrder, visitListItems },
+    imports: { exportFileInputRef, mapFileInputRef, mapImportSavedSettings },
+    list: {
+      candidateMovePlan,
+      currentMode,
+      executeMovePlan,
+      hasCandidateSelection,
+      hasExecuteSelection,
+      mainContentVisible,
+      selectedItemIds,
+      showHeaderBar,
+      showMoveButtons,
+      sortDisplayLabel,
+      visibleItems,
+    },
+  } = model;
+  const {
+    item: {
+      handleCancelUpdate,
+      handleConfirmDelete,
+      handleConfirmUpdate,
+      handleUpdateHallOrderForPriorityChangeFromEdit,
+      handleUpdateItem,
+    },
+    event: {
+      handleConfirmExport,
+      handleConfirmRename,
+      handleUrlUpdate,
+      onShowEventList,
+    },
+    mapEditor: {
+      handleCancelCellSelection,
+      handleCancelVertexSelection,
+      handleConfirmCellSelection,
+      handleConfirmVertexSelection,
+      handleReorderExecuteListByHallOrder,
+      handleStartCellSelection,
+      handleStartVertexSelection,
+      handleSyncMaplessHallsToOtherDates,
+      handleSyncPolygonHallsToOtherDates,
+      handleUpdateBlocks,
+      handleUpdateGlobalHallRouteSettings,
+      handleUpdateHalls,
+      handleUpdateMaplessHalls,
+      setVertexGuideOptions,
+    },
+    visitList: {
+      handleClearMapCellHighlight,
+      handleHighlightMapCell,
+      handleUpdateItemPriority,
+      handleVisitListCancel,
+      handleVisitListClose,
+      handleVisitListConfirm,
+      handleVisitListDialogCancel,
+      handleVisitListDialogConfirm,
+      handleVisitListOrderUpdate,
+    },
+    imports: {
+      handleExportFileImport,
+      handleMapFileChange,
+      handleMapImportClose,
+      handleMapImportConfirm,
+      xlsxExecutionPort,
+    },
+    list: {
+      handleBulkSort,
+      handleClearSelection,
+      handleMoveToExecuteColumn,
+      handleRemoveFromExecuteColumn,
+      handleSortToggle,
+    },
+  } = actions;
+  const {
+    editDialogItem,
+    itemToDelete,
+    pendingEventUpdate,
+    showUrlUpdateDialog,
+    pendingUpdateEventName,
+    showRenameDialog,
+    eventToRename,
+    showExportOptions,
+    exportEventName,
+    blockDefinitionMode,
+    pendingCellSelection,
+    cellSelectionMode,
+    simpleHallDefinitionMode,
+    globalHallOrderPanelOpen,
+    hallDefinitionMode,
+    pendingVertexSelection,
+    visitListPanelOpen,
+    visitListHasUnsavedChanges,
+    showVisitListConfirmDialog,
+    vertexSelectionMode,
+    mapImportDialogOpen,
+    mapImportPendingFile,
+    mapImportPendingEventName,
+    smartInsertToast,
+    smartInsertToastType,
+  } = overlay;
+  const {
+    item: itemOverlayCommands,
+    event: eventOverlayCommands,
+    mapEditor: mapEditorOverlayCommands,
+  } = overlayCommands;
+
   return (
     <>
       {editDialogItem && (
@@ -348,7 +423,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
                 prevPriority,
               );
             }
-            setEditDialogItem(null);
+            itemOverlayCommands.confirm();
             setTimeout(() => {
               const element = document.querySelector(
                 `[data-item-id="${updatedItem.id}"]`,
@@ -361,7 +436,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
           onPriorityChange={() => {
             /* no-op: priority 変更は onSave 内で統合処理済み */
           }}
-          onClose={() => setEditDialogItem(null)}
+          onClose={itemOverlayCommands.close}
         />
       )}
 
@@ -369,7 +444,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
         <DeleteConfirmationModal
           item={itemToDelete}
           onConfirm={handleConfirmDelete}
-          onCancel={() => setItemToDelete(null)}
+          onCancel={itemOverlayCommands.close}
         />
       )}
 
@@ -406,8 +481,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
           }
           onConfirm={handleUrlUpdate}
           onCancel={() => {
-            setShowUrlUpdateDialog(false);
-            setPendingUpdateEventName(null);
+            eventOverlayCommands.close();
             onShowEventList();
           }}
         />
@@ -417,20 +491,14 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
         <EventRenameDialog
           currentName={eventToRename}
           onConfirm={handleConfirmRename}
-          onCancel={() => {
-            setShowRenameDialog(false);
-            setEventToRename(null);
-          }}
+          onCancel={eventOverlayCommands.close}
         />
       )}
 
       {showExportOptions && exportEventName && (
         <ExportOptionsDialog
           isOpen={showExportOptions}
-          onClose={() => {
-            setShowExportOptions(false);
-            setExportEventName(null);
-          }}
+          onClose={eventOverlayCommands.close}
           onExport={handleConfirmExport}
           hasMapData={
             !!(
@@ -445,15 +513,14 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
       {blockDefinitionMode && currentMapData && (
         <BlockDefinitionPanel
           isOpen={blockDefinitionMode}
-          onClose={() => {
-            setBlockDefinitionMode(false);
-            setPendingCellSelection(null);
-          }}
+          onClose={mapEditorOverlayCommands.close}
           mapData={currentMapData}
           onUpdateBlocks={handleUpdateBlocks}
           onStartCellSelection={handleStartCellSelection}
           pendingCellSelection={pendingCellSelection}
-          onClearPendingCellSelection={() => setPendingCellSelection(null)}
+          onClearPendingCellSelection={
+            mapEditorOverlayCommands.clearPendingCellSelection
+          }
         />
       )}
 
@@ -522,7 +589,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
       {simpleHallDefinitionMode && (
         <SimpleHallDefinitionPanel
           isOpen={simpleHallDefinitionMode}
-          onClose={() => setSimpleHallDefinitionMode(false)}
+          onClose={mapEditorOverlayCommands.close}
           halls={currentMaplessHalls}
           onUpdateHalls={handleUpdateMaplessHalls}
           availableBlocks={allBlocksForHallDefinition}
@@ -535,7 +602,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
       {globalHallOrderPanelOpen && (
         <HallOrderPanel
           isOpen={globalHallOrderPanelOpen}
-          onClose={() => setGlobalHallOrderPanelOpen(false)}
+          onClose={mapEditorOverlayCommands.close}
           halls={globalHallOrderHalls}
           hallRouteSettings={globalHallOrderRouteSettings}
           onUpdateHallRouteSettings={handleUpdateGlobalHallRouteSettings}
@@ -547,16 +614,15 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
       {hallDefinitionMode && currentMapData && (
         <HallDefinitionPanel
           isOpen={hallDefinitionMode}
-          onClose={() => {
-            setHallDefinitionMode(false);
-            setPendingVertexSelection(null);
-          }}
+          onClose={mapEditorOverlayCommands.close}
           mapData={currentMapData}
           halls={currentHalls}
           onUpdateHalls={handleUpdateHalls}
           onStartVertexSelection={handleStartVertexSelection}
           pendingVertexSelection={pendingVertexSelection}
-          onClearPendingVertexSelection={() => setPendingVertexSelection(null)}
+          onClearPendingVertexSelection={
+            mapEditorOverlayCommands.clearPendingVertexSelection
+          }
           eventDates={eventDates}
           activeEventDate={activeEventDate}
           mapTabDates={mapTabDates}
@@ -701,11 +767,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
         isOpen={mapImportDialogOpen}
         file={mapImportPendingFile}
         eventName={mapImportPendingEventName}
-        savedSettings={
-          mapImportPendingEventName
-            ? loadBlockDetectionSettings(mapImportPendingEventName)
-            : null
-        }
+        savedSettings={mapImportSavedSettings}
         onImport={handleMapImportConfirm}
         onClose={handleMapImportClose}
         xlsxExecutionPort={xlsxExecutionPort}
@@ -717,6 +779,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
         accept=".xlsx"
         onChange={handleExportFileImport}
         className="hidden"
+        aria-label="Excelファイルを選択"
       />
 
       {activeEventName && items.length > 0 && mainContentVisible && (

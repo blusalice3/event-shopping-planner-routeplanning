@@ -10,9 +10,11 @@ import {
   produceCompanionRecoveryDrill,
   produceContinuousProductionProbe,
 } from "./acceptanceEvidenceInputs.mjs";
+import { resolveReviewedAcceptanceCollectorAuthority } from "./collect-acceptance-evidence-source.mjs";
 import { readCurrentReleaseState } from "./currentReleaseState.mjs";
 import { createPostgresReleaseStateStore } from "./postgresStore.mjs";
 import { assertProtectedWorkflowEnvironment } from "./protected-release.mjs";
+import { collectReviewedWorkflowRunAuthority } from "./reviewedWorkflowRunAuthority.mjs";
 import {
   NAMESPACE_PATTERN,
   SHA256_PATTERN,
@@ -28,6 +30,8 @@ const root = path.resolve(
 const MAX_INPUT_BYTES = 16 * 1024 * 1024;
 const COMMANDS = ["companion-recovery", "continuous-probe"];
 const FLAGS = [
+  "--collector-receipt",
+  "--collector-receipt-sha256",
   "--namespace",
   "--output",
   "--release-evidence",
@@ -69,6 +73,7 @@ export const parseAcceptanceEvidenceInputArguments = (arguments_) => {
   if (
     Object.keys(values).length !== FLAGS.length ||
     !NAMESPACE_PATTERN.test(values["--namespace"]) ||
+    !SHA256_PATTERN.test(values["--collector-receipt-sha256"]) ||
     !SHA256_PATTERN.test(values["--release-evidence-sha256"]) ||
     !SHA256_PATTERN.test(values["--source-sha256"])
   ) {
@@ -79,10 +84,9 @@ export const parseAcceptanceEvidenceInputArguments = (arguments_) => {
 
 const resolveDistinctPaths = (values, workingDirectory) => {
   const paths = Object.fromEntries(
-    ["--release-evidence", "--source", "--output"].map((flag) => [
-      flag,
-      path.resolve(workingDirectory, values[flag]),
-    ]),
+    ["--collector-receipt", "--release-evidence", "--source", "--output"].map(
+      (flag) => [flag, path.resolve(workingDirectory, values[flag])],
+    ),
   );
   const identities = Object.values(paths).map((value) =>
     process.platform === "win32" ? value.toLocaleLowerCase("en-US") : value,
@@ -177,6 +181,8 @@ export const runAcceptanceEvidenceInputProducerCli = async (
     readState = readCurrentReleaseState,
     produceContinuous = produceContinuousProductionProbe,
     produceRecovery = produceCompanionRecoveryDrill,
+    resolveCollectorAuthority = resolveReviewedAcceptanceCollectorAuthority,
+    collectRunAuthority = collectReviewedWorkflowRunAuthority,
     clock = Date.now,
   } = {},
 ) => {
@@ -184,14 +190,19 @@ export const runAcceptanceEvidenceInputProducerCli = async (
   const paths = resolveDistinctPaths(parsed.values, workingDirectory);
   await assertOutputAvailable(paths["--output"], lstatImpl);
   const inputOptions = { lstatImpl, readFileImpl };
-  const [releaseAEvidenceBytes, sourceBytes] = await Promise.all([
-    readBoundedRegularFile(paths["--release-evidence"], inputOptions),
-    readBoundedRegularFile(paths["--source"], inputOptions),
-  ]);
+  const [collectorReceiptBytes, releaseAEvidenceBytes, sourceBytes] =
+    await Promise.all([
+      readBoundedRegularFile(paths["--collector-receipt"], inputOptions),
+      readBoundedRegularFile(paths["--release-evidence"], inputOptions),
+      readBoundedRegularFile(paths["--source"], inputOptions),
+    ]);
+  const expectedCollectorReceiptSha256 =
+    parsed.values["--collector-receipt-sha256"];
   const expectedReleaseAEvidenceSha256 =
     parsed.values["--release-evidence-sha256"];
   const expectedSourceSha256 = parsed.values["--source-sha256"];
   if (
+    sha256Bytes(collectorReceiptBytes) !== expectedCollectorReceiptSha256 ||
     sha256Bytes(releaseAEvidenceBytes) !== expectedReleaseAEvidenceSha256 ||
     sha256Bytes(sourceBytes) !== expectedSourceSha256
   ) {
@@ -242,13 +253,36 @@ export const runAcceptanceEvidenceInputProducerCli = async (
     if (!Number.isFinite(nowMilliseconds)) {
       throw new Error("Acceptance evidence producer clock is invalid");
     }
+    const sourceAuthority = await resolveCollectorAuthority({
+      store,
+      namespace,
+      input: {
+        bytes: collectorReceiptBytes,
+        value: parseCanonicalJsonBytes(
+          collectorReceiptBytes,
+          "Finalized acceptance collector receipt",
+        ),
+      },
+      expectedSourceSha256,
+      expectedReleaseAEvidenceSha256,
+      currentRunId: runId,
+      pendingAcceptance,
+      approvalPolicy,
+      environment,
+      allowedCommands: ["finalize"],
+      collectRunAuthority,
+    });
     const common = {
+      store,
+      current,
       namespace,
       pendingAcceptance,
       releaseAEvidenceBytes,
       expectedReleaseAEvidenceSha256,
       sourceBytes,
       expectedSourceSha256,
+      sourceWorkflowAuthority: sourceAuthority.workflowRunAuthority.receipt,
+      approvalPolicy,
       nowMilliseconds,
     };
     const produced =
@@ -259,6 +293,7 @@ export const runAcceptanceEvidenceInputProducerCli = async (
           })
         : await produceRecovery({
             ...common,
+            providerPolicy,
             futureClockSkewSeconds:
               providerPolicy.observationPolicy.maxFutureClockSkewSeconds,
           });

@@ -12,6 +12,9 @@ import {
   contentAddressedObjectPath,
   writeContentAddressedObject,
 } from "../lib/content-addressed-store.mjs";
+import { renderCspHeaders } from "../lib/csp-delivery.mjs";
+import { OUTER_AGENT_ENTRY_MODULE } from "../lib/outer-agent-contract.mjs";
+import { POLICY_ACTIVATION_QA_BUILD_PURPOSE } from "../lib/release-build-input.mjs";
 import { computeVariantId } from "../lib/release-policy.mjs";
 import { produceDeploymentBinding } from "./deploymentBindingProducer.mjs";
 import { providerConfigurationHash } from "./providerConfiguration.mjs";
@@ -20,6 +23,11 @@ const NAMESPACE = "deployment-producer-test";
 const SOURCE_SHA = "1".repeat(40);
 const FIXED_TIME = "2026-08-06T00:00:00.000Z";
 const FIXED_NOW = Date.parse(FIXED_TIME);
+const BUILD_AUTHORITY_SHA = "6".repeat(64);
+const BUILD_AUTHORITY = Object.freeze({
+  uri: `release-state://${NAMESPACE}/evidence/${BUILD_AUTHORITY_SHA}`,
+  sha256: BUILD_AUTHORITY_SHA,
+});
 const DEPLOYMENT_URL = "https://immutable-binding-test.vercel.app";
 const CSP_POLICY = {
   schemaVersion: 1,
@@ -67,6 +75,7 @@ const PROVIDER_POLICY = {
   ownedProductionDomains: ["app.example.test"],
   productionEnvironmentName: "production",
   requiredEnvironmentNames: ["REQUIRED_ENV"],
+  cspReportEnvironmentNames: [],
   forbiddenEnvironmentNames: ["FORBIDDEN_ENV"],
   hstsOwner: "provider",
   hstsPolicy: {
@@ -177,11 +186,6 @@ const observationValidator = (observation, policy, now) => {
   return observation;
 };
 
-const buildCspHeader = () =>
-  Object.entries(CSP_POLICY.directives)
-    .map(([directive, values]) => `${directive} ${values.join(" ")}`)
-    .join("; ");
-
 const createFixture = async ({
   environmentReceipt = true,
   observationTime = FIXED_TIME,
@@ -231,11 +235,11 @@ const createFixture = async ({
     sourceSha: SOURCE_SHA,
     releaseRole: "standard",
     variantId,
-    entryModule: "src/bootstrap.ts",
+    entryModule: OUTER_AGENT_ENTRY_MODULE,
     entryFile: "/assets/release-role.js",
     modules: [
       {
-        id: "src/bootstrap.ts",
+        id: OUTER_AGENT_ENTRY_MODULE,
         external: false,
         staticImports: [],
         dynamicImports: [],
@@ -248,7 +252,7 @@ const createFixture = async ({
         size: roleBytes.length,
         staticImports: [],
         dynamicImports: [],
-        modules: ["src/bootstrap.ts"],
+        modules: [OUTER_AGENT_ENTRY_MODULE],
       },
     ],
   };
@@ -299,6 +303,10 @@ const createFixture = async ({
     variantId,
     releaseRole: "standard",
     dimensions: STANDARD_DIMENSIONS,
+    buildAuthority: BUILD_AUTHORITY,
+    targetGate: "P0-RELEASE",
+    buildPurpose: "production",
+    promotable: true,
     buildInputClosureHash: "7".repeat(64),
     lockfileSha256: "8".repeat(64),
     toolchainPolicyHash: sha256Json(TOOLCHAIN_POLICY),
@@ -342,6 +350,10 @@ const createFixture = async ({
     packageKind: "source-hardened-pair",
     sourceSha: SOURCE_SHA,
     buildId: SOURCE_SHA,
+    buildAuthority: BUILD_AUTHORITY,
+    targetGate: "P0-RELEASE",
+    buildPurpose: "production",
+    promotable: true,
     toolchainPolicyHash: manifest.toolchainPolicyHash,
     providerConfigurationHash: manifest.providerConfigurationHash,
     providerPolicyHash: manifest.providerPolicyHash,
@@ -451,7 +463,14 @@ const createFixture = async ({
                   `/release-identity.${SOURCE_SHA}.${variantId}.json`
                 ? "public, max-age=31536000, immutable"
                 : null,
-        "content-security-policy": buildCspHeader(),
+        ...Object.fromEntries(
+          Object.entries(
+            renderCspHeaders({
+              cspMode: manifest.dimensions.cspMode,
+              cspPolicy: CSP_POLICY,
+            }),
+          ).map(([name, value]) => [name.toLowerCase(), value]),
+        ),
         "x-content-type-options": "nosniff",
         "x-frame-options": "DENY",
         "referrer-policy": "strict-origin-when-cross-origin",
@@ -551,6 +570,8 @@ test("reruns production verification, probes immutable routes, and stores a clos
       ),
     );
     for (const reference of [
+      result.binding.artifactArchive,
+      result.binding.artifactArchiveAvailability,
       result.binding.packageIndex,
       result.binding.artifactManifest,
       result.binding.providerEvidence,
@@ -566,6 +587,20 @@ test("reruns production verification, probes immutable routes, and stores a clos
         `release-state://${NAMESPACE}/evidence/${reference.sha256}`,
       );
     }
+    assert.equal(
+      fixture.store.values.get(result.binding.artifactArchive.sha256).mediaType,
+      "application/vnd.event-shopping-planner.artifact-archive+zip;version=1",
+    );
+    const archiveAvailability = JSON.parse(
+      fixture.store.values
+        .get(result.binding.artifactArchiveAvailability.sha256)
+        .bytes.toString("utf8"),
+    );
+    assert.equal(archiveAvailability.availability, "available");
+    assert.equal(
+      archiveAvailability.artifactArchive.sha256,
+      result.binding.artifactArchive.sha256,
+    );
     const routeEvidence = JSON.parse(
       fixture.store.values
         .get(result.routeProbeReference.sha256)
@@ -584,6 +619,24 @@ test("reruns production verification, probes immutable routes, and stores a clos
         .bytes.toString("utf8"),
     );
     assert.equal(environmentEvidence.receipt.kind, "environment-presence");
+  });
+});
+
+test("production deployment binding rejects a policy QA package index", async () => {
+  await withFixture({}, async (fixture) => {
+    const qaIndex = structuredClone(fixture.index);
+    qaIndex.buildPurpose = POLICY_ACTIVATION_QA_BUILD_PURPOSE;
+    qaIndex.promotable = false;
+    await writeFile(
+      path.join(fixture.packageRoot, "release-package-index.json"),
+      canonicalJsonBytes(qaIndex),
+    );
+    await assert.rejects(
+      produceDeploymentBinding(fixture.options, fixture.dependencies),
+      /purpose\/promotable binding is invalid/,
+    );
+    assert.deepEqual(fixture.events, ["verify"]);
+    assert.equal(fixture.store.values.size, 0);
   });
 });
 

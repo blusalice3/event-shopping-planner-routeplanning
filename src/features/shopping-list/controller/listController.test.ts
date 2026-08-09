@@ -89,4 +89,31 @@ describe("shoppingListControllerReducer", () => {
       } as never),
     ).toBe(state);
   });
+
+  it("preserves state identity for no-op external synchronization", () => {
+    const model = buildListRows({ items: [item("1"), item("2")] });
+    const state = createShoppingListControllerState(["2", "1"]);
+
+    expect(
+      shoppingListControllerReducer(
+        model,
+        state,
+        shoppingListCommand.replaceSelection(["1", "missing", "2"]),
+      ),
+    ).toBe(state);
+    expect(
+      shoppingListControllerReducer(
+        model,
+        state,
+        shoppingListCommand.focusRow(null),
+      ),
+    ).toBe(state);
+    expect(
+      shoppingListControllerReducer(
+        model,
+        state,
+        shoppingListCommand.reconcileModel(),
+      ),
+    ).toBe(state);
+  });
 });

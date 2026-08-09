@@ -21,9 +21,29 @@ const eventItem = {
 const createPorts = (
   overrides: Partial<EventLifecycleCommandPorts> = {},
 ): EventLifecycleCommandPorts => ({
+  persistenceCommands: {
+    deleteEventAtomically: vi.fn(async () => undefined),
+    renameEventAtomically: vi.fn(async () => undefined),
+  },
+  flushPendingSave: vi.fn(async () => undefined),
   activeEventName: "イベントA",
   eventToRename: "イベントA",
   eventLists: { イベントA: [eventItem] },
+  eventMetadata: {
+    イベントA: {
+      spreadsheetUrl: "",
+      spreadsheetSheetName: "",
+      lastImportDate: "2026-08-09T00:00:00.000Z",
+    },
+  },
+  executeModeItems: { イベントA: {} },
+  dayModes: { イベントA: {} },
+  mapData: { イベントA: {} },
+  mapRotationSettings: { イベントA: {} },
+  routeSettings: { イベントA: {} },
+  hallDefinitions: { イベントA: {} },
+  hallRouteSettings: { イベントA: {} },
+  mapViewportSettings: { イベントA: {} },
   navigation: {
     showEventList: vi.fn(),
     showImport: vi.fn(),
@@ -37,7 +57,7 @@ const createPorts = (
   notify: vi.fn(),
   clearSelection: vi.fn(),
   setSelectedBlockFilters: vi.fn(),
-  setPendingEventUpdate: vi.fn(),
+  closeEventUpdateForEvent: vi.fn(),
   setEventLists: vi.fn(),
   setEventMetadata: vi.fn(),
   updateExecuteModeItems: vi.fn((update) => update({})),
@@ -49,8 +69,8 @@ const createPorts = (
   setHallRouteSettings: vi.fn(),
   setMapViewportSettings: vi.fn(),
   setFocusModeSessions: vi.fn(),
-  setEventToRename: vi.fn(),
-  setShowRenameDialog: vi.fn(),
+  openRename: vi.fn(),
+  confirmEventOverlay: vi.fn(),
   ...overrides,
 });
 
@@ -69,31 +89,92 @@ describe("useEventLifecycleCommands", () => {
     expect(ports.setSelectedBlockFilters).toHaveBeenCalledWith(new Set());
   });
 
-  it("fans delete out to every persisted section and typed navigation", () => {
+  it("commits delete atomically before updating every state section", async () => {
     const ports = createPorts();
     const { result } = renderHook(() => useEventLifecycleCommands(ports));
 
-    act(() => result.current.deleteEvent("イベントA"));
+    await act(() => result.current.deleteEvent("イベントA"));
 
     expect(ports.setEventLists).toHaveBeenCalledOnce();
     expect(ports.setMapData).toHaveBeenCalledOnce();
     expect(ports.setMapViewportSettings).toHaveBeenCalledOnce();
+    expect(
+      ports.persistenceCommands.deleteEventAtomically,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({ eventLists: ports.eventLists }),
+      "イベントA",
+    );
     expect(ports.navigation.removeEvent).toHaveBeenCalledWith("イベントA");
   });
 
-  it("renames persisted sections and the active typed screen together", () => {
+  it("commits rename atomically before updating state and the active screen", async () => {
     const ports = createPorts();
     const { result } = renderHook(() => useEventLifecycleCommands(ports));
 
-    act(() => result.current.confirmRename("イベントB"));
+    await act(() => result.current.confirmRename("イベントB"));
 
     expect(ports.setEventLists).toHaveBeenCalledOnce();
     expect(ports.setHallDefinitions).toHaveBeenCalledOnce();
+    expect(
+      ports.persistenceCommands.renameEventAtomically,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({ eventLists: ports.eventLists }),
+      "イベントA",
+      "イベントB",
+    );
     expect(ports.navigation.renameActiveEvent).toHaveBeenCalledWith(
       "イベントA",
       "イベントB",
     );
-    expect(ports.setShowRenameDialog).toHaveBeenLastCalledWith(false);
-    expect(ports.setEventToRename).toHaveBeenLastCalledWith(null);
+    expect(ports.confirmEventOverlay).toHaveBeenCalledOnce();
   });
+
+  it("routes rename and matching event-update closure through overlay commands", async () => {
+    const ports = createPorts();
+    const { result } = renderHook(() => useEventLifecycleCommands(ports));
+
+    await act(async () => {
+      result.current.requestRename("イベントA");
+      await result.current.deleteEvent("イベントA");
+    });
+
+    expect(ports.openRename).toHaveBeenCalledWith("イベントA");
+    expect(ports.closeEventUpdateForEvent).toHaveBeenCalledWith("イベントA");
+  });
+
+  it.each(["delete", "rename"] as const)(
+    "leaves every UI state unchanged when atomic %s fails",
+    async (operation) => {
+      const failure = vi.fn(async () => {
+        throw new Error("transaction aborted");
+      });
+      const ports = createPorts({
+        persistenceCommands: {
+          deleteEventAtomically:
+            operation === "delete" ? failure : vi.fn(async () => undefined),
+          renameEventAtomically:
+            operation === "rename" ? failure : vi.fn(async () => undefined),
+        },
+      });
+      const { result } = renderHook(() => useEventLifecycleCommands(ports));
+
+      await act(async () => {
+        if (operation === "delete") {
+          await result.current.deleteEvent("イベントA");
+        } else {
+          await result.current.confirmRename("イベントB");
+        }
+      });
+
+      expect(ports.setEventLists).not.toHaveBeenCalled();
+      expect(ports.setEventMetadata).not.toHaveBeenCalled();
+      expect(ports.updateExecuteModeItems).not.toHaveBeenCalled();
+      expect(ports.setMapData).not.toHaveBeenCalled();
+      expect(ports.setMapViewportSettings).not.toHaveBeenCalled();
+      expect(ports.setFocusModeSessions).not.toHaveBeenCalled();
+      expect(ports.navigation.removeEvent).not.toHaveBeenCalled();
+      expect(ports.navigation.renameActiveEvent).not.toHaveBeenCalled();
+      expect(ports.notify).toHaveBeenCalledOnce();
+    },
+  );
 });

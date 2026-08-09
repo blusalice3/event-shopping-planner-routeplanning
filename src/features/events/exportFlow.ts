@@ -19,6 +19,7 @@ import {
   buildEventWorkbookFileName,
 } from "../../xlsx/domain/eventWorkbook";
 import type { XlsxExecutionPort } from "../../xlsx/port/XlsxExecutionPort";
+import type { XlsxProgressListener } from "../../xlsx/port/XlsxExecutionPort";
 
 type ExportStores = {
   executeModeItems: Record<string, ExecuteModeItems>;
@@ -47,6 +48,7 @@ export async function buildEventExportFile(
   metadata: EventMetadata | undefined,
   stores: ExportStores,
   now: Date = new Date(),
+  onProgress?: XlsxProgressListener,
 ): Promise<{ bytes: Uint8Array; filename: string }> {
   const snapshot = buildEventWorkbookExportSnapshot(eventName, items, options, {
     metadata,
@@ -60,7 +62,11 @@ export async function buildEventExportFile(
     hallRouteSettings: stores.hallRouteSettings,
     blockDetectionSettings: stores.blockDetectionSettings,
   });
-  const bytes = await executionPort.exportWorkbook(snapshot, signal);
+  const bytes = await executionPort.exportWorkbook(
+    snapshot,
+    signal,
+    onProgress,
+  );
 
   return {
     bytes,

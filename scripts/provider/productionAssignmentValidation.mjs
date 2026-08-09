@@ -678,19 +678,27 @@ const validatePromotionReceipt = ({
     throw new Error("Promotion receipt prepared event differs");
   }
   assertExactKeys(receipt.target, TARGET_KEYS, "Promotion target");
-  assertExactKeys(receipt.companion, COMPANION_KEYS, "Promotion companion");
+  if (companion === null) {
+    if (receipt.companion !== null) {
+      throw new Error("Containment promotion receipt claimed a companion");
+    }
+  } else {
+    assertExactKeys(receipt.companion, COMPANION_KEYS, "Promotion companion");
+  }
   if (
     receipt.target.bindingId !== target.bindingId ||
-    receipt.target.releaseRole !== "standard" ||
+    receipt.target.releaseRole !== target.releaseRole ||
     receipt.target.providerDeploymentId !== target.providerDeploymentId ||
     receipt.target.deploymentUrl !== target.deploymentUrl ||
     receipt.target.providerDeploymentEvidenceSha256 !==
       target.providerEvidence.sha256 ||
-    receipt.companion.bindingId !== companion.bindingId ||
-    receipt.companion.releaseRole !== "containment" ||
-    receipt.companion.providerDeploymentId !== companion.providerDeploymentId ||
-    receipt.companion.providerDeploymentEvidenceSha256 !==
-      companion.providerEvidence.sha256
+    (companion !== null &&
+      (receipt.companion.bindingId !== companion.bindingId ||
+        receipt.companion.releaseRole !== "containment" ||
+        receipt.companion.providerDeploymentId !==
+          companion.providerDeploymentId ||
+        receipt.companion.providerDeploymentEvidenceSha256 !==
+          companion.providerEvidence.sha256))
   ) {
     throw new Error("Promotion receipt target pair differs from pending state");
   }
@@ -1947,7 +1955,6 @@ export const prepareProductionAssignmentAuthority = async (
     {
       store: context.store,
       namespace: context.namespace,
-      providerPolicy: context.providerPolicy,
       providerToken: context.validatedPrepared.token,
       fetchImpl,
     },

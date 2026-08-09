@@ -15,9 +15,17 @@
   "credentialRotationDays": 90,
   "productionCaSha256": null,
   "localContainerImage": null,
-  "migrationChecksums": {
-    "0001_release_state_store.sql": "772493b153e661e284acc4a7442b8c1b6b6b9a803fd7e97af4b3dc7ab246f553"
-  },
+  "migrations": [
+    {
+      "path": "ops/release-state/migrations/0001_release_state_store.sql",
+      "sha256": "772493b153e661e284acc4a7442b8c1b6b6b9a803fd7e97af4b3dc7ab246f553"
+    },
+    {
+      "path": "ops/release-state/migrations/0002_acceptance_evidence_chains.sql",
+      "sha256": "2fdd3fc7ac461fc3c68036acc2cf24873726869982a102f5116eb244726bf1c4"
+    }
+  ],
+  "migrationSetSha256": "de2c488eb4f20f4ca167bb91728bb04b147388df25b69b94f0e082a79443d21b",
   "blockerCodes": [
     "control-database-host-unconfigured",
     "control-database-name-unconfigured",

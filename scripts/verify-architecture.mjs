@@ -208,6 +208,25 @@ for (const rule of policy.forbiddenImportRules) {
   }
 }
 
+for (const rule of policy.requiredDirectImportRules ?? []) {
+  if (!sourceFileSet.has(rule.source)) {
+    errors.push(
+      `${rule.id}: required import source is missing: ${rule.source}`,
+    );
+    continue;
+  }
+  const directTargets = new Set(graph.get(rule.source) ?? []);
+  for (const target of rule.targets) {
+    if (!sourceFileSet.has(target)) {
+      errors.push(`${rule.id}: required import target is missing: ${target}`);
+      continue;
+    }
+    if (!directTargets.has(target)) {
+      errors.push(`${rule.id}: ${rule.source} must directly import ${target}`);
+    }
+  }
+}
+
 for (const rule of policy.forbiddenTextRules) {
   const sourcePattern = new RegExp(rule.sourceRegex);
   const textPattern = new RegExp(rule.pattern, "gu");

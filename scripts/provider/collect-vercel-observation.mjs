@@ -3,6 +3,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { resolveProviderEnvironmentContract } from "../lib/csp-delivery.mjs";
 import {
   canonicalJsonBytes,
   parseJsonStrict,
@@ -197,10 +198,18 @@ export const assertProviderPolicyConfigured = (policy) => {
     "requiredEnvironmentNames",
   );
   sortedUniqueStrings(
+    policy.cspReportEnvironmentNames,
+    "cspReportEnvironmentNames",
+    true,
+  );
+  sortedUniqueStrings(
     policy.forbiddenEnvironmentNames,
     "forbiddenEnvironmentNames",
     true,
   );
+  for (const cspMode of ["none", "report-only", "enforced"]) {
+    resolveProviderEnvironmentContract(policy, cspMode);
+  }
   if (
     !isRecord(policy.wafRules) ||
     Object.values(policy.wafRules).some(

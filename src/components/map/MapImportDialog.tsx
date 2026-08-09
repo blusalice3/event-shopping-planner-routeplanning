@@ -14,10 +14,6 @@ import {
 } from "../../types/map";
 import type { ParseMapFileResult } from "../../xlsx/domain/mapWorkbook";
 import type { XlsxExecutionPort } from "../../xlsx/port/XlsxExecutionPort";
-export {
-  loadBlockDetectionSettings,
-  saveBlockDetectionSettings,
-} from "../../utils/blockDetectionSettingsStorage";
 
 interface MapImportDialogProps {
   isOpen: boolean;

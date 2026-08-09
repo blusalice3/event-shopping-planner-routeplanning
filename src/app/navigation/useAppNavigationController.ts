@@ -4,12 +4,7 @@ import {
   type NavigationController,
 } from "./navigationCommand";
 import { navigationReducer } from "./navigationReducer";
-import {
-  screenStateToLegacy,
-  type EventScreenSurface,
-  type LegacyScreenState,
-  type ScreenState,
-} from "./screenState";
+import type { EventScreenSurface, ScreenState } from "./screenState";
 
 export interface AppNavigationCommands {
   showEventList(): void;
@@ -22,8 +17,7 @@ export interface AppNavigationCommands {
   removeEvent(eventName: string): void;
 }
 
-export interface AppNavigationController
-  extends NavigationController, LegacyScreenState {
+export interface AppNavigationController extends NavigationController {
   readonly commands: AppNavigationCommands;
 }
 
@@ -33,7 +27,6 @@ export const useAppNavigationController = (
   initialState: ScreenState = INITIAL_SCREEN_STATE,
 ): AppNavigationController => {
   const [state, dispatch] = useReducer(navigationReducer, initialState);
-  const legacyProjection = useMemo(() => screenStateToLegacy(state), [state]);
 
   const showEventList = useCallback(() => {
     dispatch(navigationCommand.showEventList());
@@ -94,8 +87,7 @@ export const useAppNavigationController = (
       state,
       dispatch,
       commands,
-      ...legacyProjection,
     }),
-    [commands, legacyProjection, state],
+    [commands, state],
   );
 };

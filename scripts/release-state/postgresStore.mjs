@@ -204,6 +204,175 @@ export const createPostgresReleaseStateStore = async ({
       });
     },
 
+    async appendAcceptanceSample({
+      operationId,
+      sourceSha,
+      bindingId,
+      expectedPreviousCommit,
+      expectedSequence,
+      sampleBytes,
+      sampleMediaType,
+      commitBytes,
+      commitMediaType,
+    }) {
+      if (
+        typeof operationId !== "string" ||
+        operationId.length === 0 ||
+        !/^[0-9a-f]{40}$/.test(sourceSha) ||
+        typeof bindingId !== "string" ||
+        bindingId.length === 0 ||
+        !Number.isSafeInteger(expectedSequence) ||
+        expectedSequence < 0 ||
+        (expectedPreviousCommit !== null &&
+          (!/^[0-9a-f]{64}$/.test(expectedPreviousCommit?.sha256) ||
+            expectedPreviousCommit.uri !==
+              `release-state://${namespace}/evidence/${expectedPreviousCommit.sha256}`)) ||
+        !Buffer.isBuffer(sampleBytes) ||
+        !Buffer.isBuffer(commitBytes)
+      ) {
+        throw new Error("Acceptance sample atomic append options are invalid");
+      }
+      const sampleSha256 = sha256Bytes(sampleBytes);
+      const commitSha256 = sha256Bytes(commitBytes);
+      const commit = parseJsonStrict(
+        commitBytes.toString("utf8"),
+        "acceptance sample chain commit",
+      );
+      if (
+        !canonicalJsonBytes(commit).equals(commitBytes) ||
+        commit.operationId !== operationId ||
+        commit.sourceSha !== sourceSha ||
+        commit.bindingId !== bindingId ||
+        commit.sequence !== expectedSequence + 1 ||
+        commit.sampleReference?.sha256 !== sampleSha256 ||
+        commit.sampleReference?.uri !==
+          `release-state://${namespace}/evidence/${sampleSha256}` ||
+        (expectedPreviousCommit === null
+          ? commit.previousCommit !== null
+          : commit.previousCommit?.sha256 !== expectedPreviousCommit.sha256 ||
+            commit.previousCommit?.uri !== expectedPreviousCommit.uri)
+      ) {
+        throw new Error(
+          "Acceptance sample chain commit differs from append request",
+        );
+      }
+      const chainId = sha256Bytes(
+        Buffer.from(
+          `${namespace}\n${operationId}\n${sourceSha}\n${bindingId}`,
+          "utf8",
+        ),
+      );
+      const result = await pool.query({
+        name: "foundation-append-acceptance-chain-v1",
+        text: `
+          select *
+          from foundation_release.append_acceptance_evidence_chain(
+            $1, $2, $3, $4, $5, $6, $7,
+            $8, $9, $10, $11, $12, $13
+          )
+        `,
+        values: [
+          namespace,
+          chainId,
+          operationId,
+          sourceSha,
+          bindingId,
+          expectedSequence,
+          expectedPreviousCommit?.sha256 ?? null,
+          sampleSha256,
+          sampleMediaType,
+          sampleBytes,
+          commitSha256,
+          commitMediaType,
+          commitBytes,
+        ],
+      });
+      if (result.rowCount !== 1) {
+        throw new Error("Acceptance sample chain append returned no receipt");
+      }
+      const row = result.rows[0];
+      const sampleCommittedAt = new Date(row.sample_committed_at).toISOString();
+      const commitCommittedAt = new Date(row.commit_committed_at).toISOString();
+      if (
+        Number(row.chain_sequence) !== expectedSequence + 1 ||
+        row.chain_head_sha !== commitSha256 ||
+        typeof row.replayed !== "boolean" ||
+        !Number.isFinite(Date.parse(sampleCommittedAt)) ||
+        commitCommittedAt !== sampleCommittedAt
+      ) {
+        throw new Error("Acceptance sample chain append receipt differs");
+      }
+      return {
+        sample: {
+          uri: `release-state://${namespace}/evidence/${sampleSha256}`,
+          sha256: sampleSha256,
+          mediaType: sampleMediaType,
+          byteLength: sampleBytes.length,
+          committedAt: sampleCommittedAt,
+          replayed: row.replayed,
+        },
+        commit: {
+          uri: `release-state://${namespace}/evidence/${commitSha256}`,
+          sha256: commitSha256,
+          mediaType: commitMediaType,
+          byteLength: commitBytes.length,
+          committedAt: commitCommittedAt,
+          replayed: row.replayed,
+        },
+      };
+    },
+
+    async readAcceptanceEvidenceChain({ operationId, sourceSha, bindingId }) {
+      if (
+        typeof operationId !== "string" ||
+        !/^[0-9a-f]{40}$/.test(sourceSha) ||
+        typeof bindingId !== "string" ||
+        bindingId.length === 0
+      ) {
+        throw new Error("Acceptance evidence chain identity is invalid");
+      }
+      const chainId = sha256Bytes(
+        Buffer.from(
+          `${namespace}\n${operationId}\n${sourceSha}\n${bindingId}`,
+          "utf8",
+        ),
+      );
+      const result = await pool.query({
+        name: "foundation-read-acceptance-chain-head-v1",
+        text: `
+          select *
+          from foundation_release.read_acceptance_evidence_chain(
+            $1, $2, $3, $4, $5
+          )
+        `,
+        values: [namespace, chainId, operationId, sourceSha, bindingId],
+      });
+      if (result.rowCount === 0) return null;
+      if (result.rowCount !== 1) {
+        throw new Error("Acceptance evidence chain head is ambiguous");
+      }
+      const row = result.rows[0];
+      if (
+        row.operation_id !== operationId ||
+        row.source_sha !== sourceSha ||
+        row.binding_id !== bindingId ||
+        !Number.isSafeInteger(Number(row.sequence)) ||
+        Number(row.sequence) < 1 ||
+        !/^[0-9a-f]{64}$/.test(row.head_sha) ||
+        !Number.isFinite(new Date(row.updated_at).getTime())
+      ) {
+        throw new Error("Acceptance evidence chain head differs");
+      }
+      return {
+        sequence: Number(row.sequence),
+        head: {
+          uri: `release-state://${namespace}/evidence/${row.head_sha}`,
+          sha256: row.head_sha,
+        },
+        updatedAt: new Date(row.updated_at).toISOString(),
+      };
+    },
+
     async close() {
       await pool.end();
     },

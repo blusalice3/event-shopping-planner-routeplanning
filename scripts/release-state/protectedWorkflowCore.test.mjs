@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { canonicalJsonBytes, sha256Bytes } from "../lib/canonical-json.mjs";
 import { readCurrentReleaseState } from "./currentReleaseState.mjs";
@@ -16,6 +17,7 @@ import {
   hashReleaseEvent,
   reduceReleaseState,
 } from "./releaseStateReducer.mjs";
+import { createStoredPrePromotionFixture } from "./prePromotionEvidenceTestFixture.mjs";
 
 const namespace = "foundation-test";
 const sourceSha = "a".repeat(40);
@@ -23,6 +25,17 @@ const fixedTime = "2026-08-06T00:00:00.000Z";
 const dbCompatibility = {
   contractUri: "urn:test:db:v1",
   fingerprint: "d".repeat(64),
+};
+const providerPolicy = {
+  bindingStatus: "configured",
+  expectedTeamId: "team-test",
+  expectedProjectId: "project-test",
+  ownedProductionDomains: ["a.example.test", "b.example.test"],
+  observationPolicy: {
+    apiBaseUrl: "https://api.vercel.com",
+    maxResponseAgeSeconds: 300,
+    maxFutureClockSkewSeconds: 30,
+  },
 };
 
 class FakeReleaseStateStore {
@@ -130,10 +143,10 @@ class FakeReleaseStateStore {
   }
 }
 
-const putJson = async (store, value) => {
+const putJson = async (store, value, mediaType = "application/json") => {
   const receipt = await store.putEvidence({
     bytes: canonicalJsonBytes(value),
-    mediaType: "application/json",
+    mediaType,
   });
   return { uri: receipt.uri, sha256: receipt.sha256 };
 };
@@ -202,10 +215,43 @@ const createBinding = async ({
     kind: "artifact-manifest",
     suffix,
   });
-  const providerPolicy = await putJson(store, {
-    kind: "provider-policy",
-    value: "shared",
+  const providerPolicyReference = await putJson(
+    store,
+    providerPolicy,
+    "application/vnd.event-shopping-planner.provider-policy+json;version=1",
+  );
+  const archiveBytes = Buffer.from(`archive:${role}:${suffix}`);
+  const archiveReceipt = await store.putEvidence({
+    bytes: archiveBytes,
+    mediaType:
+      "application/vnd.event-shopping-planner.artifact-archive+zip;version=1",
   });
+  const artifactArchive = {
+    uri: archiveReceipt.uri,
+    sha256: archiveReceipt.sha256,
+  };
+  const artifactArchiveAvailability = await putJson(
+    store,
+    {
+      schemaVersion: 1,
+      evidenceKind: "artifact-archive-availability/v1",
+      availability: "available",
+      namespace,
+      bindingId: `${role}-${suffix}`,
+      sourceSha,
+      variantId: suffix.repeat(64),
+      releaseRole: role,
+      artifactManifest,
+      artifactArchive: {
+        ...artifactArchive,
+        mediaType:
+          "application/vnd.event-shopping-planner.artifact-archive+zip;version=1",
+        byteLength: archiveBytes.length,
+        committedAt: fixedTime,
+      },
+    },
+    "application/vnd.event-shopping-planner.artifact-archive-availability+json;version=1",
+  );
   const bindingWithoutEvidence = {
     bindingId: `${role}-${suffix}`,
     sourceSha,
@@ -216,11 +262,13 @@ const createBinding = async ({
     providerProjectId: "project-test",
     providerDeploymentId: `deployment-${role}-${suffix}`,
     deploymentUrl: `https://${role}-${suffix}.example.test`,
+    artifactArchive,
+    artifactArchiveAvailability,
     packageIndex,
     artifactManifest,
     providerEvidence: null,
     releasePolicy: policyRef,
-    providerPolicy,
+    providerPolicy: providerPolicyReference,
     providerConfigurationHash: "6".repeat(64),
     requiredDbCompatibility: dbCompatibility,
   };
@@ -235,7 +283,7 @@ const createBinding = async ({
     artifactManifestHash: artifactManifest.sha256,
     packageIndexHash: packageIndex.sha256,
     providerConfigurationHash: bindingWithoutEvidence.providerConfigurationHash,
-    providerPolicyHash: providerPolicy.sha256,
+    providerPolicyHash: providerPolicyReference.sha256,
     releasePolicyHash: policyRef.sha256,
     requiredDbCompatibility: dbCompatibility,
     publicIdentity: {
@@ -252,10 +300,25 @@ const createBinding = async ({
 
 const initializeFixture = async () => {
   const store = new FakeReleaseStateStore();
-  const policyRef = await putJson(store, {
-    kind: "release-policy",
-    version: 1,
+  const configuredReleasePolicy = JSON.parse(
+    await readFile(
+      new URL("../../config/release-variants.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const prePromotion = await createStoredPrePromotionFixture({
+    store,
+    namespace,
+    sourceSha,
+    dbCompatibility,
+    providerPolicy,
+    releasePolicy: {
+      ...configuredReleasePolicy,
+      activationStatus: "active",
+      activationBlockers: [],
+    },
   });
+  const policyRef = prePromotion.releasePolicyReference;
   const bootstrap = await createBinding({
     store,
     role: "containment",
@@ -273,6 +336,7 @@ const initializeFixture = async () => {
     operationId: "initialize",
     previousEventHash: null,
     payload: {
+      acceptedGate: null,
       legacyObservedProduction: {
         observationUri: initialEvidence.uri,
         observationSha256: initialEvidence.sha256,
@@ -293,26 +357,14 @@ const initializeFixture = async () => {
     policyRef,
     bootstrap,
     current,
+    prePromotion,
   };
 };
 
 const createPromotionFixture = async () => {
   const fixture = await initializeFixture();
-  const targetBinding = await createBinding({
-    store: fixture.store,
-    role: "standard",
-    suffix: "c",
-    policyRef: fixture.policyRef,
-  });
-  const companionBinding = await createBinding({
-    store: fixture.store,
-    role: "containment",
-    suffix: "e",
-    policyRef: fixture.policyRef,
-  });
-  const qaEvidence = await putJson(fixture.store, {
-    kind: "pre-promotion-qa",
-  });
+  const targetBinding = fixture.prePromotion.standard;
+  const companionBinding = fixture.prePromotion.containment;
   const subject = {
     schemaVersion: 1,
     subjectKind: "promotion-preparation-subject/v1",
@@ -327,7 +379,10 @@ const createPromotionFixture = async () => {
     companionBinding,
     previousBinding: null,
     emergencyRecoveryBinding: fixture.bootstrap,
-    evidenceRefs: [qaEvidence],
+    evidenceRefs: Object.values(fixture.prePromotion.namedEvidence).sort(
+      (left, right) =>
+        Buffer.compare(Buffer.from(left.uri), Buffer.from(right.uri)),
+    ),
   };
   return {
     ...fixture,
@@ -625,17 +680,6 @@ test("produces a read-only reconcile plan only for an exact all-domain target ma
     },
     { collectApprovals: collector.collect },
   );
-  const providerPolicy = {
-    bindingStatus: "configured",
-    expectedTeamId: "team-test",
-    expectedProjectId: "project-test",
-    ownedProductionDomains: ["a.example.test", "b.example.test"],
-    observationPolicy: {
-      apiBaseUrl: "https://api.vercel.com",
-      maxResponseAgeSeconds: 300,
-      maxFutureClockSkewSeconds: 30,
-    },
-  };
   const assignments = [
     {
       productionDomain: "a.example.test",
@@ -667,13 +711,20 @@ test("produces a read-only reconcile plan only for an exact all-domain target ma
     {
       store: fixture.store,
       observationBytes,
-      providerPolicy,
     },
     { now: () => Date.parse(fixedTime) },
   );
   assert.equal(decision.status, "ready");
   assert.equal(decision.action, "append-state-reconciled");
   assert.equal(decision.eventPlan.payload.snapshotPatch, undefined);
+  await assert.rejects(
+    decideProviderReconciliation({
+      store: fixture.store,
+      observationBytes,
+      providerPolicy: { ...providerPolicy, expectedProjectId: "attacker" },
+    }),
+    /Caller-supplied snapshot or provider policy is forbidden/,
+  );
 
   const current = await readCurrentReleaseState({ store: fixture.store });
   const reconciled = createReleaseEvent({
@@ -722,17 +773,6 @@ test("fails reconcile closed for partial, ambiguous, and unknown assignments", a
     },
     { collectApprovals: collector.collect },
   );
-  const providerPolicy = {
-    bindingStatus: "configured",
-    expectedTeamId: "team-test",
-    expectedProjectId: "project-test",
-    ownedProductionDomains: ["a.example.test", "b.example.test"],
-    observationPolicy: {
-      apiBaseUrl: "https://api.vercel.com",
-      maxResponseAgeSeconds: 300,
-      maxFutureClockSkewSeconds: 30,
-    },
-  };
   const cases = [
     {
       expected: "partial-production-domain-set",
@@ -794,7 +834,6 @@ test("fails reconcile closed for partial, ambiguous, and unknown assignments", a
       {
         store: fixture.store,
         observationBytes: bytes,
-        providerPolicy,
       },
       { now: () => Date.parse(fixedTime) },
     );

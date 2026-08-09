@@ -8,6 +8,11 @@ import {
 } from "./usePurchaseStatusControlMode";
 
 const STORAGE_KEY = "purchaseStatusControlMode";
+const preferences = {
+  loadPreference: (key: string) => localStorage.getItem(key),
+  savePreference: (key: string, value: string) =>
+    localStorage.setItem(key, value),
+};
 
 describe("usePurchaseStatusControlMode", () => {
   beforeEach(() => {
@@ -16,7 +21,9 @@ describe("usePurchaseStatusControlMode", () => {
   });
 
   it("defaults to cycle and exposes the default value", () => {
-    const { result } = renderHook(() => usePurchaseStatusControlMode());
+    const { result } = renderHook(() =>
+      usePurchaseStatusControlMode(preferences),
+    );
 
     expect(DEFAULT_PURCHASE_STATUS_CONTROL_MODE).toBe("cycle");
     expect(result.current.purchaseStatusControlMode).toBe("cycle");
@@ -27,7 +34,9 @@ describe("usePurchaseStatusControlMode", () => {
   it("restores a valid saved mode", () => {
     localStorage.setItem(STORAGE_KEY, "radial");
 
-    const { result } = renderHook(() => usePurchaseStatusControlMode());
+    const { result } = renderHook(() =>
+      usePurchaseStatusControlMode(preferences),
+    );
 
     expect(result.current.purchaseStatusControlMode).toBe("radial");
   });
@@ -35,13 +44,17 @@ describe("usePurchaseStatusControlMode", () => {
   it("falls back to cycle for invalid saved values", () => {
     localStorage.setItem(STORAGE_KEY, "invalid");
 
-    const { result } = renderHook(() => usePurchaseStatusControlMode());
+    const { result } = renderHook(() =>
+      usePurchaseStatusControlMode(preferences),
+    );
 
     expect(result.current.purchaseStatusControlMode).toBe("cycle");
   });
 
   it("persists mode changes", () => {
-    const { result } = renderHook(() => usePurchaseStatusControlMode());
+    const { result } = renderHook(() =>
+      usePurchaseStatusControlMode(preferences),
+    );
 
     act(() => {
       result.current.setPurchaseStatusControlMode("radial");
@@ -56,7 +69,9 @@ describe("usePurchaseStatusControlMode", () => {
       throw new Error("localStorage unavailable");
     });
 
-    const { result } = renderHook(() => usePurchaseStatusControlMode());
+    const { result } = renderHook(() =>
+      usePurchaseStatusControlMode(preferences),
+    );
 
     expect(result.current.purchaseStatusControlMode).toBe("cycle");
   });
@@ -67,7 +82,7 @@ describe("usePurchaseStatusControlMode", () => {
     });
 
     expect(() =>
-      renderHook(() => usePurchaseStatusControlMode()),
+      renderHook(() => usePurchaseStatusControlMode(preferences)),
     ).not.toThrow();
   });
 });

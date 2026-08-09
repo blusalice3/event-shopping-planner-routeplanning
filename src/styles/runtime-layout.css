@@ -1,0 +1,37 @@
+:root {
+  --footer-height: attr(data-footer-height type(<length>), 0px);
+}
+
+.esp-layout-left {
+  left: attr(data-layout-left type(<length>), 0px);
+}
+
+.esp-layout-right {
+  right: attr(data-layout-right type(<length>), 0px);
+}
+
+.esp-layout-top {
+  top: attr(data-layout-top type(<length>), 0px);
+}
+
+.esp-layout-width {
+  width: attr(data-layout-width type(<length-percentage>), auto);
+}
+
+.esp-layout-height {
+  height: attr(data-layout-height type(<length-percentage>), auto);
+}
+
+.esp-layout-translate-y {
+  transform: translateY(
+    attr(data-layout-translate-y type(<length-percentage>), 0px)
+  );
+}
+
+.esp-layout-nav-left {
+  left: attr(data-nav-left type(<length>), 1rem);
+}
+
+.esp-layout-nav-right {
+  right: attr(data-nav-right type(<length>), 1rem);
+}

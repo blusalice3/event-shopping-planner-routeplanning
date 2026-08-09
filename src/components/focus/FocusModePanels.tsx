@@ -8,7 +8,6 @@ import type { FocusMapCenteringMode, FocusPhase } from "../../types/focus";
 import { hasMissingLimitedQuantity } from "../../features/space-navigation/domain/statusSegments";
 import ShoppingItemCard from "../ShoppingItemCard";
 import MapRotationControls from "../map/MapRotationControls";
-import "./FocusModePanels.css";
 
 interface FocusModeItemListProps {
   itemListRef: React.RefObject<HTMLDivElement>;

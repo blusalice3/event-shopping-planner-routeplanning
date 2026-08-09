@@ -28,6 +28,34 @@ const DEPLOYMENT_BINDING_KEYS = [
   "sourceSha",
   "variantId",
 ];
+const ARCHIVED_DEPLOYMENT_BINDING_KEYS = [
+  ...DEPLOYMENT_BINDING_KEYS,
+  "artifactArchive",
+  "artifactArchiveAvailability",
+];
+const ARTIFACT_ARCHIVE_AVAILABILITY_KEYS = [
+  "artifactArchive",
+  "artifactManifest",
+  "availability",
+  "bindingId",
+  "evidenceKind",
+  "namespace",
+  "releaseRole",
+  "schemaVersion",
+  "sourceSha",
+  "variantId",
+];
+const ARTIFACT_ARCHIVE_DESCRIPTOR_KEYS = [
+  "byteLength",
+  "committedAt",
+  "mediaType",
+  "sha256",
+  "uri",
+];
+export const ARTIFACT_ARCHIVE_MEDIA_TYPE =
+  "application/vnd.event-shopping-planner.artifact-archive+zip;version=1";
+export const ARTIFACT_ARCHIVE_AVAILABILITY_MEDIA_TYPE =
+  "application/vnd.event-shopping-planner.artifact-archive-availability+json;version=1";
 const PROVIDER_EVIDENCE_KEYS = [
   "artifactManifestHash",
   "deploymentUrl",
@@ -144,7 +172,24 @@ export const assertDeploymentBinding = (
     label = "Deployment binding",
   },
 ) => {
-  assertExactKeys(binding, DEPLOYMENT_BINDING_KEYS, label);
+  const hasArtifactArchive = Object.hasOwn(binding ?? {}, "artifactArchive");
+  const hasAvailability = Object.hasOwn(
+    binding ?? {},
+    "artifactArchiveAvailability",
+  );
+  if (hasArtifactArchive !== hasAvailability) {
+    throw new Error(`${label} has an incomplete artifact archive binding`);
+  }
+  if (!hasArtifactArchive) {
+    throw new Error(`${label} has no durable artifact archive binding`);
+  }
+  assertExactKeys(
+    binding,
+    hasArtifactArchive
+      ? ARCHIVED_DEPLOYMENT_BINDING_KEYS
+      : DEPLOYMENT_BINDING_KEYS,
+    label,
+  );
   assertNonEmptyBoundedString(binding.bindingId, `${label} ID`);
   if (
     !SOURCE_SHA_PATTERN.test(binding.sourceSha) ||
@@ -175,6 +220,12 @@ export const assertDeploymentBinding = (
   );
   assertHttpsUrl(binding.deploymentUrl, `${label} deployment URL`);
   for (const [field, fieldLabel] of [
+    ...(hasArtifactArchive
+      ? [
+          ["artifactArchive", "artifact archive"],
+          ["artifactArchiveAvailability", "artifact archive availability"],
+        ]
+      : []),
     ["packageIndex", "package index"],
     ["artifactManifest", "artifact manifest"],
     ["providerEvidence", "provider evidence"],
@@ -198,6 +249,7 @@ export const assertDeploymentBinding = (
 };
 
 export const collectBindingEvidenceReferences = (binding) => [
+  binding.artifactArchiveAvailability,
   binding.packageIndex,
   binding.artifactManifest,
   binding.providerEvidence,
@@ -223,6 +275,193 @@ export const assertEvidenceObjectAvailable = async ({
     throw new Error(`${label} is absent or failed immutable verification`);
   }
   return stored;
+};
+
+export class ArtifactArchiveAvailabilityError extends Error {
+  constructor(code, message, options) {
+    super(message, options);
+    this.name = "ArtifactArchiveAvailabilityError";
+    this.code = code;
+  }
+}
+
+const archiveAvailabilityFailure = (code, message, cause) =>
+  new ArtifactArchiveAvailabilityError(
+    code,
+    message,
+    cause === undefined ? undefined : { cause },
+  );
+
+const readArchiveEvidence = async ({
+  store,
+  reference,
+  namespace,
+  label,
+  missingCode,
+  tamperCode,
+}) => {
+  assertImmutableObjectReference(reference, namespace, label);
+  let stored;
+  try {
+    stored = await store.readEvidence({ sha256: reference.sha256 });
+  } catch (error) {
+    throw archiveAvailabilityFailure(
+      "artifact-archive-unavailable",
+      `${label} could not be read from the durable store`,
+      error,
+    );
+  }
+  if (stored === null || stored === undefined) {
+    throw archiveAvailabilityFailure(
+      missingCode,
+      `${label} is absent from the durable store`,
+    );
+  }
+  if (
+    !Buffer.isBuffer(stored.bytes) ||
+    sha256Bytes(stored.bytes) !== reference.sha256
+  ) {
+    throw archiveAvailabilityFailure(
+      tamperCode,
+      `${label} failed its content-addressed digest`,
+    );
+  }
+  if (
+    typeof stored.mediaType !== "string" ||
+    !Number.isFinite(Date.parse(stored.committedAt))
+  ) {
+    throw archiveAvailabilityFailure(
+      "artifact-archive-unavailable",
+      `${label} lacks a durable availability receipt`,
+    );
+  }
+  return stored;
+};
+
+export const assertArtifactArchiveAvailable = async ({
+  store,
+  namespace,
+  binding,
+  label = "Deployment binding",
+}) => {
+  try {
+    assertDeploymentBinding(binding, {
+      namespace,
+      allowLegacyBootstrap: true,
+      label,
+    });
+  } catch (error) {
+    throw archiveAvailabilityFailure(
+      "artifact-archive-reference-missing",
+      `${label} does not contain a complete durable artifact archive reference`,
+      error,
+    );
+  }
+  const availabilityStored = await readArchiveEvidence({
+    store,
+    reference: binding.artifactArchiveAvailability,
+    namespace,
+    label: `${label} artifact archive availability receipt`,
+    missingCode: "artifact-archive-availability-missing",
+    tamperCode: "artifact-archive-availability-tampered",
+  });
+  if (
+    availabilityStored.mediaType !== ARTIFACT_ARCHIVE_AVAILABILITY_MEDIA_TYPE
+  ) {
+    throw archiveAvailabilityFailure(
+      "artifact-archive-availability-tampered",
+      `${label} artifact archive availability receipt has the wrong media type`,
+    );
+  }
+  let availability;
+  try {
+    availability = parseCanonicalJsonBytes(
+      availabilityStored.bytes,
+      `${label} artifact archive availability receipt`,
+    );
+    assertExactKeys(
+      availability,
+      ARTIFACT_ARCHIVE_AVAILABILITY_KEYS,
+      `${label} artifact archive availability receipt`,
+    );
+    assertExactKeys(
+      availability.artifactArchive,
+      ARTIFACT_ARCHIVE_DESCRIPTOR_KEYS,
+      `${label} artifact archive descriptor`,
+    );
+    assertImmutableObjectReference(
+      availability.artifactManifest,
+      namespace,
+      `${label} availability artifact manifest`,
+    );
+  } catch (error) {
+    throw archiveAvailabilityFailure(
+      "artifact-archive-availability-tampered",
+      `${label} artifact archive availability receipt is invalid`,
+      error,
+    );
+  }
+  if (availability.availability !== "available") {
+    throw archiveAvailabilityFailure(
+      "artifact-archive-unavailable",
+      `${label} artifact archive is not marked available`,
+    );
+  }
+  if (
+    availability.schemaVersion !== 1 ||
+    availability.evidenceKind !== "artifact-archive-availability/v1" ||
+    availability.namespace !== namespace ||
+    availability.bindingId !== binding.bindingId ||
+    availability.sourceSha !== binding.sourceSha ||
+    availability.variantId !== binding.variantId ||
+    availability.releaseRole !== binding.releaseRole ||
+    !sameCanonicalValue(
+      availability.artifactManifest,
+      binding.artifactManifest,
+    ) ||
+    availability.artifactArchive.uri !== binding.artifactArchive.uri ||
+    availability.artifactArchive.sha256 !== binding.artifactArchive.sha256
+  ) {
+    throw archiveAvailabilityFailure(
+      "artifact-archive-binding-mismatch",
+      `${label} artifact archive availability receipt differs from its source or binding`,
+    );
+  }
+  if (
+    availability.artifactArchive.mediaType !== ARTIFACT_ARCHIVE_MEDIA_TYPE ||
+    !Number.isSafeInteger(availability.artifactArchive.byteLength) ||
+    availability.artifactArchive.byteLength < 1 ||
+    !Number.isFinite(Date.parse(availability.artifactArchive.committedAt))
+  ) {
+    throw archiveAvailabilityFailure(
+      "artifact-archive-availability-tampered",
+      `${label} artifact archive descriptor is invalid`,
+    );
+  }
+  const archiveStored = await readArchiveEvidence({
+    store,
+    reference: binding.artifactArchive,
+    namespace,
+    label: `${label} artifact archive`,
+    missingCode: "artifact-archive-missing",
+    tamperCode: "artifact-archive-tampered",
+  });
+  if (
+    archiveStored.mediaType !== ARTIFACT_ARCHIVE_MEDIA_TYPE ||
+    archiveStored.bytes.length !== availability.artifactArchive.byteLength ||
+    archiveStored.committedAt !== availability.artifactArchive.committedAt
+  ) {
+    throw archiveAvailabilityFailure(
+      "artifact-archive-unavailable",
+      `${label} artifact archive differs from its durable availability receipt`,
+    );
+  }
+  return {
+    archive: archiveStored,
+    availability,
+    availabilityReference: structuredClone(binding.artifactArchiveAvailability),
+    archiveReference: structuredClone(binding.artifactArchive),
+  };
 };
 
 export const validateProviderEvidenceForBinding = async ({

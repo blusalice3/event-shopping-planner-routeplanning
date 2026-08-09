@@ -14,6 +14,7 @@ import {
   buildPublicResponseHashes,
   computeRoleEntryGraphHash,
   readAndVerifyCapability,
+  readAndVerifyOuterAgentGraph,
   readAndVerifyPublicIdentity,
   readAndVerifyRoleEntryGraph,
 } from "./artifact-contract.mjs";
@@ -32,6 +33,13 @@ import {
   verifyDeterministicZip,
 } from "../deterministic-zip.mjs";
 import { providerConfigurationHash } from "../provider/providerConfiguration.mjs";
+import {
+  cspReportSinkContract,
+  renderCspHeaders,
+  renderVercelOutputConfig,
+  resolveProviderEnvironmentContract,
+} from "./csp-delivery.mjs";
+import { readStaticApplicationStylesheetContract } from "./application-stylesheet-contract.mjs";
 
 const REQUIRED_SOURCE_HARDENED_PUBLIC_PATHS = Object.freeze([
   "/",
@@ -78,6 +86,7 @@ const assertNoCriticalPlaceholder = (value, label) => {
 export const assertProductionProviderContext = (
   providerPolicy,
   providerObservation,
+  { cspMode = null } = {},
 ) => {
   if (providerPolicy.bindingStatus !== "configured") {
     throw new Error(
@@ -157,10 +166,14 @@ export const assertProductionProviderContext = (
   const environmentNames = new Set(
     providerObservation.presentEnvironmentNames ?? [],
   );
-  for (const name of providerPolicy.requiredEnvironmentNames ?? []) {
+  const environmentContract = resolveProviderEnvironmentContract(
+    providerPolicy,
+    cspMode,
+  );
+  for (const name of environmentContract.requiredEnvironmentNames) {
     if (!environmentNames.has(name)) mismatches.push(`missing:${name}`);
   }
-  for (const name of providerPolicy.forbiddenEnvironmentNames ?? []) {
+  for (const name of environmentContract.forbiddenEnvironmentNames) {
     if (environmentNames.has(name)) mismatches.push(`forbidden:${name}`);
   }
   if (
@@ -326,6 +339,8 @@ export const calculateBuildInputClosure = ({ repositoryRoot, sourceSha }) => {
         file === "scripts/build-pwa-recovery-agent.mjs" ||
         file === "scripts/build-release-vite.mjs" ||
         file === "scripts/lib/canonical-json.mjs" ||
+        file === "scripts/lib/csp-delivery.d.mts" ||
+        file === "scripts/lib/csp-delivery.mjs" ||
         file === "scripts/lib/release-build-input.mjs" ||
         file === "scripts/lib/release-policy.mjs" ||
         file === "scripts/verify-release-a-build.mjs",
@@ -403,33 +418,13 @@ const collectHeadersForPath = (routes, filesystemIndex, pathname) => {
   return headers;
 };
 
-const buildSecurityHeaders = (cspPolicy) => {
-  if (
-    !isRecord(cspPolicy) ||
-    !isRecord(cspPolicy.directives) ||
-    !isRecord(cspPolicy.securityHeaders)
-  ) {
-    throw new Error("Source-hardened route verification requires CSP policy");
-  }
-  const contentSecurityPolicy = Object.entries(cspPolicy.directives)
-    .map(([directive, values]) => {
-      if (
-        !Array.isArray(values) ||
-        values.some((value) => typeof value !== "string")
-      ) {
-        throw new Error(`CSP directive ${directive} is invalid`);
-      }
-      return `${directive} ${values.join(" ")}`;
-    })
-    .join("; ");
-  return {
-    "Content-Security-Policy": contentSecurityPolicy,
-    ...cspPolicy.securityHeaders,
-  };
-};
-
-const assertSourceHardenedRoutes = ({ routes, filesystemIndex, cspPolicy }) => {
-  const securityHeaders = buildSecurityHeaders(cspPolicy);
+const assertSourceHardenedRoutes = ({
+  routes,
+  filesystemIndex,
+  cspMode,
+  cspPolicy,
+}) => {
+  const securityHeaders = renderCspHeaders({ cspMode, cspPolicy });
   const versionedIdentity = `/release-identity.${"a".repeat(40)}.${"b".repeat(64)}.json`;
   for (const [pathname, additionalHeaders] of [
     ["/", {}],
@@ -449,7 +444,11 @@ const assertSourceHardenedRoutes = ({ routes, filesystemIndex, cspPolicy }) => {
   }
 };
 
-const assertRouteFallbackOrder = (routes, filesystemIndex) => {
+const assertRouteFallbackOrder = (
+  routes,
+  filesystemIndex,
+  { cspMode = "enforced", cspPolicy = null } = {},
+) => {
   const terminalAfterFilesystem = routes
     .slice(filesystemIndex + 1)
     .filter(
@@ -464,6 +463,14 @@ const assertRouteFallbackOrder = (routes, filesystemIndex) => {
         `Vercel API fallback is absent or out of order for ${pathname}`,
       );
     }
+  }
+  if (
+    cspMode === "none" &&
+    firstDestinationFor(cspPolicy.reportEndpoint) !== "/api/not-found"
+  ) {
+    throw new Error(
+      "Disabled CSP report route does not close to /api/not-found",
+    );
   }
   for (const pathname of ["/", "/events/1", "/apiary"]) {
     if (firstDestinationFor(pathname) !== "/index.html") {
@@ -486,9 +493,44 @@ const assertRouteFallbackOrder = (routes, filesystemIndex) => {
   }
 };
 
+export const applyCspDeliveryToVercelOutput = async ({
+  outputRoot,
+  cspMode,
+  cspPolicy,
+}) => {
+  const configPath = path.join(outputRoot, "config.json");
+  const config = parseJsonStrict(
+    await readFile(configPath, "utf8"),
+    "Vercel Build Output config.json",
+  );
+  const reportSink = cspReportSinkContract({ cspMode, cspPolicy });
+  const renderedConfig = renderVercelOutputConfig({
+    config,
+    cspMode,
+    cspPolicy,
+  });
+  const operations = [
+    writeFile(configPath, canonicalJsonBytes(renderedConfig)),
+  ];
+  if (!reportSink.enabled) {
+    operations.push(
+      rm(path.join(outputRoot, "functions", "api", "csp-report.func"), {
+        recursive: true,
+        force: true,
+      }),
+    );
+  }
+  await Promise.all(operations);
+  return reportSink;
+};
+
 export const assertVercelOutputShape = async (
   outputRoot,
-  { publicIdentityKind = "release-identity-v1", cspPolicy = null } = {},
+  {
+    publicIdentityKind = "release-identity-v1",
+    cspMode = "enforced",
+    cspPolicy = null,
+  } = {},
 ) => {
   const outputFiles = await buildFileManifest(outputRoot);
   const paths = new Set(outputFiles.map((file) => file.path));
@@ -509,10 +551,14 @@ export const assertVercelOutputShape = async (
   const apiFunctionRoots = [...functionRoots]
     .filter((value) => value.startsWith("api/"))
     .sort(compareStrings);
+  const reportSink =
+    publicIdentityKind === "release-identity-v1"
+      ? cspReportSinkContract({ cspMode, cspPolicy })
+      : null;
   const expectedApiFunctionRoots =
     publicIdentityKind === "release-identity-v1"
       ? [
-          "api/csp-report.func",
+          ...(reportSink.enabled ? [reportSink.functionRoot] : []),
           "api/google-sheets-csv.func",
           "api/not-found.func",
           "api/persistence-release-a-metrics.func",
@@ -556,11 +602,15 @@ export const assertVercelOutputShape = async (
     throw new Error("Vercel output requires exactly one filesystem boundary");
   }
   const filesystemIndex = filesystemIndexes[0];
-  assertRouteFallbackOrder(config.routes, filesystemIndex);
+  assertRouteFallbackOrder(config.routes, filesystemIndex, {
+    cspMode,
+    cspPolicy,
+  });
   if (publicIdentityKind === "release-identity-v1") {
     assertSourceHardenedRoutes({
       routes: config.routes,
       filesystemIndex,
+      cspMode,
       cspPolicy,
     });
   }
@@ -578,13 +628,27 @@ export const createArtifactManifestFromOutput = async ({
   publicBuildEnvHash,
   publicIdentityKind,
   bootstrap,
+  buildAuthority = null,
+  targetGate = null,
+  buildPurpose = publicIdentityKind === "legacy-bootstrap-v1"
+    ? "legacy-bootstrap"
+    : "production",
+  promotable = buildPurpose === "production",
   additionalPublicPaths = [],
   cspPolicy = null,
 }) => {
   await assertVercelOutputShape(outputRoot, {
     publicIdentityKind,
+    cspMode:
+      publicIdentityKind === "release-identity-v1"
+        ? dimensions.cspMode
+        : "enforced",
     cspPolicy,
   });
+  const applicationStylesheet =
+    publicIdentityKind === "release-identity-v1"
+      ? await readStaticApplicationStylesheetContract(outputRoot)
+      : null;
   const outputFiles = await buildFileManifest(outputRoot);
   const variantId = computeVariantId(releasePolicy, dimensions);
   let roleEntryGraph;
@@ -637,10 +701,13 @@ export const createArtifactManifestFromOutput = async ({
   const publicPaths = [
     ...REQUIRED_SOURCE_HARDENED_PUBLIC_PATHS,
     `/release-capabilities.${sourceSha}.json`,
+    ...(applicationStylesheet ? [applicationStylesheet.publicPath] : []),
     ...additionalPublicPaths,
   ];
   if (publicIdentityKind === "release-identity-v1") {
     publicPaths.push(
+      "/assets/outer-recovery-agent.js",
+      "/outer-agent-graph.json",
       "/release-identity.json",
       "/release-role-graph.json",
       `/release-identity.${sourceSha}.${variantId}.json`,
@@ -657,6 +724,10 @@ export const createArtifactManifestFromOutput = async ({
     variantId,
     releaseRole: dimensions.releaseRole,
     dimensions,
+    buildAuthority,
+    targetGate,
+    buildPurpose,
+    promotable,
     buildInputClosureHash,
     lockfileSha256,
     toolchainPolicyHash: releaseContext.toolchainPolicyHash,
@@ -673,11 +744,28 @@ export const createArtifactManifestFromOutput = async ({
     outputFiles,
   };
   manifest.roleEntryGraphHash = computeRoleEntryGraphHash(roleEntryGraph);
-  assertArtifactManifest(manifest, releasePolicy);
-  await readAndVerifyCapability({ outputRoot, manifest });
+  assertArtifactManifest(manifest, releasePolicy, {
+    expectedBuildPurpose:
+      publicIdentityKind === "legacy-bootstrap-v1"
+        ? "production"
+        : buildPurpose,
+  });
+  await readAndVerifyCapability({
+    outputRoot,
+    manifest,
+    expectedBuildPurpose:
+      publicIdentityKind === "legacy-bootstrap-v1"
+        ? "production"
+        : buildPurpose,
+  });
   await readAndVerifyRoleEntryGraph({ outputRoot, manifest });
   if (publicIdentityKind === "release-identity-v1") {
-    await readAndVerifyPublicIdentity({ outputRoot, manifest });
+    await readAndVerifyOuterAgentGraph({ outputRoot, manifest });
+    await readAndVerifyPublicIdentity({
+      outputRoot,
+      manifest,
+      expectedBuildPurpose: buildPurpose,
+    });
   } else if (
     outputFiles.some((file) =>
       /^static\/release-identity(?:\.|$)/.test(file.path),

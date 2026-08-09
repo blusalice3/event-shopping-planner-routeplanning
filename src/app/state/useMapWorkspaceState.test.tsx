@@ -23,21 +23,54 @@ describe("map workspace state", () => {
   });
 
   it("supports the existing React setter contract through one typed reducer", () => {
-    const { result } = renderHook(() => useMapWorkspaceState());
+    const preferenceCommands = {
+      loadPreference: vi.fn(() => null),
+      savePreference: vi.fn(),
+    };
+    const notify = vi.fn();
+    const { result } = renderHook(() =>
+      useMapWorkspaceState(preferenceCommands, notify),
+    );
 
     act(() => {
-      result.current.setVisitListOriginalOrder(["a"]);
-      result.current.setVisitListOriginalOrder((current) => [...current, "b"]);
+      result.current.setMapTabMenuOpen("map-toggle");
+      result.current.setMapTabMenuOpen((current) => `${current}-updated`);
       result.current.setVertexGuideOptions((current) => ({
         ...current,
         showGrid: false,
       }));
     });
 
-    expect(result.current.visitListOriginalOrder).toEqual(["a", "b"]);
+    expect(result.current.mapTabMenuOpen).toBe("map-toggle-updated");
     expect(result.current.vertexGuideOptions).toEqual({
       showGrid: false,
       showRuler: true,
     });
+    expect(preferenceCommands.savePreference).toHaveBeenCalledWith(
+      "mapSmartInsertEnabled",
+      "true",
+    );
+    expect(preferenceCommands.savePreference).toHaveBeenCalledWith(
+      "mapSmartInsertMode",
+      "map",
+    );
+  });
+
+  it("does not resave preferences when the injected overlay notifier changes", () => {
+    const preferenceCommands = {
+      loadPreference: vi.fn(() => null),
+      savePreference: vi.fn(),
+    };
+    const firstNotify = vi.fn();
+    const secondNotify = vi.fn();
+    const { rerender } = renderHook(
+      ({ notify }) => useMapWorkspaceState(preferenceCommands, notify),
+      { initialProps: { notify: firstNotify } },
+    );
+    expect(preferenceCommands.savePreference).toHaveBeenCalledTimes(2);
+
+    rerender({ notify: secondNotify });
+
+    expect(preferenceCommands.savePreference).toHaveBeenCalledTimes(2);
   });
 });

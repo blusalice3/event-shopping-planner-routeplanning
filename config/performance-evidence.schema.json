@@ -237,7 +237,8 @@
         "samplesSha256",
         "statistics",
         "supplementaryMetrics",
-        "outcomeAssertions"
+        "outcomeAssertions",
+        "executionBinding"
       ],
       "properties": {
         "id": {
@@ -273,6 +274,122 @@
           "additionalProperties": {
             "const": true
           }
+        },
+        "executionBinding": {
+          "$ref": "#/$defs/executionBinding"
+        }
+      }
+    },
+    "executionBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "adapterContract",
+        "fixturePayload",
+        "faultInjection",
+        "setup"
+      ],
+      "properties": {
+        "adapterContract": {
+          "const": "public-artifact-surface-v1"
+        },
+        "fixturePayload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "generator",
+            "seed",
+            "cardinality",
+            "payloadSha256",
+            "semanticSha256"
+          ],
+          "properties": {
+            "generator": { "type": "string", "minLength": 1 },
+            "seed": { "type": ["integer", "null"], "minimum": 0 },
+            "cardinality": { "type": ["integer", "null"], "minimum": 0 },
+            "payloadSha256": { "$ref": "#/$defs/sha256" },
+            "semanticSha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "faultInjection": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "method",
+                "originalWorkerSha256",
+                "replacementWorkerSha256"
+              ],
+              "properties": {
+                "method": {
+                  "const": "playwright-exact-worker-response-substitution-v1"
+                },
+                "originalWorkerSha256": { "$ref": "#/$defs/sha256" },
+                "replacementWorkerSha256": { "$ref": "#/$defs/sha256" }
+              }
+            }
+          ]
+        },
+        "setup": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "method",
+                "timing",
+                "readback",
+                "databaseName",
+                "databaseVersion",
+                "storeName",
+                "controlStoreName",
+                "key",
+                "transactionStores",
+                "payloadSha256",
+                "semanticSha256",
+                "itemCount",
+                "revision"
+              ],
+              "properties": {
+                "method": {
+                  "const": "indexeddb-schema-exact-single-transaction-stage-v1"
+                },
+                "timing": { "const": "excluded-from-measurement-v1" },
+                "readback": {
+                  "const": "separate-readonly-transaction-v1"
+                },
+                "databaseName": { "const": "EventShoppingPlannerDB" },
+                "databaseVersion": {
+                  "type": "integer",
+                  "minimum": 5,
+                  "maximum": 7
+                },
+                "storeName": { "const": "eventLists" },
+                "controlStoreName": { "const": "syncQueue" },
+                "key": { "const": "data" },
+                "transactionStores": {
+                  "type": "array",
+                  "prefixItems": [
+                    { "const": "eventLists" },
+                    { "const": "syncQueue" }
+                  ],
+                  "items": false,
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "payloadSha256": { "$ref": "#/$defs/sha256" },
+                "semanticSha256": { "$ref": "#/$defs/sha256" },
+                "itemCount": { "const": 50000 },
+                "revision": {
+                  "type": "string",
+                  "pattern": "^performance-stage:[0-9a-f]{64}$"
+                }
+              }
+            }
+          ]
         }
       }
     }

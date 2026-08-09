@@ -2,6 +2,22 @@ import type {
   StartupRecoveryBundle,
   StartupRecoveryCandidate,
 } from "../../utils/persistenceResilience";
+import type {
+  BlockDetectionSettings,
+  BlockDetectionSettingsStore,
+} from "../../types/map";
+
+export class PersistenceSettingsRollbackError extends Error {
+  readonly originalError: unknown;
+  readonly rollbackError: unknown;
+
+  constructor(originalError: unknown, rollbackError: unknown) {
+    super("Auxiliary settings could not be rolled back after restore failure.");
+    this.name = "PersistenceSettingsRollbackError";
+    this.originalError = originalError;
+    this.rollbackError = rollbackError;
+  }
+}
 
 export interface PersistenceSnapshot {
   eventLists: Record<string, unknown[]>;
@@ -47,7 +63,25 @@ export type PersistenceMigrationCommandResult =
       recoveryBundle: StartupRecoveryBundle;
     };
 
-export interface PersistenceCommandPort {
+export interface PreferencePersistencePort {
+  loadPreference(key: string): string | null;
+  savePreference(key: string, value: string): void;
+}
+
+export interface PersistenceCommandPort extends PreferencePersistencePort {
+  readBlockDetectionSettings(eventName: string): BlockDetectionSettings | null;
+  readBlockDetectionSettingsForBackup(
+    eventNames: readonly string[],
+  ): BlockDetectionSettingsStore;
+  saveBlockDetectionSettings(
+    eventName: string,
+    settings: BlockDetectionSettings,
+  ): void;
+  removeBlockDetectionSettingsForEvent(eventName: string): void;
+  renameBlockDetectionSettingsForEvent(
+    oldEventName: string,
+    newEventName: string,
+  ): void;
   migrateFromLocalStorage(): Promise<PersistenceMigrationCommandResult>;
   adoptRecoveryCandidate(candidate: StartupRecoveryCandidate): Promise<void>;
   saveEventLists(value: PersistenceSnapshot["eventLists"]): Promise<void>;
@@ -74,4 +108,21 @@ export interface PersistenceCommandPort {
     value: PersistenceSnapshot["mapViewportSettings"],
   ): Promise<void>;
   restoreAppDataAtomically(snapshot: PersistenceSnapshot): Promise<void>;
+  commitApplicationSnapshotAtomically(
+    snapshot: PersistenceSnapshot,
+  ): Promise<void>;
+  deleteEventAtomically(
+    snapshot: PersistenceSnapshot,
+    eventName: string,
+  ): Promise<void>;
+  renameEventAtomically(
+    snapshot: PersistenceSnapshot,
+    oldEventName: string,
+    newEventName: string,
+  ): Promise<void>;
+  restoreAppDataWithBlockDetectionSettings(
+    snapshot: PersistenceSnapshot,
+    eventName: string,
+    settings: BlockDetectionSettings | null,
+  ): Promise<void>;
 }

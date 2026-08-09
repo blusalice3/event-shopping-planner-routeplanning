@@ -1,5 +1,6 @@
 import { parseJsonStrict, sha256Bytes } from "../lib/canonical-json.mjs";
 import { readCurrentReleaseState } from "./currentReleaseState.mjs";
+import { reduceReleaseState } from "./releaseStateReducer.mjs";
 import {
   NAMESPACE_PATTERN,
   assertDeploymentBinding,
@@ -13,6 +14,8 @@ import {
 } from "./releaseWorkflowValidation.mjs";
 
 export const PROVIDER_ALIAS_OBSERVATION_KIND = "provider-alias-observation/v1";
+export const PROVIDER_ALIAS_OBSERVATION_MEDIA_TYPE =
+  "application/vnd.event-shopping-planner.provider-alias-observation+json;version=1";
 export const RECONCILE_DECISION_KIND = "release-state-reconcile-decision/v1";
 
 const OBSERVATION_KEYS = [
@@ -44,6 +47,8 @@ const PROVIDER_RECEIPT_MEDIA_TYPE =
   "application/vnd.event-shopping-planner.vercel-alias-receipt+json;version=1";
 const PROVIDER_RESPONSE_MEDIA_TYPE =
   "application/vnd.vercel.alias-response+json";
+const PROVIDER_POLICY_MEDIA_TYPE =
+  "application/vnd.event-shopping-planner.provider-policy+json;version=1";
 
 const sortedUniqueStrings = (values) => [...new Set(values)].sort(compareUtf8);
 
@@ -73,6 +78,84 @@ const assertProviderPolicy = (policy) => {
       `Provider policy is not configured: ${(policy?.blockerCodes ?? []).join(", ")}`,
     );
   }
+};
+
+export const resolvePendingProviderAuthority = async (
+  { store, current: suppliedCurrent = null },
+  { readState = readCurrentReleaseState } = {},
+) => {
+  if (
+    !store ||
+    typeof store.readEvidence !== "function" ||
+    typeof store.readHead !== "function" ||
+    typeof store.readEvents !== "function"
+  ) {
+    throw new Error("Release State store lacks provider authority reads");
+  }
+  const current = suppliedCurrent ?? (await readState({ store }));
+  const namespace = current.records[0]?.event?.namespace;
+  const pending = current.snapshot.pendingOperation;
+  if (pending === null || !NAMESPACE_PATTERN.test(namespace)) {
+    throw new Error("Provider authority requires a replayed pending operation");
+  }
+  const candidateBindings = [
+    ["target", pending.targetBinding],
+    ["previous", pending.previousBinding],
+    ["emergency", pending.emergencyRecoveryBinding],
+  ].filter(([, binding]) => binding !== null);
+  for (const [kind, binding] of candidateBindings) {
+    assertDeploymentBinding(binding, {
+      namespace,
+      allowLegacyBootstrap: true,
+      label: `Pending ${kind} provider binding`,
+    });
+    await validateProviderEvidenceForBinding({
+      store,
+      namespace,
+      binding,
+      label: `Pending ${kind} provider binding`,
+    });
+  }
+  const policyReference = candidateBindings[0]?.[1]?.providerPolicy;
+  if (
+    policyReference === undefined ||
+    candidateBindings.some(
+      ([, binding]) =>
+        !sameCanonicalValue(binding.providerPolicy, policyReference),
+    )
+  ) {
+    throw new Error("Pending provider bindings do not share one policy");
+  }
+  const storedPolicy = await assertEvidenceObjectAvailable({
+    store,
+    reference: policyReference,
+    namespace,
+    label: "Pending provider policy",
+  });
+  if (storedPolicy.mediaType !== PROVIDER_POLICY_MEDIA_TYPE) {
+    throw new Error("Pending provider policy media type is invalid");
+  }
+  const providerPolicy = parseCanonicalJsonBytes(
+    storedPolicy.bytes,
+    "Pending provider policy",
+  );
+  assertProviderPolicy(providerPolicy);
+  if (
+    candidateBindings.some(
+      ([, binding]) =>
+        binding.providerProjectId !== providerPolicy.expectedProjectId,
+    )
+  ) {
+    throw new Error("Pending provider binding project differs from policy");
+  }
+  return {
+    current,
+    namespace,
+    pending,
+    providerPolicy,
+    providerPolicyReference: policyReference,
+    candidateBindings: Object.fromEntries(candidateBindings),
+  };
 };
 
 const parseObservation = (observationBytes) => {
@@ -155,6 +238,7 @@ const validateProviderReceiptChain = async ({
   observation,
   providerPolicy,
   nowMilliseconds,
+  freshnessRequired = true,
 }) => {
   if (
     observation.providerReceiptReferences.length !==
@@ -202,10 +286,12 @@ const validateProviderReceiptChain = async ({
       receipt.requestUrl !== receipt.responseUrl ||
       !Number.isFinite(providerTimestamp) ||
       receipt.providerDate !== new Date(providerTimestamp).toISOString() ||
-      nowMilliseconds - providerTimestamp >
-        providerPolicy.observationPolicy.maxResponseAgeSeconds * 1000 ||
-      providerTimestamp - nowMilliseconds >
-        providerPolicy.observationPolicy.maxFutureClockSkewSeconds * 1000 ||
+      (freshnessRequired &&
+        (nowMilliseconds - providerTimestamp >
+          providerPolicy.observationPolicy.maxResponseAgeSeconds * 1000 ||
+          providerTimestamp - nowMilliseconds >
+            providerPolicy.observationPolicy.maxFutureClockSkewSeconds *
+              1000)) ||
       receipt.responseSha256 !== receipt.responseReference?.sha256
     ) {
       throw new Error("Provider alias receipt binding is invalid");
@@ -269,8 +355,7 @@ export const storeProviderAliasObservation = async ({
     );
   }
   const sha256 = sha256Bytes(observationBytes);
-  const mediaType =
-    "application/vnd.event-shopping-planner.provider-alias-observation+json;version=1";
+  const mediaType = PROVIDER_ALIAS_OBSERVATION_MEDIA_TYPE;
   const receipt = await store.putEvidence({
     bytes: observationBytes,
     mediaType,
@@ -289,6 +374,132 @@ export const storeProviderAliasObservation = async ({
   return {
     uri: receipt.uri,
     sha256: receipt.sha256,
+  };
+};
+
+export const validateProviderAliasObservationEvidence = async (
+  {
+    store,
+    observationBytes: suppliedBytes,
+    providerPolicy,
+    namespace,
+    expectedBinding = undefined,
+    freshnessRequired = true,
+  },
+  { now = Date.now } = {},
+) => {
+  if (!store || typeof store.readEvidence !== "function") {
+    throw new Error("Release State store lacks provider evidence reads");
+  }
+  assertProviderPolicy(providerPolicy);
+  const observationBytes = Buffer.isBuffer(suppliedBytes)
+    ? suppliedBytes
+    : Buffer.from(suppliedBytes ?? "");
+  const observation = parseObservation(observationBytes);
+  if (
+    observation.namespace !== namespace ||
+    (store.namespace !== undefined && store.namespace !== namespace)
+  ) {
+    throw new Error("Provider observation namespace differs from the store");
+  }
+  const nowMilliseconds = now();
+  if (!Number.isFinite(nowMilliseconds)) {
+    throw new Error("Provider observation clock is invalid");
+  }
+  const observationSha256 = sha256Bytes(observationBytes);
+  const observationReference = {
+    uri: `release-state://${namespace}/evidence/${observationSha256}`,
+    sha256: observationSha256,
+  };
+  const storedObservation = await assertEvidenceObjectAvailable({
+    store,
+    reference: observationReference,
+    namespace,
+    label: "Provider alias observation",
+  });
+  if (
+    storedObservation.mediaType !== PROVIDER_ALIAS_OBSERVATION_MEDIA_TYPE ||
+    !storedObservation.bytes.equals(observationBytes)
+  ) {
+    throw new Error("Stored provider observation bytes differ");
+  }
+  const providerReceiptChainReferences = await validateProviderReceiptChain({
+    store,
+    namespace,
+    observation,
+    providerPolicy,
+    nowMilliseconds,
+    freshnessRequired,
+  });
+  const providerResponseReferences = [];
+  for (const reference of providerReceiptChainReferences) {
+    const stored = await assertEvidenceObjectAvailable({
+      store,
+      reference,
+      namespace,
+      label: "Provider receipt-chain object",
+    });
+    if (stored.mediaType === PROVIDER_RESPONSE_MEDIA_TYPE) {
+      providerResponseReferences.push(reference);
+    }
+  }
+  const expectedDomains = sortedUniqueStrings(
+    providerPolicy.ownedProductionDomains,
+  );
+  const assignments = [...observation.assignments].sort((left, right) =>
+    compareUtf8(left.productionDomain, right.productionDomain),
+  );
+  if (
+    observation.providerProjectId !== providerPolicy.expectedProjectId ||
+    !sameCanonicalValue(assignments, observation.assignments) ||
+    !sameCanonicalValue(
+      assignments.map(({ productionDomain }) => productionDomain),
+      expectedDomains,
+    )
+  ) {
+    throw new Error(
+      "Provider observation is partial, ambiguous, or noncanonical",
+    );
+  }
+  const deploymentIds = sortedUniqueStrings(
+    assignments.map(({ assignedDeploymentId }) => assignedDeploymentId),
+  );
+  if (deploymentIds.length !== 1) {
+    throw new Error("Provider observation deployment assignment is ambiguous");
+  }
+  if (expectedBinding === null) {
+    if (observation.observedBinding !== null) {
+      throw new Error("Legacy provider observation must not claim a binding");
+    }
+  } else if (expectedBinding !== undefined) {
+    assertDeploymentBinding(expectedBinding, {
+      namespace,
+      allowLegacyBootstrap: true,
+      label: "Expected provider binding",
+    });
+    if (
+      !sameCanonicalValue(observation.observedBinding, expectedBinding) ||
+      deploymentIds[0] !== expectedBinding.providerDeploymentId ||
+      observation.providerProjectId !== expectedBinding.providerProjectId
+    ) {
+      throw new Error("Provider observation differs from the expected binding");
+    }
+    await validateProviderEvidenceForBinding({
+      store,
+      namespace,
+      binding: expectedBinding,
+      label: "Expected provider binding",
+    });
+  }
+  return {
+    observation,
+    observationReference,
+    providerReceiptChainReferences,
+    providerResponseReferences: sortAndDedupeReferences(
+      providerResponseReferences,
+      namespace,
+    ),
+    observedDeploymentId: deploymentIds[0],
   };
 };
 
@@ -319,16 +530,214 @@ const createDecision = ({
   observedDeploymentId,
 });
 
+const releaseEventReference = (namespace, record) => ({
+  uri:
+    `release-state://${namespace}/events/${record.sequence}/` +
+    record.eventHash,
+  sha256: record.eventHash,
+});
+
+const resolveAcceptedAuthority = ({ current, namespace, binding }) => {
+  const references = [];
+  if (
+    sameCanonicalValue(current.snapshot.acceptedStandard, binding) &&
+    current.snapshot.acceptedStandardEvent !== null
+  ) {
+    references.push(current.snapshot.acceptedStandardEvent);
+  }
+  for (const entry of current.snapshot.rollbackInventory) {
+    if (sameCanonicalValue(entry.binding, binding)) {
+      references.push(entry.acceptedEvent);
+    }
+  }
+  const distinct = [
+    ...new Map(
+      references.map((reference) => [reference.uri, reference]),
+    ).values(),
+  ];
+  if (distinct.length !== 1) {
+    throw new Error(
+      "Reconcile rollback accepted authority is absent or ambiguous",
+    );
+  }
+  let replayed = null;
+  for (const record of current.records) {
+    replayed = reduceReleaseState(replayed, record.event);
+    const reference = releaseEventReference(namespace, record);
+    if (sameCanonicalValue(reference, distinct[0])) {
+      if (
+        record.event.eventType !== "release-accepted" ||
+        !sameCanonicalValue(replayed.acceptedStandard, binding) ||
+        !sameCanonicalValue(replayed.acceptedStandardEvent, reference)
+      ) {
+        throw new Error(
+          "Reconcile accepted event does not authorize the observed standard",
+        );
+      }
+      return {
+        originAcceptedEvent: reference,
+        originAcceptedGate: record.event.payload.acceptedGate,
+        originAcceptedStandardFloors: structuredClone(
+          record.event.payload.acceptedStandardFloors,
+        ),
+      };
+    }
+  }
+  throw new Error("Reconcile rollback accepted event cannot be read back");
+};
+
+const containmentTerminalPlan = ({
+  binding,
+  current,
+  nowMilliseconds,
+  pending,
+}) => {
+  const legacy = binding.publicIdentityKind === "legacy-bootstrap-v1";
+  return {
+    eventType: legacy
+      ? "temporary-containment-activated"
+      : "containment-activated",
+    targetBinding: binding,
+    payload: {
+      binding,
+      activatedAt: new Date(nowMilliseconds).toISOString(),
+      recoveryDeadline: new Date(
+        nowMilliseconds + (legacy ? 6 : 24) * 60 * 60 * 1000,
+      ).toISOString(),
+      targetStandard: current.snapshot.acceptedStandard,
+    },
+    approvalRefs: pending.approvalRefs,
+  };
+};
+
+const buildReconciliationTerminalPlan = ({
+  current,
+  namespace,
+  observedBinding,
+  observedKind,
+  nowMilliseconds,
+  pending,
+}) => {
+  if (observedKind === "target") {
+    if (pending.kind === "promote-standard") return null;
+    if (pending.kind === "rollback-standard") {
+      return {
+        eventType: "rollback-activated",
+        targetBinding: pending.targetBinding,
+        payload: {
+          binding: pending.targetBinding,
+          companionBinding: pending.companionBinding,
+          ...resolveAcceptedAuthority({
+            current,
+            namespace,
+            binding: pending.targetBinding,
+          }),
+        },
+        approvalRefs: pending.approvalRefs,
+      };
+    }
+    if (pending.kind === "activate-containment") {
+      return containmentTerminalPlan({
+        binding: pending.targetBinding,
+        current,
+        nowMilliseconds,
+        pending,
+      });
+    }
+    if (pending.kind === "redeploy-containment") {
+      const terminal = containmentTerminalPlan({
+        binding: pending.targetBinding,
+        current,
+        nowMilliseconds,
+        pending,
+      });
+      return {
+        ...terminal,
+        eventType: "package-redeploy-activated",
+        payload: { ...terminal.payload, releaseRole: "containment" },
+      };
+    }
+    if (pending.kind === "redeploy-standard") {
+      const accepted = resolveAcceptedAuthority({
+        current,
+        namespace,
+        binding: pending.originBinding,
+      });
+      const rollbackInventory = current.snapshot.rollbackInventory
+        .map((entry) =>
+          sameCanonicalValue(entry.binding, pending.originBinding)
+            ? { ...structuredClone(entry), binding: pending.targetBinding }
+            : structuredClone(entry),
+        )
+        .sort((left, right) =>
+          compareUtf8(left.binding.bindingId, right.binding.bindingId),
+        );
+      return {
+        eventType: "package-redeploy-activated",
+        targetBinding: pending.targetBinding,
+        payload: {
+          releaseRole: "standard",
+          standardBinding: pending.targetBinding,
+          companionBinding: pending.companionBinding,
+          rollbackInventory,
+          ...accepted,
+        },
+        approvalRefs: pending.approvalRefs,
+      };
+    }
+    throw new Error("Reconcile target operation kind is unsupported");
+  }
+  if (
+    observedKind === "previous" &&
+    observedBinding.releaseRole === "standard"
+  ) {
+    const companionBinding =
+      pending.originBinding !== null &&
+      sameCanonicalValue(observedBinding, pending.originBinding)
+        ? pending.originCompanionBinding
+        : current.snapshot.containmentCompanion;
+    if (companionBinding === null) {
+      throw new Error("Reconcile previous standard companion is absent");
+    }
+    return {
+      eventType: "rollback-activated",
+      targetBinding: observedBinding,
+      payload: {
+        binding: observedBinding,
+        companionBinding,
+        ...resolveAcceptedAuthority({
+          current,
+          namespace,
+          binding: observedBinding,
+        }),
+      },
+      approvalRefs: pending.approvalRefs,
+    };
+  }
+  if (observedBinding.releaseRole !== "containment") {
+    throw new Error("Reconcile recovery binding role is unsupported");
+  }
+  return containmentTerminalPlan({
+    binding: observedBinding,
+    current,
+    nowMilliseconds,
+    pending,
+  });
+};
+
 export const decideProviderReconciliation = async (
   options,
   { readState = readCurrentReleaseState, now = Date.now } = {},
 ) => {
-  if (Object.hasOwn(options, "snapshot")) {
+  if (
+    Object.hasOwn(options, "snapshot") ||
+    Object.hasOwn(options, "providerPolicy")
+  ) {
     throw new Error(
-      "Caller-supplied snapshot is forbidden; Release State is replayed from the store",
+      "Caller-supplied snapshot or provider policy is forbidden; authority is replayed from Release State",
     );
   }
-  const { store, observationBytes: suppliedBytes, providerPolicy } = options;
+  const { store, observationBytes: suppliedBytes } = options;
   if (
     !store ||
     typeof store.readEvidence !== "function" ||
@@ -337,7 +746,6 @@ export const decideProviderReconciliation = async (
   ) {
     throw new Error("Release State store lacks reconcile read operations");
   }
-  assertProviderPolicy(providerPolicy);
   const observationBytes = Buffer.isBuffer(suppliedBytes)
     ? suppliedBytes
     : Buffer.from(suppliedBytes ?? "");
@@ -347,7 +755,11 @@ export const decideProviderReconciliation = async (
     throw new Error("Provider reconciliation clock is invalid");
   }
   const current = await readState({ store });
-  const namespace = current.records[0]?.event?.namespace;
+  const authority = await resolvePendingProviderAuthority(
+    { store, current },
+    { readState },
+  );
+  const { namespace, pending, providerPolicy } = authority;
   if (
     observation.namespace !== namespace ||
     (store.namespace !== undefined && store.namespace !== namespace)
@@ -370,7 +782,10 @@ export const decideProviderReconciliation = async (
       namespace,
       label: "Provider alias observation",
     });
-    if (!storedObservation.bytes.equals(observationBytes)) {
+    if (
+      storedObservation.mediaType !== PROVIDER_ALIAS_OBSERVATION_MEDIA_TYPE ||
+      !storedObservation.bytes.equals(observationBytes)
+    ) {
       reasons.push("provider-observation-bytes-differ");
     }
   } catch {
@@ -389,14 +804,9 @@ export const decideProviderReconciliation = async (
     reasons.push("provider-receipt-chain-unverifiable");
   }
 
-  const pending = current.snapshot.pendingOperation;
-  if (pending === null) {
-    reasons.push("no-pending-operation");
-  }
   if (
     observation.providerProjectId !== providerPolicy.expectedProjectId ||
-    (pending !== null &&
-      observation.providerProjectId !== pending.targetBinding.providerProjectId)
+    observation.providerProjectId !== pending.targetBinding.providerProjectId
   ) {
     reasons.push("provider-project-mismatch");
   }
@@ -438,19 +848,30 @@ export const decideProviderReconciliation = async (
   }
   const observedDeploymentId =
     deploymentIds.length === 1 ? deploymentIds[0] : null;
-  const target = pending?.targetBinding ?? null;
-  if (target !== null && observedDeploymentId !== null) {
-    if (observedDeploymentId !== target.providerDeploymentId) {
-      const knownRecoveryIds = [
-        pending.previousBinding?.providerDeploymentId,
-        pending.emergencyRecoveryBinding?.providerDeploymentId,
-      ].filter(Boolean);
-      reasons.push(
-        knownRecoveryIds.includes(observedDeploymentId)
-          ? "provider-assignment-not-target"
-          : "unknown-provider-deployment",
-      );
-    }
+  const target = pending.targetBinding;
+  const bindingCandidates = [
+    ["target", target],
+    ["previous", pending.previousBinding],
+    ["emergency", pending.emergencyRecoveryBinding],
+  ].filter(([, binding]) => binding !== null);
+  const deploymentMatches =
+    observedDeploymentId === null
+      ? []
+      : bindingCandidates.filter(
+          ([, binding]) =>
+            binding.providerDeploymentId === observedDeploymentId,
+        );
+  if (deploymentMatches.length === 0 && observedDeploymentId !== null) {
+    reasons.push("unknown-provider-deployment");
+  }
+  const observedCandidate = deploymentMatches[0] ?? null;
+  if (
+    deploymentMatches.some(
+      ([, binding]) =>
+        !sameCanonicalValue(binding, observedCandidate?.[1] ?? null),
+    )
+  ) {
+    reasons.push("ambiguous-known-provider-deployment");
   }
 
   if (observation.observedBinding === null) {
@@ -459,13 +880,12 @@ export const decideProviderReconciliation = async (
     try {
       assertDeploymentBinding(observation.observedBinding, {
         namespace,
-        expectedRole: target?.releaseRole ?? null,
         allowLegacyBootstrap: true,
         label: "Observed provider binding",
       });
       if (
-        target === null ||
-        !sameCanonicalValue(observation.observedBinding, target)
+        observedCandidate === null ||
+        !sameCanonicalValue(observation.observedBinding, observedCandidate[1])
       ) {
         reasons.push("provider-binding-mismatch");
       } else {
@@ -481,20 +901,52 @@ export const decideProviderReconciliation = async (
     }
   }
 
+  const observedKind = observedCandidate?.[0] ?? null;
+  const observedBinding = observedCandidate?.[1] ?? null;
+  if (
+    observedKind === "previous" &&
+    pending.originBinding !== null &&
+    sameCanonicalValue(observedBinding, pending.originBinding)
+  ) {
+    reasons.push("provider-previous-is-redeploy-origin");
+  }
+
+  const reconciliationKinds = {
+    target: "provider-target-assigned/v1",
+    previous: "provider-previous-assigned/v1",
+    emergency: "provider-emergency-assigned/v1",
+  };
+
+  let terminalPlan = null;
+  if (reasons.length === 0) {
+    try {
+      terminalPlan = buildReconciliationTerminalPlan({
+        current,
+        namespace,
+        observedBinding,
+        observedKind,
+        nowMilliseconds,
+        pending,
+      });
+    } catch {
+      reasons.push("recovery-terminal-authority-unresolved");
+    }
+  }
   const ready = reasons.length === 0;
   return {
     ...createDecision({
       namespace,
-      operationId: pending?.operationId ?? null,
+      operationId: pending.operationId,
       head: current.head,
       observationSha256,
       status: ready ? "ready" : "blocked",
       action: ready ? "append-state-reconciled" : null,
       reasonCodes: reasons,
-      targetBindingId: target?.bindingId ?? null,
+      targetBindingId: target.bindingId,
       observedDeploymentId,
     }),
     observationReference,
+    terminalPlan: ready ? terminalPlan : null,
     eventPlan: ready
       ? {
           eventType: "state-reconciled",
@@ -504,14 +956,14 @@ export const decideProviderReconciliation = async (
             eventHash: current.head.eventHash,
           },
           payload: {
-            reconciliationKind: "provider-target-assigned/v1",
-            observedBinding: target,
+            reconciliationKind: reconciliationKinds[observedKind],
+            observedBinding,
             providerObservation: observationReference,
           },
           evidenceRefs: sortAndDedupeReferences(
             [
               observationReference,
-              target.providerEvidence,
+              observedBinding.providerEvidence,
               ...providerReceiptChainReferences,
             ],
             namespace,

@@ -9,11 +9,13 @@ export interface XlsxExecutionPort {
   importWorkbook(
     request: XlsxImportRequest,
     signal: AbortSignal,
+    onProgress?: XlsxProgressListener,
   ): Promise<XlsxImportResult>;
 
   exportWorkbook(
     snapshot: ExportSnapshot,
     signal: AbortSignal,
+    onProgress?: XlsxProgressListener,
   ): Promise<Uint8Array>;
 }
 

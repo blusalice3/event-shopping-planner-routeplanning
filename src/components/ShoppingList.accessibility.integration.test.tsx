@@ -85,6 +85,43 @@ const expectAccessibleGroupHeaders = () => {
   }
 };
 
+const expectFullRendererRowsUseSharedController = (
+  expectedGroups: readonly { key: string; label: string }[],
+) => {
+  const list = screen.getByRole("list", { name: "買い物リスト" });
+  expect(list).toHaveAttribute("data-list-renderer", "full");
+  expect(list).toHaveAttribute("data-list-controller", "shared");
+  const expectedRows = expectedGroups.flatMap((group, index) => [
+    {
+      rowKey: `group:${JSON.stringify(group.key)}`,
+      accessibleName: `${group.label} 1件`,
+      positionInSet: null,
+      setSize: null,
+    },
+    {
+      rowKey: `item:${JSON.stringify(groupedItems[index].id)}`,
+      accessibleName: `${groupedItems[index].block}${groupedItems[index].number} ${groupedItems[index].circle} ${groupedItems[index].title}`,
+      positionInSet: String(index + 1),
+      setSize: String(groupedItems.length),
+    },
+  ]);
+  expect(
+    Array.from(list.querySelectorAll<HTMLElement>('[role="listitem"]')).map(
+      (row) => ({
+        rowKey: row.dataset.rowKey,
+        accessibleName: row.getAttribute("aria-label"),
+        positionInSet: row.getAttribute("aria-posinset"),
+        setSize: row.getAttribute("aria-setsize"),
+      }),
+    ),
+  ).toEqual(
+    expectedRows.map((row) => ({
+      ...row,
+      rowKey: row.rowKey,
+    })),
+  );
+};
+
 describe("ShoppingList accessibility", () => {
   it("keeps priority group counts readable in space and hall grouping", () => {
     const { rerender } = render(
@@ -92,10 +129,20 @@ describe("ShoppingList accessibility", () => {
     );
 
     expectAccessibleGroupHeaders();
+    expectFullRendererRowsUseSharedController([
+      { key: "東A-01a:highest", label: "東A-01a" },
+      { key: "東A-02a:priority", label: "東A-02a" },
+      { key: "東A-03a", label: "東A-03a" },
+    ]);
 
     rerender(<ShoppingList {...commonProps} showHallGroups />);
 
     expectAccessibleGroupHeaders();
+    expectFullRendererRowsUseSharedController([
+      { key: "undefined:highest", label: "ホール未定義最優先" },
+      { key: "undefined:priority", label: "ホール未定義優先" },
+      { key: "ungrouped:2", label: "ホール未定義" },
+    ]);
   });
 
   it("renders the add-item form as a named modal with visible labels and contained focus", () => {

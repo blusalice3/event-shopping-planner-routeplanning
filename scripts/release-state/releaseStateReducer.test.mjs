@@ -1,21 +1,49 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   createReleaseEvent,
   hashReleaseEvent,
   reduceReleaseState,
   replayReleaseEvents,
 } from "./releaseStateReducer.mjs";
+import {
+  assertReleaseEventMatchesSchema,
+  assertReleaseStateSnapshotMatchesSchema,
+} from "./releaseStateSchema.mjs";
 
 const sha = (character) => character.repeat(64);
 const sourceSha = "a".repeat(40);
 const namespace = "foundation-test";
+const root = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+);
+const releaseStateSchema = JSON.parse(
+  await readFile(
+    path.join(root, "config", "release-state.schema.json"),
+    "utf8",
+  ),
+);
 const dbCompatibility = {
   contractUri: "urn:test:db:v1",
   fingerprint: sha("d"),
 };
+const nextDbCompatibility = {
+  contractUri: "urn:test:db:v2",
+  fingerprint: sha("e"),
+};
 const objectRef = (character) => ({
   uri: `release-state://${namespace}/evidence/${sha(character)}`,
+  sha256: sha(character),
+});
+const eventRef = (sequence, character) => ({
+  uri: `release-state://${namespace}/events/${sequence}/` + sha(character),
   sha256: sha(character),
 });
 const policyRef = objectRef("1");
@@ -30,6 +58,8 @@ const binding = (role, suffix) => ({
   providerProjectId: "project-test",
   providerDeploymentId: `deployment-${role}-${suffix}`,
   deploymentUrl: `https://${role}-${suffix}.example.test`,
+  artifactArchive: objectRef("7"),
+  artifactArchiveAvailability: objectRef("8"),
   packageIndex: objectRef("2"),
   artifactManifest: objectRef("3"),
   providerEvidence: objectRef("4"),
@@ -62,6 +92,7 @@ const appendEvent = (
   operationId,
   payload,
   approvals = [],
+  evidenceRefs = [objectRef("9")],
 ) =>
   createReleaseEvent({
     namespace,
@@ -70,9 +101,16 @@ const appendEvent = (
     operationId,
     previousEventHash: snapshot?.eventHash ?? null,
     payload,
-    evidenceRefs: [objectRef("9")],
+    evidenceRefs,
     approvalRefs: approvals,
   });
+
+const currentHeadRef = (snapshot) => ({
+  uri:
+    `release-state://${namespace}/events/${snapshot.sequence}/` +
+    snapshot.eventHash,
+  sha256: snapshot.eventHash,
+});
 
 const initializeState = () => {
   const bootstrap = {
@@ -80,6 +118,7 @@ const initializeState = () => {
     publicIdentityKind: "legacy-bootstrap-v1",
   };
   const event = appendEvent(null, "state-initialized", "initialize", {
+    acceptedGate: null,
     legacyObservedProduction: {
       observationUri: objectRef("c").uri,
       observationSha256: sha("c"),
@@ -101,6 +140,8 @@ const inventoryEntry = (
 ) => ({
   binding: standard,
   acceptedEvent: objectRef("4"),
+  acceptedGate: "P0-RELEASE",
+  acceptedStandardFloors: { pwaLifecycle: "outer-agent-v1" },
   evaluatedPolicy: policyRef,
   eligibleActions: actions,
   eligibility: actions.length === 0 ? "ineligible" : "eligible",
@@ -116,6 +157,7 @@ const prepareOperation = (
     companionBinding = null,
     originBinding = null,
     originCompanionBinding = null,
+    emergencyRecoveryBinding = snapshot.bootstrapRecovery,
   },
 ) => {
   const approvals = [
@@ -139,7 +181,7 @@ const prepareOperation = (
         originCompanionBinding,
         companionBinding,
         previousBinding: snapshot.activeProduction,
-        emergencyRecoveryBinding: snapshot.bootstrapRecovery,
+        emergencyRecoveryBinding,
         approvalRefs: approvals,
         preparedAt: "2026-08-01T00:00:00.000Z",
       },
@@ -148,6 +190,76 @@ const prepareOperation = (
   );
   return reduceReleaseState(snapshot, event);
 };
+
+const advanceAssignmentLifecycle = (
+  snapshot,
+  {
+    operationId = snapshot.pendingOperation?.operationId,
+    targetBinding = snapshot.pendingOperation?.targetBinding,
+    assignmentReceipt = objectRef("c"),
+    promotionReceipt = objectRef("d"),
+    assignmentValidation = objectRef("e"),
+    productionProbe = objectRef("f"),
+  } = {},
+) => {
+  if (snapshot.pendingOperation?.reconciliationAuthority !== undefined) {
+    const authority = snapshot.pendingOperation.reconciliationAuthority;
+    return reduceReleaseState(
+      snapshot,
+      appendEvent(
+        snapshot,
+        "assignment-validated",
+        operationId,
+        {
+          reconciliationKind: authority.reconciliationKind,
+          providerObservation: authority.providerObservation,
+          stateReconciled: authority.stateReconciled,
+          targetBinding,
+        },
+        [],
+        [currentHeadRef(snapshot), authority.providerObservation],
+      ),
+    );
+  }
+  let current = reduceReleaseState(
+    snapshot,
+    appendEvent(
+      snapshot,
+      "deployment-assigned",
+      operationId,
+      { assignmentReceipt, promotionReceipt, targetBinding },
+      [],
+      [currentHeadRef(snapshot)],
+    ),
+  );
+  current = reduceReleaseState(
+    current,
+    appendEvent(
+      current,
+      "assignment-validated",
+      operationId,
+      {
+        assignmentReceipt,
+        assignmentValidation,
+        productionProbe,
+        targetBinding,
+      },
+      [],
+      [currentHeadRef(current)],
+    ),
+  );
+  return current;
+};
+
+const appendRecoveryTerminal = (snapshot, eventType, payload, options = {}) =>
+  appendEvent(
+    snapshot,
+    eventType,
+    options.operationId ?? snapshot.pendingOperation?.operationId,
+    payload,
+    options.approvals ?? snapshot.pendingOperation?.approvalRefs,
+    options.evidenceRefs ?? [currentHeadRef(snapshot)],
+  );
 
 test("builds a source-hardened standard acceptance through the event chain", () => {
   let snapshot = initializeState();
@@ -185,12 +297,7 @@ test("builds a source-hardened standard acceptance through the event chain", () 
   snapshot = reduceReleaseState(snapshot, prepared);
   assert.equal(snapshot.pendingOperation?.operationId, operationId);
 
-  for (const eventType of ["deployment-assigned", "assignment-validated"]) {
-    const event = appendEvent(snapshot, eventType, operationId, {
-      evidence: objectRef(eventType === "deployment-assigned" ? "d" : "e"),
-    });
-    snapshot = reduceReleaseState(snapshot, event);
-  }
+  snapshot = advanceAssignmentLifecycle(snapshot);
 
   const observationStartedEvent = objectRef("f");
   const observation = appendEvent(
@@ -222,6 +329,7 @@ test("builds a source-hardened standard acceptance through the event chain", () 
     "release-accepted",
     operationId,
     {
+      acceptedGate: "P0-RELEASE",
       releaseRole: "standard",
       observedThrough: "2026-08-02T00:00:01.000Z",
       acceptedStandardFloors: {
@@ -231,6 +339,10 @@ test("builds a source-hardened standard acceptance through the event chain", () 
         {
           binding: standard,
           acceptedEvent: objectRef("4"),
+          acceptedGate: "P0-RELEASE",
+          acceptedStandardFloors: {
+            pwaLifecycle: "legacy-auto-update-v1",
+          },
           evaluatedPolicy: policyRef,
           eligibleActions: ["package-redeploy", "rollback"],
           eligibility: "eligible",
@@ -384,10 +496,27 @@ test("rejects namespace changes while replaying one event chain", () => {
 test("applies policy and DB compatibility changes with reviewed inventory", () => {
   let snapshot = initializeState();
   const standard = binding("standard", "a");
+  const acceptedEvent = eventRef(snapshot.sequence, "4");
+  snapshot = {
+    ...snapshot,
+    activeProduction: standard,
+    acceptedStandard: standard,
+    acceptedStandardEvent: acceptedEvent,
+    acceptedGate: "P8-CLEAN",
+  };
   const policyOperation = "activate-policy";
   const policyApprovals = [
     approval(policyOperation, "releaseOwner", "1"),
     approval(policyOperation, "dataSafetyReviewer", "2"),
+    approval(policyOperation, "operationsReviewer", "3"),
+  ];
+  const policyClosureBundle = objectRef("a");
+  const policyClosureEvidenceRefs = [
+    objectRef("b"),
+    objectRef("c"),
+    objectRef("d"),
+    objectRef("e"),
+    objectRef("f"),
   ];
   snapshot = reduceReleaseState(
     snapshot,
@@ -396,16 +525,30 @@ test("applies policy and DB compatibility changes with reviewed inventory", () =
       "policy-activated",
       policyOperation,
       {
+        activationGate: "P8-CLEAN",
+        previousReleasePolicy: policyRef,
+        proposedReleasePolicy: policyRef,
         activeReleasePolicy: policyRef,
-        minimumSafetyFloors: { releaseChannel: "release-a" },
+        behaviorDimensionChange: null,
+        minimumSafetyFloorChange: { styleSrcAttr: "none" },
+        minimumSafetyFloors: {
+          ...snapshot.minimumSafetyFloors,
+          styleSrcAttr: "none",
+        },
+        activePolicyCompatibility: [],
+        closureBundle: policyClosureBundle,
+        closureEvidenceRefs: policyClosureEvidenceRefs,
         rollbackInventory: [inventoryEntry(standard)],
       },
       policyApprovals,
+      [policyClosureBundle, ...policyClosureEvidenceRefs],
     ),
   );
   assert.deepEqual(snapshot.rollbackInventory, [inventoryEntry(standard)]);
   assert.deepEqual(snapshot.minimumSafetyFloors, {
     releaseChannel: "release-a",
+    legacyLocalStorageCleanup: "forced-off",
+    styleSrcAttr: "none",
   });
 
   const dbOperation = "activate-db-contract";
@@ -413,6 +556,11 @@ test("applies policy and DB compatibility changes with reviewed inventory", () =
     approval(dbOperation, "releaseOwner", "3"),
     approval(dbOperation, "dataSafetyReviewer", "4"),
   ];
+  const nextStandard = {
+    ...standard,
+    requiredDbCompatibility: nextDbCompatibility,
+  };
+  snapshot = { ...snapshot, activeProduction: nextStandard };
   snapshot = reduceReleaseState(
     snapshot,
     appendEvent(
@@ -420,50 +568,60 @@ test("applies policy and DB compatibility changes with reviewed inventory", () =
       "db-contract-activated",
       dbOperation,
       {
-        currentDbCompatibility: dbCompatibility,
-        rollbackInventory: [inventoryEntry(standard)],
+        previousDbCompatibility: dbCompatibility,
+        currentDbCompatibility: nextDbCompatibility,
+        rollbackInventory: [inventoryEntry(nextStandard)],
       },
       dbApprovals,
     ),
   );
-  assert.deepEqual(snapshot.currentDbCompatibility, dbCompatibility);
+  assert.deepEqual(snapshot.currentDbCompatibility, nextDbCompatibility);
 });
 
 test("activates bootstrap containment, source-hardened containment, and rollback", () => {
   let snapshot = initializeState();
   const bootstrap = snapshot.bootstrapRecovery;
+  snapshot = prepareOperation(snapshot, {
+    operationId: "temporary-containment",
+    kind: "promote-standard",
+    targetBinding: binding("standard", "1"),
+    companionBinding: binding("containment", "2"),
+  });
+  snapshot = advanceAssignmentLifecycle(snapshot);
   snapshot = reduceReleaseState(
     snapshot,
-    appendEvent(
-      snapshot,
-      "temporary-containment-activated",
-      "temporary-containment",
-      {
-        binding: bootstrap,
-        activatedAt: "2026-08-01T00:00:00.000Z",
-        recoveryDeadline: "2026-08-01T01:00:00.000Z",
-        targetStandard: null,
-      },
-    ),
+    appendRecoveryTerminal(snapshot, "temporary-containment-activated", {
+      binding: bootstrap,
+      activatedAt: "2026-08-01T00:00:00.000Z",
+      recoveryDeadline: "2026-08-01T01:00:00.000Z",
+      targetStandard: null,
+    }),
   );
   assert.equal(snapshot.containmentIncident?.kind, "legacy-bootstrap");
   assert.equal(snapshot.standardRecovery?.targetStandard, null);
 
   const containment = binding("containment", "c");
   const targetStandard = binding("standard", "d");
+  snapshot = {
+    ...snapshot,
+    acceptedStandard: targetStandard,
+    acceptedStandardEvent: objectRef("4"),
+    containmentCompanion: containment,
+  };
+  snapshot = prepareOperation(snapshot, {
+    operationId: "source-hardened-containment",
+    kind: "activate-containment",
+    targetBinding: containment,
+  });
+  snapshot = advanceAssignmentLifecycle(snapshot);
   snapshot = reduceReleaseState(
     snapshot,
-    appendEvent(
-      snapshot,
-      "containment-activated",
-      "source-hardened-containment",
-      {
-        binding: containment,
-        activatedAt: "2026-08-01T02:00:00.000Z",
-        recoveryDeadline: "2026-08-01T03:00:00.000Z",
-        targetStandard,
-      },
-    ),
+    appendRecoveryTerminal(snapshot, "containment-activated", {
+      binding: containment,
+      activatedAt: "2026-08-01T02:00:00.000Z",
+      recoveryDeadline: "2026-08-01T03:00:00.000Z",
+      targetStandard,
+    }),
   );
   assert.equal(snapshot.containmentIncident?.kind, "source-hardened");
   assert.equal(
@@ -473,20 +631,162 @@ test("activates bootstrap containment, source-hardened containment, and rollback
 
   const standard = binding("standard", "e");
   const companion = binding("containment", "f");
+  const rollbackAuthority = inventoryEntry(standard).acceptedEvent;
   snapshot = {
     ...snapshot,
     rollbackInventory: [inventoryEntry(standard)],
   };
+  snapshot = prepareOperation(snapshot, {
+    operationId: "rollback",
+    kind: "rollback-standard",
+    targetBinding: standard,
+    companionBinding: companion,
+  });
+  snapshot = advanceAssignmentLifecycle(snapshot);
   snapshot = reduceReleaseState(
     snapshot,
-    appendEvent(snapshot, "rollback-activated", "rollback", {
-      binding: standard,
-      companionBinding: companion,
-    }),
+    appendRecoveryTerminal(
+      snapshot,
+      "rollback-activated",
+      {
+        binding: standard,
+        companionBinding: companion,
+        originAcceptedEvent: rollbackAuthority,
+        originAcceptedGate: "P0-RELEASE",
+        originAcceptedStandardFloors: { pwaLifecycle: "outer-agent-v1" },
+      },
+      {
+        evidenceRefs: [currentHeadRef(snapshot), rollbackAuthority],
+      },
+    ),
   );
   assert.equal(snapshot.activeProduction?.bindingId, standard.bindingId);
   assert.equal(snapshot.containmentCompanion?.bindingId, companion.bindingId);
+  assert.deepEqual(snapshot.acceptedStandardEvent, rollbackAuthority);
+  assert.deepEqual(snapshot.acceptedStandardFloors, {
+    pwaLifecycle: "outer-agent-v1",
+  });
   assert.equal(snapshot.containmentIncident, null);
+});
+
+test("rejects unauthorized or incomplete recovery terminal events", () => {
+  const directSnapshot = initializeState();
+  assert.throws(
+    () =>
+      reduceReleaseState(
+        directSnapshot,
+        appendEvent(
+          directSnapshot,
+          "containment-activated",
+          "direct-containment",
+          {
+            binding: binding("containment", "1"),
+            activatedAt: "2026-08-01T00:00:00.000Z",
+            recoveryDeadline: "2026-08-01T01:00:00.000Z",
+            targetStandard: null,
+          },
+          [],
+          [currentHeadRef(directSnapshot)],
+        ),
+      ),
+    /No release operation is pending/,
+  );
+  assert.throws(
+    () =>
+      reduceReleaseState(
+        directSnapshot,
+        appendEvent(
+          directSnapshot,
+          "rollback-activated",
+          "direct-rollback",
+          {
+            binding: binding("standard", "2"),
+            companionBinding: binding("containment", "3"),
+          },
+          [],
+          [currentHeadRef(directSnapshot)],
+        ),
+      ),
+    /No release operation is pending/,
+  );
+
+  const target = binding("containment", "4");
+  let partial = prepareOperation(directSnapshot, {
+    operationId: "partial-assignment",
+    kind: "activate-containment",
+    targetBinding: target,
+  });
+  partial = reduceReleaseState(
+    partial,
+    appendEvent(
+      partial,
+      "deployment-assigned",
+      "partial-assignment",
+      {
+        assignmentReceipt: objectRef("c"),
+        promotionReceipt: objectRef("d"),
+        targetBinding: target,
+      },
+      [],
+      [currentHeadRef(partial)],
+    ),
+  );
+  assert.throws(
+    () =>
+      reduceReleaseState(
+        partial,
+        appendRecoveryTerminal(partial, "containment-activated", {
+          binding: target,
+          activatedAt: "2026-08-01T00:00:00.000Z",
+          recoveryDeadline: "2026-08-01T01:00:00.000Z",
+          targetStandard: null,
+        }),
+      ),
+    /requires assignment and validation lifecycle events/,
+  );
+
+  let prepared = prepareOperation(directSnapshot, {
+    operationId: "guard-terminal",
+    kind: "activate-containment",
+    targetBinding: target,
+  });
+  prepared = advanceAssignmentLifecycle(prepared);
+  assert.throws(
+    () =>
+      reduceReleaseState(
+        prepared,
+        appendRecoveryTerminal(prepared, "containment-activated", {
+          binding: binding("containment", "5"),
+          activatedAt: "2026-08-01T00:00:00.000Z",
+          recoveryDeadline: "2026-08-01T01:00:00.000Z",
+          targetStandard: null,
+        }),
+      ),
+    /differs from the prepared operation/,
+  );
+  assert.throws(
+    () =>
+      reduceReleaseState(
+        prepared,
+        appendRecoveryTerminal(
+          prepared,
+          "containment-activated",
+          {
+            binding: target,
+            activatedAt: "2026-08-01T00:00:00.000Z",
+            recoveryDeadline: "2026-08-01T01:00:00.000Z",
+            targetStandard: null,
+          },
+          {
+            approvals: [
+              approval("guard-terminal", "releaseOwner", "1"),
+              approval("guard-terminal", "dataSafetyReviewer", "2"),
+            ],
+          },
+        ),
+      ),
+    /approvals differ from the prepared operation/,
+  );
 });
 
 test("applies prepared standard and containment package redeploys", () => {
@@ -495,6 +795,20 @@ test("applies prepared standard and containment package redeploys", () => {
   const originCompanion = binding("containment", "2");
   const nextStandard = binding("standard", "3");
   const nextCompanion = binding("containment", "4");
+  const newerStandard = binding("standard", "9");
+  const newerCompanion = binding("containment", "a");
+  const originAuthority = inventoryEntry(originStandard).acceptedEvent;
+  const originFloors = { pwaLifecycle: "outer-agent-v1" };
+  snapshot = {
+    ...snapshot,
+    activeProduction: newerStandard,
+    acceptedStandard: newerStandard,
+    acceptedStandardEvent: eventRef(3, "b"),
+    acceptedGate: "P1-PWA",
+    acceptedStandardFloors: { pwaLifecycle: "outer-agent-v2" },
+    containmentCompanion: newerCompanion,
+    rollbackInventory: [inventoryEntry(originStandard)],
+  };
   snapshot = prepareOperation(snapshot, {
     operationId: "redeploy-standard",
     kind: "redeploy-standard",
@@ -503,16 +817,30 @@ test("applies prepared standard and containment package redeploys", () => {
     originBinding: originStandard,
     originCompanionBinding: originCompanion,
   });
+  snapshot = advanceAssignmentLifecycle(snapshot);
   snapshot = reduceReleaseState(
     snapshot,
-    appendEvent(snapshot, "package-redeploy-activated", "redeploy-standard", {
-      releaseRole: "standard",
-      standardBinding: nextStandard,
-      companionBinding: nextCompanion,
-      rollbackInventory: [inventoryEntry(nextStandard)],
-    }),
+    appendRecoveryTerminal(
+      snapshot,
+      "package-redeploy-activated",
+      {
+        releaseRole: "standard",
+        standardBinding: nextStandard,
+        companionBinding: nextCompanion,
+        rollbackInventory: [inventoryEntry(nextStandard)],
+        originAcceptedEvent: originAuthority,
+        originAcceptedGate: "P0-RELEASE",
+        originAcceptedStandardFloors: originFloors,
+      },
+      {
+        evidenceRefs: [currentHeadRef(snapshot), originAuthority],
+      },
+    ),
   );
   assert.equal(snapshot.acceptedStandard?.bindingId, nextStandard.bindingId);
+  assert.deepEqual(snapshot.acceptedStandardEvent, originAuthority);
+  assert.equal(snapshot.acceptedGate, "P0-RELEASE");
+  assert.deepEqual(snapshot.acceptedStandardFloors, originFloors);
   assert.equal(snapshot.pendingOperation, null);
 
   const originContainment = binding("containment", "5");
@@ -523,20 +851,16 @@ test("applies prepared standard and containment package redeploys", () => {
     targetBinding: nextContainment,
     originBinding: originContainment,
   });
+  snapshot = advanceAssignmentLifecycle(snapshot);
   snapshot = reduceReleaseState(
     snapshot,
-    appendEvent(
-      snapshot,
-      "package-redeploy-activated",
-      "redeploy-containment",
-      {
-        releaseRole: "containment",
-        binding: nextContainment,
-        activatedAt: "2026-08-01T04:00:00.000Z",
-        recoveryDeadline: "2026-08-01T05:00:00.000Z",
-        targetStandard: nextStandard,
-      },
-    ),
+    appendRecoveryTerminal(snapshot, "package-redeploy-activated", {
+      releaseRole: "containment",
+      binding: nextContainment,
+      activatedAt: "2026-08-01T04:00:00.000Z",
+      recoveryDeadline: "2026-08-01T05:00:00.000Z",
+      targetStandard: nextStandard,
+    }),
   );
   assert.equal(snapshot.activeProduction?.bindingId, nextContainment.bindingId);
   assert.equal(snapshot.containmentIncident?.kind, "source-hardened");
@@ -586,6 +910,162 @@ test("reconciles and aborts only the currently prepared operation", () => {
   );
 });
 
+test("reconciles a previous accepted standard and restores its accepted event and floors atomically", () => {
+  let snapshot = initializeState();
+  const previous = binding("standard", "7");
+  const companion = binding("containment", "8");
+  const acceptedEvent = eventRef(2, "a");
+  const acceptedFloors = { pwaLifecycle: "outer-agent-v1" };
+  snapshot = {
+    ...snapshot,
+    activeProduction: previous,
+    acceptedStandard: previous,
+    acceptedStandardEvent: acceptedEvent,
+    acceptedGate: "P0-RELEASE",
+    acceptedStandardFloors: acceptedFloors,
+    containmentCompanion: companion,
+    rollbackInventory: [
+      {
+        ...inventoryEntry(previous),
+        acceptedEvent,
+        acceptedGate: "P0-RELEASE",
+        acceptedStandardFloors: acceptedFloors,
+      },
+    ],
+  };
+  snapshot = prepareOperation(snapshot, {
+    operationId: "reconcile-previous-standard",
+    kind: "promote-standard",
+    targetBinding: binding("standard", "9"),
+    companionBinding: binding("containment", "a"),
+  });
+  const observation = objectRef("b");
+  snapshot = reduceReleaseState(
+    snapshot,
+    appendEvent(
+      snapshot,
+      "state-reconciled",
+      "reconcile-previous-standard",
+      {
+        reconciliationKind: "provider-previous-assigned/v1",
+        observedBinding: previous,
+        providerObservation: observation,
+      },
+      [],
+      [observation],
+    ),
+  );
+  assert.equal(snapshot.pendingOperation.kind, "rollback-standard");
+  assert.equal(
+    snapshot.pendingOperation.targetBinding.bindingId,
+    previous.bindingId,
+  );
+  assert.throws(
+    () =>
+      reduceReleaseState(
+        snapshot,
+        appendEvent(
+          snapshot,
+          "deployment-assigned",
+          "reconcile-previous-standard",
+          {
+            assignmentReceipt: observation,
+            promotionReceipt: observation,
+            targetBinding: previous,
+          },
+          [],
+          [currentHeadRef(snapshot), observation],
+        ),
+      ),
+    /differs from the prepared target/,
+  );
+  assert.throws(
+    () =>
+      reduceReleaseState(
+        snapshot,
+        appendEvent(
+          snapshot,
+          "assignment-validated",
+          "reconcile-previous-standard",
+          {
+            assignmentReceipt: observation,
+            assignmentValidation: observation,
+            productionProbe: observation,
+            targetBinding: previous,
+          },
+          [],
+          [currentHeadRef(snapshot), observation],
+        ),
+      ),
+    /differs from its authority/,
+  );
+  snapshot = advanceAssignmentLifecycle(snapshot);
+  snapshot = reduceReleaseState(
+    snapshot,
+    appendRecoveryTerminal(
+      snapshot,
+      "rollback-activated",
+      {
+        binding: previous,
+        companionBinding: companion,
+        originAcceptedEvent: acceptedEvent,
+        originAcceptedGate: "P0-RELEASE",
+        originAcceptedStandardFloors: acceptedFloors,
+      },
+      { evidenceRefs: [currentHeadRef(snapshot), acceptedEvent] },
+    ),
+  );
+  assert.equal(snapshot.pendingOperation, null);
+  assert.deepEqual(snapshot.acceptedStandardEvent, acceptedEvent);
+  assert.equal(snapshot.acceptedGate, "P0-RELEASE");
+  assert.deepEqual(snapshot.acceptedStandardFloors, acceptedFloors);
+});
+
+test("reconciles a source-hardened emergency only as prepared containment recovery", () => {
+  let snapshot = initializeState();
+  const emergency = binding("containment", "d");
+  snapshot = prepareOperation(snapshot, {
+    operationId: "reconcile-emergency-containment",
+    kind: "promote-standard",
+    targetBinding: binding("standard", "e"),
+    companionBinding: binding("containment", "f"),
+    emergencyRecoveryBinding: emergency,
+  });
+  const observation = objectRef("c");
+  snapshot = reduceReleaseState(
+    snapshot,
+    appendEvent(
+      snapshot,
+      "state-reconciled",
+      "reconcile-emergency-containment",
+      {
+        reconciliationKind: "provider-emergency-assigned/v1",
+        observedBinding: emergency,
+        providerObservation: observation,
+      },
+      [],
+      [observation],
+    ),
+  );
+  assert.equal(snapshot.pendingOperation.kind, "activate-containment");
+  assert.equal(
+    snapshot.pendingOperation.targetBinding.bindingId,
+    emergency.bindingId,
+  );
+  snapshot = advanceAssignmentLifecycle(snapshot);
+  snapshot = reduceReleaseState(
+    snapshot,
+    appendRecoveryTerminal(snapshot, "containment-activated", {
+      binding: emergency,
+      activatedAt: "2026-08-01T01:00:00.000Z",
+      recoveryDeadline: "2026-08-02T01:00:00.000Z",
+      targetStandard: null,
+    }),
+  );
+  assert.equal(snapshot.pendingOperation, null);
+  assert.equal(snapshot.containmentIncident.kind, "source-hardened");
+});
+
 test("validates event construction and replay boundary inputs", () => {
   const base = {
     namespace,
@@ -611,14 +1091,26 @@ test("validates event construction and replay boundary inputs", () => {
 
 test("updates DB compatibility with active production and prepares a generic operation", () => {
   let snapshot = initializeState();
+  const initialContainment = binding("containment", "a");
+  const nextContainment = {
+    ...initialContainment,
+    requiredDbCompatibility: nextDbCompatibility,
+  };
+  snapshot = prepareOperation(snapshot, {
+    operationId: "activate-before-db",
+    kind: "activate-containment",
+    targetBinding: initialContainment,
+  });
+  snapshot = advanceAssignmentLifecycle(snapshot);
   snapshot = reduceReleaseState(
     snapshot,
-    appendEvent(snapshot, "containment-activated", "activate-before-db", {
-      binding: binding("containment", "a"),
+    appendRecoveryTerminal(snapshot, "containment-activated", {
+      binding: initialContainment,
       activatedAt: "2026-08-01T00:00:00.000Z",
       recoveryDeadline: "2026-08-01T01:00:00.000Z",
     }),
   );
+  snapshot = { ...snapshot, activeProduction: nextContainment };
   const operationId = "db-with-active-production";
   const approvals = [
     approval(operationId, "releaseOwner", "1"),
@@ -631,18 +1123,451 @@ test("updates DB compatibility with active production and prepares a generic ope
       "db-contract-activated",
       operationId,
       {
-        currentDbCompatibility: dbCompatibility,
-        rollbackInventory: [inventoryEntry(binding("standard", "b"), [])],
+        previousDbCompatibility: dbCompatibility,
+        currentDbCompatibility: nextDbCompatibility,
+        rollbackInventory: [
+          inventoryEntry(
+            {
+              ...binding("standard", "b"),
+              requiredDbCompatibility: nextDbCompatibility,
+            },
+            [],
+          ),
+        ],
       },
       approvals,
     ),
   );
   assert.equal(snapshot.rollbackInventory[0]?.eligibility, "ineligible");
 
+  snapshot = {
+    ...snapshot,
+    bootstrapRecovery: {
+      ...snapshot.bootstrapRecovery,
+      requiredDbCompatibility: nextDbCompatibility,
+    },
+  };
   snapshot = prepareOperation(snapshot, {
     operationId: "generic-operation",
     kind: "rollback",
-    targetBinding: binding("standard", "c"),
+    targetBinding: {
+      ...binding("standard", "c"),
+      requiredDbCompatibility: nextDbCompatibility,
+    },
   });
   assert.equal(snapshot.pendingOperation?.kind, "rollback");
+});
+
+const releaseEventSchemaFixtures = () => {
+  const operationId = "schema-operation";
+  const standard = binding("standard", "a");
+  const companion = binding("containment", "b");
+  const bootstrap = {
+    ...binding("containment", "c"),
+    publicIdentityKind: "legacy-bootstrap-v1",
+  };
+  const approvals = [
+    approval(operationId, "releaseOwner", "a"),
+    approval(operationId, "dataSafetyReviewer", "b"),
+  ];
+  const pendingOperation = {
+    operationId,
+    kind: "promote-standard",
+    expectedState: {
+      sequence: 1,
+      eventHash: sha("a"),
+    },
+    targetBinding: standard,
+    originBinding: null,
+    originCompanionBinding: null,
+    companionBinding: companion,
+    previousBinding: null,
+    emergencyRecoveryBinding: bootstrap,
+    approvalRefs: approvals,
+    preparedAt: "2026-08-01T00:00:00.000Z",
+  };
+  const pendingAcceptance = {
+    operationId,
+    standardBinding: standard,
+    companionBinding: companion,
+    assignmentValidationEvidence: objectRef("a"),
+    observationStartedEvent: objectRef("b"),
+    observationNotBefore: "2026-08-01T00:00:00.000Z",
+    minimumObservationEndsAt: "2026-08-02T00:00:00.000Z",
+  };
+  const rollbackInventory = [inventoryEntry(standard)];
+
+  return [
+    [
+      "state-initialized",
+      {
+        acceptedGate: null,
+        legacyObservedProduction: {
+          observationUri: objectRef("c").uri,
+          observationSha256: sha("c"),
+        },
+        bootstrapRecovery: bootstrap,
+        minimumSafetyFloors: { releaseChannel: "release-a" },
+        currentDbCompatibility: dbCompatibility,
+        activeReleasePolicy: policyRef,
+      },
+      "initial",
+    ],
+    [
+      "policy-activated",
+      {
+        activationGate: "P8-CLEAN",
+        previousReleasePolicy: policyRef,
+        proposedReleasePolicy: policyRef,
+        activeReleasePolicy: policyRef,
+        behaviorDimensionChange: null,
+        minimumSafetyFloorChange: { styleSrcAttr: "none" },
+        minimumSafetyFloors: {
+          releaseChannel: "release-a",
+          styleSrcAttr: "none",
+        },
+        activePolicyCompatibility: [],
+        closureBundle: objectRef("a"),
+        closureEvidenceRefs: [
+          objectRef("b"),
+          objectRef("c"),
+          objectRef("d"),
+          objectRef("e"),
+          objectRef("f"),
+        ],
+        rollbackInventory,
+      },
+      "policy",
+    ],
+    [
+      "db-contract-activated",
+      {
+        previousDbCompatibility: dbCompatibility,
+        currentDbCompatibility: dbCompatibility,
+        rollbackInventory,
+      },
+      "db",
+    ],
+    ["promotion-prepared", { pendingOperation }, "prepared"],
+    [
+      "deployment-assigned",
+      {
+        assignmentReceipt: objectRef("c"),
+        promotionReceipt: objectRef("d"),
+        targetBinding: standard,
+      },
+      "assigned",
+    ],
+    [
+      "assignment-validated",
+      {
+        assignmentReceipt: objectRef("c"),
+        assignmentValidation: objectRef("d"),
+        productionProbe: objectRef("e"),
+        targetBinding: standard,
+      },
+      "validated",
+    ],
+    [
+      "assignment-validated",
+      {
+        reconciliationKind: "provider-target-assigned/v1",
+        providerObservation: objectRef("f"),
+        stateReconciled: eventRef(2, "e"),
+        targetBinding: standard,
+      },
+      "reconcile-validated",
+    ],
+    ["observation-started", { pendingAcceptance }, "observation"],
+    [
+      "release-accepted",
+      {
+        acceptedGate: "P0-RELEASE",
+        releaseRole: "standard",
+        observedThrough: "2026-08-02T00:00:01.000Z",
+        acceptedStandardFloors: { pwaLifecycle: "outer-agent-v1" },
+        rollbackInventory,
+        clearBootstrapRecovery: true,
+      },
+      "accepted",
+    ],
+    ["operation-aborted", {}, "aborted"],
+    [
+      "temporary-containment-activated",
+      {
+        binding: bootstrap,
+        activatedAt: "2026-08-01T00:00:00.000Z",
+        recoveryDeadline: "2026-08-01T01:00:00.000Z",
+        targetStandard: null,
+      },
+      "temporary-containment",
+    ],
+    [
+      "containment-activated",
+      {
+        binding: companion,
+        activatedAt: "2026-08-01T02:00:00.000Z",
+        recoveryDeadline: "2026-08-01T03:00:00.000Z",
+        targetStandard: standard,
+      },
+      "containment",
+    ],
+    [
+      "rollback-activated",
+      {
+        binding: standard,
+        companionBinding: companion,
+        originAcceptedEvent: rollbackInventory[0].acceptedEvent,
+        originAcceptedGate: "P0-RELEASE",
+        originAcceptedStandardFloors: { pwaLifecycle: "outer-agent-v1" },
+      },
+      "rollback",
+    ],
+    [
+      "package-redeploy-activated",
+      {
+        releaseRole: "standard",
+        standardBinding: standard,
+        companionBinding: companion,
+        rollbackInventory,
+        originAcceptedEvent: rollbackInventory[0].acceptedEvent,
+        originAcceptedGate: "P0-RELEASE",
+        originAcceptedStandardFloors: { pwaLifecycle: "outer-agent-v1" },
+      },
+      "standard-redeploy",
+    ],
+    [
+      "package-redeploy-activated",
+      {
+        releaseRole: "containment",
+        binding: companion,
+        activatedAt: "2026-08-01T04:00:00.000Z",
+        recoveryDeadline: "2026-08-01T05:00:00.000Z",
+        targetStandard: standard,
+      },
+      "containment-redeploy",
+    ],
+    [
+      "state-reconciled",
+      {
+        reconciliationKind: "provider-target-assigned/v1",
+        observedBinding: standard,
+        providerObservation: objectRef("f"),
+      },
+      "reconciled",
+    ],
+  ];
+};
+
+const schemaEvent = (eventType, payload, fixtureId = eventType) =>
+  createReleaseEvent({
+    namespace,
+    sequence: 1,
+    eventType,
+    operationId: `schema-${fixtureId}`,
+    previousEventHash: null,
+    payload,
+  });
+
+test("accepts a closed payload fixture for every release event type", () => {
+  const fixtures = releaseEventSchemaFixtures();
+  for (const [eventType, payload, fixtureId] of fixtures) {
+    assert.doesNotThrow(
+      () =>
+        assertReleaseEventMatchesSchema(
+          schemaEvent(eventType, payload, fixtureId),
+          releaseStateSchema,
+          fixtureId,
+        ),
+      `schema fixture rejected for ${eventType}/${fixtureId}`,
+    );
+  }
+  const fixtureTypes = [
+    ...new Set(fixtures.map(([eventType]) => eventType)),
+  ].sort();
+  const declaredTypes = [
+    ...releaseStateSchema.$defs.releaseEventEnvelope.properties.eventType.enum,
+  ].sort();
+  assert.deepEqual(fixtureTypes, declaredTypes);
+});
+
+test("closes incident, recovery, legacy observation, and rollback inventory snapshots", () => {
+  const snapshot = initializeState();
+  const containmentBinding = binding("containment", "d");
+  const targetStandard = binding("standard", "e");
+  const containedSnapshot = {
+    ...snapshot,
+    containmentIncident: {
+      kind: "source-hardened",
+      binding: containmentBinding,
+      activatedAt: "2026-08-01T02:00:00.000Z",
+      recoveryDeadline: "2026-08-01T03:00:00.000Z",
+    },
+    standardRecovery: {
+      containmentBinding,
+      targetStandard,
+      recoveryDeadline: "2026-08-01T03:00:00.000Z",
+    },
+    rollbackInventory: [inventoryEntry(targetStandard)],
+  };
+  assert.doesNotThrow(() =>
+    assertReleaseStateSnapshotMatchesSchema(
+      containedSnapshot,
+      releaseStateSchema,
+    ),
+  );
+
+  const unknownField = structuredClone(containedSnapshot);
+  unknownField.containmentIncident.untrusted = true;
+  assert.throws(
+    () =>
+      assertReleaseStateSnapshotMatchesSchema(unknownField, releaseStateSchema),
+    /schema mismatch/,
+  );
+});
+
+test("rejects unknown, missing, wrong-type, URI, hash, and time payload values", () => {
+  const fixtures = releaseEventSchemaFixtures();
+  const byType = new Map(
+    fixtures.map(([eventType, payload]) => [eventType, payload]),
+  );
+  const stateWithoutArchive = structuredClone(byType.get("state-initialized"));
+  delete stateWithoutArchive.bootstrapRecovery.artifactArchive;
+  delete stateWithoutArchive.bootstrapRecovery.artifactArchiveAvailability;
+  const invalidPayloads = [
+    [
+      "policy-activated",
+      { ...structuredClone(byType.get("policy-activated")), unknown: true },
+    ],
+    ["db-contract-activated", { rollbackInventory: [] }],
+    [
+      "release-accepted",
+      {
+        ...structuredClone(byType.get("release-accepted")),
+        clearBootstrapRecovery: "yes",
+      },
+    ],
+    ["state-initialized", stateWithoutArchive],
+    [
+      "state-initialized",
+      {
+        ...structuredClone(byType.get("state-initialized")),
+        legacyObservedProduction: {
+          observationUri: "https://example.test/mutable",
+          observationSha256: "not-a-hash",
+        },
+      },
+    ],
+    [
+      "containment-activated",
+      {
+        ...structuredClone(byType.get("containment-activated")),
+        recoveryDeadline: "tomorrow",
+      },
+    ],
+  ];
+  for (const [eventType, payload] of invalidPayloads) {
+    assert.throws(
+      () =>
+        assertReleaseEventMatchesSchema(
+          schemaEvent(eventType, payload, `invalid-${eventType}`),
+          releaseStateSchema,
+        ),
+      /schema mismatch/,
+    );
+  }
+});
+
+const verifierInput = (event) => {
+  const eventHash = hashReleaseEvent(event);
+  return {
+    events: [event],
+    receipts: [
+      {
+        namespace: event.namespace,
+        sequence: event.sequence,
+        eventHash,
+        canonicalEventSha256: eventHash,
+        replayed: false,
+        committedAt: "2026-08-01T00:00:00.000Z",
+      },
+    ],
+  };
+};
+
+test("verify-release-state validates payload schemas and payload hashes", async () => {
+  const temporaryDirectory = await mkdtemp(
+    path.join(tmpdir(), "release-state-schema-"),
+  );
+  const inputPath = path.join(temporaryDirectory, "events.json");
+  const runVerifier = async (event) => {
+    await writeFile(inputPath, JSON.stringify(verifierInput(event)), "utf8");
+    return spawnSync(
+      process.execPath,
+      ["scripts/verify-release-state.mjs", "--events", inputPath],
+      {
+        cwd: root,
+        encoding: "utf8",
+        windowsHide: true,
+      },
+    );
+  };
+  const output = (result) => `${result.stdout}\n${result.stderr}`;
+
+  try {
+    const initialPayload = structuredClone(
+      releaseEventSchemaFixtures().find(
+        ([eventType]) => eventType === "state-initialized",
+      )[1],
+    );
+    const validEvent = schemaEvent(
+      "state-initialized",
+      initialPayload,
+      "cli-valid",
+    );
+    const valid = await runVerifier(validEvent);
+    assert.equal(valid.status, 0, output(valid));
+    assert.match(valid.stdout, /PASS Release State: 1 events/);
+
+    for (const invalidEvent of [
+      {
+        ...schemaEvent(
+          "state-initialized",
+          { ...structuredClone(initialPayload), unknown: true },
+          "cli-unknown",
+        ),
+      },
+      schemaEvent(
+        "state-initialized",
+        {
+          bootstrapRecovery: initialPayload.bootstrapRecovery,
+          minimumSafetyFloors: initialPayload.minimumSafetyFloors,
+          currentDbCompatibility: initialPayload.currentDbCompatibility,
+          activeReleasePolicy: initialPayload.activeReleasePolicy,
+        },
+        "cli-missing",
+      ),
+      schemaEvent(
+        "state-initialized",
+        {
+          ...structuredClone(initialPayload),
+          minimumSafetyFloors: [],
+        },
+        "cli-wrong-type",
+      ),
+      { ...validEvent, unknownEnvelopeField: true },
+    ]) {
+      const invalid = await runVerifier(invalidEvent);
+      assert.notEqual(invalid.status, 0);
+      assert.match(output(invalid), /schema mismatch/);
+    }
+
+    const tampered = structuredClone(validEvent);
+    tampered.payload.minimumSafetyFloors.releaseChannel = "tampered";
+    const tamperedResult = await runVerifier(tampered);
+    assert.notEqual(tamperedResult.status, 0);
+    assert.match(output(tamperedResult), /payload hash mismatch/);
+  } finally {
+    await rm(temporaryDirectory, { force: true, recursive: true });
+  }
 });

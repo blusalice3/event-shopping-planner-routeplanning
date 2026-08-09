@@ -3,7 +3,7 @@
   "scenarioId": "xlsx-worker-export-roundtrip",
   "domain": "xlsx-worker",
   "dataset": {
-    "generator": "event-export-snapshot-v1",
+    "generator": "event-export-idb-stage-v1",
     "itemCount": 50000
   },
   "operation": {

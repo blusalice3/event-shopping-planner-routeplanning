@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 
 import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ShoppingItem } from "../../../types/item";
 import { buildListRows, type ShoppingListRow } from "../model/buildListRows";
-import { FullListRenderer } from "./FullListRenderer";
+import {
+  FullListRenderer,
+  type FullListRenderedItemRow,
+} from "./FullListRenderer";
 import { getShoppingListRowAccessibilityAttributes } from "./rowAccessibility";
 import {
   extractVirtualIndexesWithPinnedFocus,
@@ -47,11 +51,17 @@ afterEach(() => {
 describe("list renderer boundaries", () => {
   const model = buildListRows({ items: [item("1"), item("2"), item("3")] });
 
-  it("marks the existing full DOM without adding a wrapper", () => {
+  it("owns the full root and renders only canonical model rows", () => {
+    const renderCanonicalRow = vi.fn(renderRow);
     const { container } = render(
-      <FullListRenderer model={model} selectionReason="virtual-ineligible">
-        <section aria-label="既存リストDOM" />
-      </FullListRenderer>,
+      <FullListRenderer
+        model={model}
+        selectionReason="virtual-ineligible"
+        accessibleLabel="既存リストDOM"
+        beforeContent={<span data-testid="before-content" />}
+        afterContent={<span data-testid="after-content" />}
+        renderRow={renderCanonicalRow}
+      />,
     );
 
     expect(container.children).toHaveLength(1);
@@ -63,6 +73,12 @@ describe("list renderer boundaries", () => {
         .getByLabelText("既存リストDOM")
         .getAttribute("data-list-row-count"),
     ).toBe("3");
+    expect(renderCanonicalRow).toHaveBeenCalledTimes(3);
+    expect(renderCanonicalRow.mock.calls.map(([row]) => row.rowKey)).toEqual(
+      model.rows.map((row) => row.rowKey),
+    );
+    expect(screen.getByTestId("before-content")).not.toBeNull();
+    expect(screen.getByTestId("after-content")).not.toBeNull();
   });
 
   it("uses the canonical accessible names in full and virtual windows", () => {
@@ -93,6 +109,97 @@ describe("list renderer boundaries", () => {
     expect(screen.queryByLabelText("東A1 サークル1 新刊1")).toBeNull();
     expect(screen.getByLabelText("東A2 サークル2 新刊2")).not.toBeNull();
     expect(screen.getByLabelText("東A3 サークル3 新刊3")).not.toBeNull();
+  });
+
+  it("segments grouped rows and decorates every canonical group and item row", () => {
+    const groupedModel = buildListRows({
+      items: [item("1"), item("2"), item("3")],
+      groups: [
+        {
+          key: "first",
+          label: "第1グループ",
+          items: [item("1"), item("2")],
+        },
+        { key: "second", label: "第2グループ", items: [item("3")] },
+      ],
+    });
+    const renderGroup = vi.fn(
+      (
+        row: Extract<ShoppingListRow, { kind: "group" }>,
+        renderedItemRows: readonly FullListRenderedItemRow[],
+      ) => (
+        <section>
+          <span>{row.label}</span>
+          <div role="list" aria-label={`${row.label}の項目`}>
+            {renderedItemRows.map((renderedItemRow) =>
+              renderedItemRow.render(
+                <button>{renderedItemRow.row.accessibleName}</button>,
+              ),
+            )}
+          </div>
+        </section>
+      ),
+    );
+
+    const view = render(
+      <FullListRenderer
+        model={groupedModel}
+        accessibleLabel="grouped"
+        renderGroup={renderGroup}
+      />,
+    );
+    const renderedKeys = Array.from(
+      view.container.querySelectorAll<HTMLElement>("[data-row-key]"),
+      (element) => element.dataset.rowKey,
+    );
+
+    expect(renderedKeys).toEqual(groupedModel.rows.map((row) => row.rowKey));
+    expect(new Set(renderedKeys).size).toBe(groupedModel.rows.length);
+    expect(renderGroup).toHaveBeenCalledTimes(2);
+    expect(renderGroup.mock.calls.map((call) => call[1].length)).toEqual([
+      2, 1,
+    ]);
+    expect(screen.getByLabelText("第1グループ 2件")).toHaveAttribute(
+      "role",
+      "listitem",
+    );
+    expect(screen.getByLabelText("東A2 サークル2 新刊2")).toHaveAttribute(
+      "aria-posinset",
+      "2",
+    );
+    expect(screen.getByLabelText("東A3 サークル3 新刊3")).toHaveAttribute(
+      "aria-setsize",
+      "3",
+    );
+  });
+
+  it("fails closed when grouped rendering omits a canonical row", () => {
+    const groupedModel = buildListRows({
+      items: [item("1")],
+      groups: [{ key: "first", label: "第1グループ", items: [item("1")] }],
+    });
+
+    expect(() =>
+      renderToStaticMarkup(
+        <FullListRenderer
+          model={groupedModel}
+          accessibleLabel="grouped"
+          renderGroup={() => <section>canonical item omitted</section>}
+        />,
+      ),
+    ).toThrow(/canonical row .* was not rendered exactly once/);
+  });
+
+  it("fails closed when grouped rendering receives an orphan item row", () => {
+    expect(() =>
+      renderToStaticMarkup(
+        <FullListRenderer
+          model={model}
+          accessibleLabel="grouped"
+          renderGroup={() => <section />}
+        />,
+      ),
+    ).toThrow(/orphan item row/);
   });
 
   it("rejects an unsafe virtual window", () => {

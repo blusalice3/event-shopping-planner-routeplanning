@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { canonicalJsonBytes, sha256Bytes } from "../lib/canonical-json.mjs";
 import {
+  PRE_PROMOTION_EVIDENCE_SOURCE_KIND,
   PRE_PROMOTION_EVIDENCE_SET_KIND,
+  buildAuthoritativePrePromotionEvidenceSet,
   buildAuthoritativePromotionSubject,
   buildAuthoritativeProviderAliasObservation,
   collectVercelAliasAssignments,
@@ -13,6 +15,12 @@ import {
   createReleaseEvent,
   hashReleaseEvent,
 } from "./releaseStateReducer.mjs";
+import { createStoredPrePromotionFixture } from "./prePromotionEvidenceTestFixture.mjs";
+import {
+  GITHUB_WORKFLOW_RUN_RESPONSE_MEDIA_TYPE,
+  REVIEWED_WORKFLOW_RUN_RECEIPT_MEDIA_TYPE,
+} from "./reviewedWorkflowRunAuthority.mjs";
+import { readFile } from "node:fs/promises";
 
 const namespace = "producer-test";
 const sourceSha = "a".repeat(40);
@@ -25,6 +33,13 @@ const observationPolicy = {
   apiBaseUrl: "https://api.vercel.com",
   maxResponseAgeSeconds: 300,
   maxFutureClockSkewSeconds: 30,
+};
+const providerPolicy = {
+  bindingStatus: "configured",
+  expectedTeamId: "team-test",
+  expectedProjectId: "project-test",
+  ownedProductionDomains: ["b.example.test", "a.example.test"],
+  observationPolicy,
 };
 
 class FakeReleaseStateStore {
@@ -88,12 +103,48 @@ class FakeReleaseStateStore {
   }
 }
 
-const putJson = async (store, value) => {
+const putJson = async (store, value, mediaType = "application/json") => {
   const receipt = await store.putEvidence({
     bytes: canonicalJsonBytes(value),
-    mediaType: "application/json",
+    mediaType,
   });
   return { uri: receipt.uri, sha256: receipt.sha256 };
+};
+
+const putWorkflowRunAuthority = async (store, runId = "101") => {
+  const apiResponse = await putJson(
+    store,
+    {
+      id: Number(runId),
+      run_attempt: 1,
+      event: "workflow_dispatch",
+      status: "completed",
+      conclusion: "success",
+      head_branch: "main",
+      head_sha: sourceSha,
+      path: ".github/workflows/release.yml",
+      repository: { full_name: "owner/repository" },
+    },
+    GITHUB_WORKFLOW_RUN_RESPONSE_MEDIA_TYPE,
+  );
+  return putJson(
+    store,
+    {
+      schemaVersion: 1,
+      kind: "reviewed-github-workflow-run/v1",
+      repository: "owner/repository",
+      runId,
+      runAttempt: "1",
+      workflowPath: ".github/workflows/release.yml",
+      event: "workflow_dispatch",
+      status: "completed",
+      conclusion: "success",
+      headBranch: "main",
+      headSha: sourceSha,
+      apiResponse,
+    },
+    REVIEWED_WORKFLOW_RUN_RECEIPT_MEDIA_TYPE,
+  );
 };
 
 const createBinding = async ({
@@ -111,10 +162,43 @@ const createBinding = async ({
     kind: "artifact-manifest",
     suffix,
   });
-  const providerPolicy = await putJson(store, {
-    kind: "provider-policy",
-    version: 1,
+  const providerPolicyReference = await putJson(
+    store,
+    providerPolicy,
+    "application/vnd.event-shopping-planner.provider-policy+json;version=1",
+  );
+  const archiveBytes = Buffer.from(`archive:${role}:${suffix}`);
+  const archiveReceipt = await store.putEvidence({
+    bytes: archiveBytes,
+    mediaType:
+      "application/vnd.event-shopping-planner.artifact-archive+zip;version=1",
   });
+  const artifactArchive = {
+    uri: archiveReceipt.uri,
+    sha256: archiveReceipt.sha256,
+  };
+  const artifactArchiveAvailability = await putJson(
+    store,
+    {
+      schemaVersion: 1,
+      evidenceKind: "artifact-archive-availability/v1",
+      availability: "available",
+      namespace,
+      bindingId: `${role}-${suffix}`,
+      sourceSha,
+      variantId: suffix.repeat(64),
+      releaseRole: role,
+      artifactManifest,
+      artifactArchive: {
+        ...artifactArchive,
+        mediaType:
+          "application/vnd.event-shopping-planner.artifact-archive+zip;version=1",
+        byteLength: archiveBytes.length,
+        committedAt: fixedTime,
+      },
+    },
+    "application/vnd.event-shopping-planner.artifact-archive-availability+json;version=1",
+  );
   const base = {
     bindingId: `${role}-${suffix}`,
     sourceSha,
@@ -125,11 +209,13 @@ const createBinding = async ({
     providerProjectId: "project-test",
     providerDeploymentId: `deployment-${role}-${suffix}`,
     deploymentUrl: `https://${role}-${suffix}.example.test`,
+    artifactArchive,
+    artifactArchiveAvailability,
     packageIndex,
     artifactManifest,
     providerEvidence: null,
     releasePolicy,
-    providerPolicy,
+    providerPolicy: providerPolicyReference,
     providerConfigurationHash: "6".repeat(64),
     requiredDbCompatibility: dbCompatibility,
   };
@@ -144,7 +230,7 @@ const createBinding = async ({
     artifactManifestHash: artifactManifest.sha256,
     packageIndexHash: packageIndex.sha256,
     providerConfigurationHash: base.providerConfigurationHash,
-    providerPolicyHash: providerPolicy.sha256,
+    providerPolicyHash: providerPolicyReference.sha256,
     releasePolicyHash: releasePolicy.sha256,
     requiredDbCompatibility: dbCompatibility,
     publicIdentity: {
@@ -158,10 +244,25 @@ const createBinding = async ({
 
 const initializeFixture = async () => {
   const store = new FakeReleaseStateStore();
-  const releasePolicy = await putJson(store, {
-    kind: "release-policy",
-    version: 1,
+  const configuredReleasePolicy = JSON.parse(
+    await readFile(
+      new URL("../../config/release-variants.json", import.meta.url),
+      "utf8",
+    ),
+  );
+  const prePromotion = await createStoredPrePromotionFixture({
+    store,
+    namespace,
+    sourceSha,
+    dbCompatibility,
+    providerPolicy,
+    releasePolicy: {
+      ...configuredReleasePolicy,
+      activationStatus: "active",
+      activationBlockers: [],
+    },
   });
+  const releasePolicy = prePromotion.releasePolicyReference;
   const bootstrap = await createBinding({
     store,
     role: "containment",
@@ -180,6 +281,7 @@ const initializeFixture = async () => {
       operationId: "initialize",
       previousEventHash: null,
       payload: {
+        acceptedGate: null,
         legacyObservedProduction: {
           observationUri: initialEvidence.uri,
           observationSha256: initialEvidence.sha256,
@@ -192,38 +294,29 @@ const initializeFixture = async () => {
       evidenceRefs: [initialEvidence],
     }),
   );
-  const standard = await createBinding({
-    store,
-    role: "standard",
-    suffix: "c",
-    releasePolicy,
-  });
-  const containment = await createBinding({
-    store,
-    role: "containment",
-    suffix: "e",
-    releasePolicy,
-  });
-  const qaEvidence = await putJson(store, { kind: "qa-pass" });
-  const provenanceEvidence = await putJson(store, {
-    kind: "artifact-provenance",
-  });
-  const evidenceRefs = [qaEvidence, provenanceEvidence].sort((left, right) =>
+  const standard = prePromotion.standard;
+  const containment = prePromotion.containment;
+  const namedEvidence = prePromotion.namedEvidence;
+  const evidenceRefs = Object.values(namedEvidence).sort((left, right) =>
     Buffer.compare(Buffer.from(left.uri), Buffer.from(right.uri)),
   );
+  const workflowRunAuthority = await putWorkflowRunAuthority(store);
   const evidenceSetBytes = canonicalJsonBytes({
     schemaVersion: 1,
     evidenceKind: PRE_PROMOTION_EVIDENCE_SET_KIND,
     namespace,
-    evidenceRefs,
+    evidence: namedEvidence,
+    workflowRunAuthority,
   });
   return {
     store,
     bootstrap,
     standard,
     containment,
+    namedEvidence,
     evidenceRefs,
     evidenceSetBytes,
+    workflowRunAuthority,
   };
 };
 
@@ -236,6 +329,79 @@ const producePromotion = async (fixture) =>
     containmentBindingBytes: canonicalJsonBytes(fixture.containment),
     evidenceSetBytes: fixture.evidenceSetBytes,
   });
+
+test("produces pre-promotion evidence only from reviewed stored references", async () => {
+  const fixture = await initializeFixture();
+  const sourceBytes = canonicalJsonBytes({
+    schemaVersion: 1,
+    sourceKind: PRE_PROMOTION_EVIDENCE_SOURCE_KIND,
+    namespace,
+    sourceSha,
+    evidence: fixture.namedEvidence,
+  });
+  const result = await buildAuthoritativePrePromotionEvidenceSet(
+    {
+      store: fixture.store,
+      namespace,
+      sourceSha,
+      sourceBytes,
+      expectedSourceSha256: sha256Bytes(sourceBytes),
+      currentRunId: "200",
+      githubToken: "github-token-fixture",
+      repository: "owner/repository",
+    },
+    {
+      collectRunAuthority: async () => ({
+        receipt: fixture.workflowRunAuthority,
+      }),
+    },
+  );
+  assert.deepEqual(result.evidenceSet, {
+    schemaVersion: 1,
+    evidenceKind: PRE_PROMOTION_EVIDENCE_SET_KIND,
+    namespace,
+    evidence: fixture.namedEvidence,
+    workflowRunAuthority: fixture.workflowRunAuthority,
+  });
+  await assert.rejects(
+    buildAuthoritativePrePromotionEvidenceSet(
+      {
+        store: fixture.store,
+        namespace,
+        sourceSha,
+        sourceBytes,
+        expectedSourceSha256: sha256Bytes(sourceBytes),
+        currentRunId: "101",
+        githubToken: "github-token-fixture",
+        repository: "owner/repository",
+      },
+      {
+        collectRunAuthority: async () => {
+          throw new Error("same-run authority lookup must not execute");
+        },
+      },
+    ),
+    /distinct prior run/,
+  );
+  const missing = structuredClone(JSON.parse(sourceBytes.toString("utf8")));
+  missing.evidence.qa.sha256 = "0".repeat(64);
+  missing.evidence.qa.uri =
+    `release-state://${namespace}/evidence/` + missing.evidence.qa.sha256;
+  const missingBytes = canonicalJsonBytes(missing);
+  await assert.rejects(
+    buildAuthoritativePrePromotionEvidenceSet({
+      store: fixture.store,
+      namespace,
+      sourceSha,
+      sourceBytes: missingBytes,
+      expectedSourceSha256: sha256Bytes(missingBytes),
+      currentRunId: "200",
+      githubToken: "github-token-fixture",
+      repository: "owner/repository",
+    }),
+    /not found|missing|absent/i,
+  );
+});
 
 const createApproval = (role, suffix, operationId) => ({
   uri: `release-state://${namespace}/evidence/${suffix.repeat(64)}`,
@@ -337,6 +503,15 @@ test("fails promotion subject production for noncanonical or absent evidence", a
 
   fixture.store.evidence.delete(fixture.evidenceRefs[0].sha256);
   await assert.rejects(producePromotion(fixture), /absent or failed/);
+
+  const missingAuthority = await initializeFixture();
+  missingAuthority.store.evidence.delete(
+    missingAuthority.workflowRunAuthority.sha256,
+  );
+  await assert.rejects(
+    producePromotion(missingAuthority),
+    /workflow run receipt is absent/,
+  );
 });
 
 test("collects every Vercel alias from the provider API with response bindings", async () => {
@@ -416,18 +591,10 @@ test("stores provider API receipts and emits an observation accepted by reconcil
   const fixture = await initializeFixture();
   const promotion = await producePromotion(fixture);
   await seedPreparedPromotion(fixture, promotion);
-  const providerPolicy = {
-    bindingStatus: "configured",
-    expectedTeamId: "team-test",
-    expectedProjectId: "project-test",
-    ownedProductionDomains: ["b.example.test", "a.example.test"],
-    observationPolicy,
-  };
   const result = await buildAuthoritativeProviderAliasObservation(
     {
       store: fixture.store,
       namespace,
-      providerPolicy,
       providerToken: "v".repeat(20),
     },
     {
@@ -488,7 +655,6 @@ test("stores provider API receipts and emits an observation accepted by reconcil
     {
       store: fixture.store,
       observationBytes: result.observationBytes,
-      providerPolicy,
     },
     { now: () => Date.parse(fixedTime) },
   );
@@ -500,17 +666,64 @@ test("stores provider API receipts and emits an observation accepted by reconcil
   );
 });
 
+test("derives the initial post-promotion bootstrap recovery branch", async () => {
+  const fixture = await initializeFixture();
+  const promotion = await producePromotion(fixture);
+  await seedPreparedPromotion(fixture, promotion);
+  const result = await buildAuthoritativeProviderAliasObservation(
+    {
+      store: fixture.store,
+      namespace,
+      providerToken: "v".repeat(20),
+    },
+    {
+      now: () => Date.parse(fixedTime),
+      collectAssignments: async ({ domains }) =>
+        domains.map((productionDomain) => {
+          const bodyBytes = Buffer.from(
+            JSON.stringify({
+              alias: productionDomain,
+              projectId: "project-test",
+              deploymentId: fixture.bootstrap.providerDeploymentId,
+            }),
+          );
+          const requestUrl =
+            `https://api.vercel.com/v4/aliases/${productionDomain}` +
+            "?teamId=team-test";
+          return {
+            productionDomain,
+            providerProjectId: "project-test",
+            providerDeploymentId: fixture.bootstrap.providerDeploymentId,
+            requestUrl,
+            responseUrl: requestUrl,
+            status: 200,
+            providerDate: fixedTime,
+            bodyBytes,
+            responseSha256: sha256Bytes(bodyBytes),
+          };
+        }),
+    },
+  );
+  assert.deepEqual(result.observation.observedBinding, fixture.bootstrap);
+  assert.equal(
+    result.decision.eventPlan.payload.reconciliationKind,
+    "provider-emergency-assigned/v1",
+  );
+  assert.equal(
+    result.decision.terminalPlan.eventType,
+    "temporary-containment-activated",
+  );
+  assert.equal(
+    Date.parse(result.decision.terminalPlan.payload.recoveryDeadline) -
+      Date.parse(result.decision.terminalPlan.payload.activatedAt),
+    6 * 60 * 60 * 1000,
+  );
+});
+
 test("fails provider production closed for partial, ambiguous, unknown, or caller assignments", async () => {
   const fixture = await initializeFixture();
   const promotion = await producePromotion(fixture);
   await seedPreparedPromotion(fixture, promotion);
-  const providerPolicy = {
-    bindingStatus: "configured",
-    expectedTeamId: "team-test",
-    expectedProjectId: "project-test",
-    ownedProductionDomains: ["a.example.test", "b.example.test"],
-    observationPolicy,
-  };
   const makeCollected = (domain, deploymentId) => {
     const bodyBytes = Buffer.from("{}");
     const requestUrl = `https://api.vercel.com/v4/aliases/${domain}`;
@@ -529,7 +742,6 @@ test("fails provider production closed for partial, ambiguous, unknown, or calle
   const base = {
     store: fixture.store,
     namespace,
-    providerPolicy,
     providerToken: "v".repeat(20),
   };
 

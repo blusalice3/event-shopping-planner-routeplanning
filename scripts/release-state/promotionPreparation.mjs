@@ -5,6 +5,8 @@ import {
 } from "./approvalResolver.mjs";
 import { readCurrentReleaseState } from "./currentReleaseState.mjs";
 import { fetchGitHubProtectedEnvironmentApprovals } from "./githubApprovalReceipt.mjs";
+import { assertBindingPolicyEligible } from "./policyCompatibility.mjs";
+import { resolvePrePromotionEvidenceReferences } from "./prePromotionEvidence.mjs";
 import {
   requestGitHubOidcToken,
   verifyGitHubOidcTokenFromIssuer,
@@ -133,6 +135,12 @@ export const validatePromotionSubject = ({ subject, snapshot }) => {
     label: "Promotion emergency recovery",
   });
   assertPromotionPair(subject.targetBinding, subject.companionBinding);
+  assertBindingPolicyEligible({
+    snapshot,
+    binding: subject.emergencyRecoveryBinding,
+    action: "containment",
+    label: "Promotion emergency recovery",
+  });
 
   if (
     !sameCanonicalValue(subject.previousBinding, snapshot.activeProduction) ||
@@ -165,10 +173,6 @@ export const validatePromotionSubject = ({ subject, snapshot }) => {
     !sameCanonicalValue(
       subject.companionBinding.releasePolicy,
       snapshot.activeReleasePolicy,
-    ) ||
-    !sameCanonicalValue(
-      subject.emergencyRecoveryBinding.releasePolicy,
-      snapshot.activeReleasePolicy,
     )
   ) {
     throw new Error(
@@ -183,9 +187,11 @@ export const validatePromotionSubject = ({ subject, snapshot }) => {
   }
   if (
     !Array.isArray(subject.evidenceRefs) ||
-    subject.evidenceRefs.length === 0
+    subject.evidenceRefs.length !== 5
   ) {
-    throw new Error("Promotion subject requires pre-promotion evidence");
+    throw new Error(
+      "Promotion subject requires the five closed pre-promotion receipts",
+    );
   }
   const sortedEvidence = sortAndDedupeReferences(
     subject.evidenceRefs,
@@ -202,7 +208,7 @@ export const validatePromotionSubject = ({ subject, snapshot }) => {
   return subject;
 };
 
-const validateSubjectEvidence = async ({ store, subject }) => {
+const validateSubjectEvidence = async ({ store, subject, snapshot }) => {
   const bindings = [
     ["Promotion target", subject.targetBinding],
     ["Promotion companion", subject.companionBinding],
@@ -216,6 +222,16 @@ const validateSubjectEvidence = async ({ store, subject }) => {
       label,
     });
   }
+  await resolvePrePromotionEvidenceReferences({
+    store,
+    namespace: subject.namespace,
+    references: subject.evidenceRefs,
+    bindings: {
+      standard: subject.targetBinding,
+      containment: subject.companionBinding,
+    },
+    snapshot,
+  });
   const references = sortAndDedupeReferences(
     [
       ...subject.evidenceRefs,
@@ -535,6 +551,17 @@ export const preparePromotion = async (
       "Promotion subject namespace differs from the replayed Release State",
     );
   }
+  if (
+    subject.targetBinding.sourceSha !== expectedSourceSha ||
+    subject.companionBinding.sourceSha !== expectedSourceSha
+  ) {
+    throw new Error("Promotion source differs from the protected workflow");
+  }
+  const bindingEvidenceReferences = await validateSubjectEvidence({
+    store,
+    subject,
+    snapshot: current.snapshot,
+  });
   const existing = await existingPreparationResult({
     store,
     current,
@@ -546,16 +573,6 @@ export const preparePromotion = async (
   if (existing) return existing;
 
   validatePromotionSubject({ subject, snapshot: current.snapshot });
-  if (
-    subject.targetBinding.sourceSha !== expectedSourceSha ||
-    subject.companionBinding.sourceSha !== expectedSourceSha
-  ) {
-    throw new Error("Promotion source differs from the protected workflow");
-  }
-  const bindingEvidenceReferences = await validateSubjectEvidence({
-    store,
-    subject,
-  });
   const storedSubjectReference = await putReceiptEvidence({
     store,
     namespace: subject.namespace,
@@ -599,6 +616,19 @@ export const preparePromotion = async (
 
   const refreshed = await readState({ store });
   validatePromotionSubject({ subject, snapshot: refreshed.snapshot });
+  const refreshedBindingEvidenceReferences = await validateSubjectEvidence({
+    store,
+    subject,
+    snapshot: refreshed.snapshot,
+  });
+  if (
+    !sameCanonicalValue(
+      refreshedBindingEvidenceReferences,
+      bindingEvidenceReferences,
+    )
+  ) {
+    throw new Error("Promotion evidence changed during approval resolution");
+  }
   const eventEvidenceRefs = sortAndDedupeReferences(
     [
       subjectReference,

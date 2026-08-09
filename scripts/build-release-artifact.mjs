@@ -15,12 +15,13 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import {
+  applyCspDeliveryToVercelOutput,
   assertBootstrapStaticOutput,
   assertIndependentBuildReproducibility,
+  assertProductionProviderContext,
   buildBootstrapGeneratedFiles,
   buildRawDistManifest,
   buildReleaseContext,
-  buildSourceHardenedDimensions,
   calculateBuildInputClosure,
   collectPublicBuildEnvironment,
   createArtifactManifestFromOutput,
@@ -45,7 +46,15 @@ import {
   releaseBuildInputEnvironment,
 } from "./lib/release-build-input.mjs";
 import { writeContentAddressedObject } from "./lib/content-addressed-store.mjs";
+import { buildIndependentOuterAgent } from "./build-pwa-recovery-agent.mjs";
+import {
+  OUTER_AGENT_BUNDLE_ENV,
+  OUTER_AGENT_GRAPH_ENV,
+} from "./lib/outer-agent-contract.mjs";
 import { verifyReleasePackage } from "./verify-release-artifact.mjs";
+import { assertArtifactBuildRuntimeAuthority } from "./lib/artifact-build-runtime-authority.mjs";
+import { createPostgresReleaseStateStore } from "./release-state/postgresStore.mjs";
+import { validateAuthoritativeArtifactBuildRequirements } from "./release-state/artifactBuildAuthority.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -180,13 +189,82 @@ const assertProviderCredentials = ({
   }
 };
 
-const runPinnedVercelBuild = ({ vercelCliPath, cwd, environment }) => {
-  execFileSync(process.execPath, [vercelCliPath, "build", "--prod", "--yes"], {
-    cwd,
-    env: environment,
-    stdio: "inherit",
-    windowsHide: true,
+const runPinnedVercelBuild = ({
+  vercelCliPath,
+  cwd,
+  environment,
+  productionTarget,
+}) => {
+  execFileSync(
+    process.execPath,
+    [
+      vercelCliPath,
+      "build",
+      ...(productionTarget ? ["--prod"] : ["--target", "preview"]),
+      "--yes",
+    ],
+    {
+      cwd,
+      env: environment,
+      stdio: "inherit",
+      windowsHide: true,
+    },
+  );
+};
+
+const requireEnvironment = (name) => {
+  const value = process.env[name];
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`Required release build environment is absent: ${name}`);
+  }
+  return value;
+};
+
+const openReleaseStateStore = async ({ namespace, storePolicy }) => {
+  if (
+    storePolicy?.databaseUrlEnvironmentName !== "RELEASE_STATE_DATABASE_URL" ||
+    requireEnvironment("RELEASE_STATE_NAMESPACE") !== namespace
+  ) {
+    throw new Error("Release State build authority environment is invalid");
+  }
+  return createPostgresReleaseStateStore({
+    connectionString: requireEnvironment(
+      storePolicy.databaseUrlEnvironmentName,
+    ),
+    namespace,
+    policy: storePolicy,
+    ca: requireEnvironment("RELEASE_STATE_DATABASE_CA_PEM"),
   });
+};
+
+const validateReviewedBuildAuthority = async ({
+  store,
+  requirementsBytes,
+  expectedSha256,
+  sourceSha,
+  releasePolicy,
+  providerPolicy,
+  toolchainPolicy,
+  cspPolicy,
+  dbContract,
+}) => {
+  const validated = await validateAuthoritativeArtifactBuildRequirements({
+    store,
+    requirementsBytes,
+    expectedSha256,
+    checkoutSourceSha: sourceSha,
+  });
+  const authority = assertArtifactBuildRuntimeAuthority({
+    requirements: validated.requirements,
+    requirementsReference: validated.requirementsReference,
+    sourceSha,
+    releasePolicy,
+    providerPolicy,
+    toolchainPolicy,
+    cspPolicy,
+    dbContract,
+  });
+  return { ...validated, authority };
 };
 
 const assertCheckoutStillClean = () => {
@@ -208,6 +286,29 @@ const writePackageIndex = async (packageRoot, index) => {
   );
 };
 
+const buildReproducibleIndependentOuterAgent = async ({
+  scratchRoot,
+  sourceSha,
+}) => {
+  const first = await buildIndependentOuterAgent({
+    outputDirectory: path.join(scratchRoot, "outer-agent-build-1"),
+    sourceSha,
+  });
+  const second = await buildIndependentOuterAgent({
+    outputDirectory: path.join(scratchRoot, "outer-agent-build-2"),
+    sourceSha,
+  });
+  if (
+    !first.outerAgentBytes.equals(second.outerAgentBytes) ||
+    first.graphSha256 !== second.graphSha256
+  ) {
+    throw new Error(
+      "Independent outer agent is not reproducible across clean single-entry builds",
+    );
+  }
+  return first;
+};
+
 const buildSourceHardenedPackage = async ({
   packageRoot,
   scratchRoot,
@@ -220,14 +321,14 @@ const buildSourceHardenedPackage = async ({
   publicBuildEnvironment,
   vercelCliPath,
   standardDimensions,
+  containmentDimensions,
+  buildAuthority,
   cspPolicy,
+  independentOuterAgent,
 }) => {
   const dimensions = {
     standard: standardDimensions,
-    containment: projectContainmentDimensions(
-      releasePolicy,
-      standardDimensions,
-    ),
+    containment: containmentDimensions,
   };
   const references = [];
   for (const releaseRole of ["standard", "containment"]) {
@@ -242,6 +343,7 @@ const buildSourceHardenedPackage = async ({
       dimensions: roleDimensions,
       variantId,
       dbFingerprint: releaseContext.requiredDbCompatibility.fingerprint,
+      buildPurpose: buildAuthority.buildPurpose,
     });
     const buildEnvironment = {
       ...process.env,
@@ -250,6 +352,10 @@ const buildSourceHardenedPackage = async ({
       VITE_PERSISTENCE_RELEASE_CHANNEL: "release-a",
       VITE_PERSISTENCE_LEGACY_CLEANUP: "false",
       ...releaseBuildInputEnvironment(buildInput, releasePolicy),
+      FOUNDATION_ARTIFACT_BUILD_REQUIREMENTS_SHA256:
+        buildAuthority.requirementsReference.sha256,
+      [OUTER_AGENT_BUNDLE_ENV]: independentOuterAgent.outerAgentPath,
+      [OUTER_AGENT_GRAPH_ENV]: independentOuterAgent.graphPath,
       VERCEL: "1",
       VERCEL_GIT_COMMIT_SHA: sourceSha,
     };
@@ -265,8 +371,14 @@ const buildSourceHardenedPackage = async ({
           vercelCliPath,
           cwd: repositoryRoot,
           environment: buildEnvironment,
+          productionTarget: buildAuthority.promotable,
         });
         const outputRoot = path.join(vercelRoot, "output");
+        await applyCspDeliveryToVercelOutput({
+          outputRoot,
+          cspMode: roleDimensions.cspMode,
+          cspPolicy,
+        });
         const manifest = await createArtifactManifestFromOutput({
           outputRoot,
           releasePolicy,
@@ -279,6 +391,10 @@ const buildSourceHardenedPackage = async ({
           publicIdentityKind: "release-identity-v1",
           bootstrap: null,
           cspPolicy,
+          buildAuthority: buildAuthority.requirementsReference,
+          targetGate: buildAuthority.targetGate,
+          buildPurpose: buildAuthority.buildPurpose,
+          promotable: buildAuthority.promotable,
         });
         if (acceptedManifest === null) {
           acceptedManifest = manifest;
@@ -317,6 +433,10 @@ const buildSourceHardenedPackage = async ({
     providerPolicyHash: releaseContext.providerPolicyHash,
     releasePolicyHash: releaseContext.releasePolicyHash,
     requiredDbCompatibility: releaseContext.requiredDbCompatibility,
+    buildAuthority: buildAuthority.requirementsReference,
+    targetGate: buildAuthority.targetGate,
+    buildPurpose: buildAuthority.buildPurpose,
+    promotable: buildAuthority.promotable,
     artifacts: references,
   };
   await writePackageIndex(packageRoot, index);
@@ -490,6 +610,10 @@ const buildBootstrapPackage = async ({
     providerPolicyHash: releaseContext.providerPolicyHash,
     releasePolicyHash: releaseContext.releasePolicyHash,
     requiredDbCompatibility: releaseContext.requiredDbCompatibility,
+    buildAuthority: null,
+    targetGate: null,
+    buildPurpose: "legacy-bootstrap",
+    promotable: false,
     bootstrapInput: {
       uri: bootstrapInputReference.uri,
       sha256: bootstrapInputReference.sha256,
@@ -509,13 +633,31 @@ const run = async () => {
   const bootstrap = process.argv.includes("--bootstrap");
   const rawDistArgument = option("--raw-dist");
   const dimensionsArgument = option("--standard-dimensions");
+  const requirementsArgument = option("--build-requirements");
+  const requirementsSha256Argument = option("--build-requirements-sha256");
   if (!outputArgument || !providerObservationArgument) {
     throw new Error(
-      "Usage: node scripts/build-release-artifact.mjs --output <outside-checkout-directory> --provider-observation <json> [--standard-dimensions <json>] [--bootstrap --raw-dist <directory>]",
+      "Usage: node scripts/build-release-artifact.mjs --output <outside-checkout-directory> --provider-observation <json> [--build-requirements <json> --build-requirements-sha256 <sha256> | --bootstrap --raw-dist <directory>]",
     );
   }
   if (bootstrap !== Boolean(rawDistArgument)) {
     throw new Error("--bootstrap and --raw-dist must be provided together");
+  }
+  if (dimensionsArgument !== null) {
+    throw new Error(
+      "--standard-dimensions is forbidden; dimensions require reviewed Release State authority",
+    );
+  }
+  if (
+    bootstrap
+      ? requirementsArgument !== null || requirementsSha256Argument !== null
+      : requirementsArgument === null ||
+        requirementsSha256Argument === null ||
+        !/^[0-9a-f]{64}$/.test(requirementsSha256Argument)
+  ) {
+    throw new Error(
+      "Bootstrap forbids build requirements; source-hardened builds require a reviewed requirements file and SHA-256",
+    );
   }
   const outputRoot = assertPathOutsideRepository(outputArgument);
   await assertAbsent(outputRoot, "Release package output");
@@ -529,6 +671,7 @@ const run = async () => {
     archivePolicy,
     foundationBaseline,
     cspPolicy,
+    storePolicy,
   ] = await Promise.all([
     readJsonStrict(
       path.join(repositoryRoot, "config", "release-variants.json"),
@@ -548,101 +691,175 @@ const run = async () => {
       path.join(repositoryRoot, "config", "foundation-baseline.json"),
     ),
     readJsonStrict(path.join(repositoryRoot, "config", "csp-policy.json")),
+    readJsonStrict(
+      path.join(repositoryRoot, "config", "release-state-store.json"),
+    ),
   ]);
-  const releaseContext = buildReleaseContext({
-    releasePolicy,
-    toolchainPolicy,
-    providerPolicy,
-    providerObservation,
-    dbContract,
-    requireProductionBindings: true,
-  });
-  assertExactRuntime(toolchainPolicy);
-  assertProviderCredentials({
-    providerPolicy,
-    providerObservation,
-    environment: process.env,
-  });
-  const vercelCliPath = await readPinnedVercelCli(toolchainPolicy);
-  const packageLockBytes = await readFile(
-    path.join(repositoryRoot, "package-lock.json"),
-  );
-  const effectivePublicEnvironment = {
-    ...process.env,
-    VITE_APP_BUILD_ID: sourceSha,
-    VITE_PERSISTENCE_RELEASE_CHANNEL: "release-a",
-    VITE_PERSISTENCE_LEGACY_CLEANUP: "false",
-  };
-  const publicBuildEnvironment = collectPublicBuildEnvironment(
-    effectivePublicEnvironment,
-  );
-  const parent = path.dirname(outputRoot);
-  await mkdir(parent, { recursive: true });
-  const scratchRoot = await mkdtemp(
-    path.join(parent, ".foundation-artifact-build-"),
-  );
-  const packageRoot = path.join(scratchRoot, "package");
-  await mkdir(packageRoot, { recursive: true });
+  let releaseStateStore = null;
+  let reviewedBuild = null;
   try {
-    if (bootstrap) {
-      await buildBootstrapPackage({
-        packageRoot,
-        scratchRoot,
-        rawDistRoot: path.resolve(rawDistArgument),
-        foundationBaseline,
-        releasePolicy,
-        providerPolicy,
-        releaseContext,
-        archivePolicy,
-        vercelCliPath,
+    if (!bootstrap) {
+      const requirementsBytes = await readFile(
+        path.resolve(requirementsArgument),
+      );
+      const preliminary = parseJsonStrict(
+        requirementsBytes.toString("utf8"),
+        "Artifact build requirements",
+      );
+      if (
+        typeof preliminary.namespace !== "string" ||
+        !/^[a-z0-9][a-z0-9-]{2,62}$/.test(preliminary.namespace)
+      ) {
+        throw new Error("Artifact build requirements namespace is invalid");
+      }
+      releaseStateStore = await openReleaseStateStore({
+        namespace: preliminary.namespace,
+        storePolicy,
       });
-    } else {
-      const standardDimensions = dimensionsArgument
-        ? await readJsonStrict(path.resolve(dimensionsArgument))
-        : buildSourceHardenedDimensions(releasePolicy).standard;
-      const buildInputClosure = calculateBuildInputClosure({
-        repositoryRoot,
-        sourceSha,
-      });
-      await buildSourceHardenedPackage({
-        packageRoot,
-        scratchRoot,
-        sourceSha,
-        releasePolicy,
-        releaseContext,
-        archivePolicy,
-        lockfileSha256: sha256Bytes(packageLockBytes),
-        buildInputClosureHash: buildInputClosure.sha256,
-        publicBuildEnvironment,
-        vercelCliPath,
-        standardDimensions,
-        cspPolicy,
-      });
+      reviewedBuild = {
+        ...(await validateReviewedBuildAuthority({
+          store: releaseStateStore,
+          requirementsBytes,
+          expectedSha256: requirementsSha256Argument,
+          sourceSha,
+          releasePolicy,
+          providerPolicy,
+          toolchainPolicy,
+          cspPolicy,
+          dbContract,
+        })),
+        requirementsBytes,
+      };
     }
-    const verification = await verifyReleasePackage({
-      packageRoot,
+    const standardDimensions =
+      reviewedBuild?.authority.standardDimensions ?? null;
+    const releaseContext = buildReleaseContext({
       releasePolicy,
       toolchainPolicy,
       providerPolicy,
       providerObservation,
       dbContract,
-      cspPolicy,
       requireProductionBindings: true,
-      root: repositoryRoot,
+    });
+    if (standardDimensions !== null) {
+      assertProductionProviderContext(providerPolicy, providerObservation, {
+        cspMode: standardDimensions.cspMode,
+      });
+    }
+    assertExactRuntime(toolchainPolicy);
+    assertProviderCredentials({
+      providerPolicy,
+      providerObservation,
       environment: process.env,
     });
-    await rename(packageRoot, outputRoot);
-    process.stdout.write(
-      `PASS release artifact build: ${verification.index.packageKind}; index ${verification.packageIndexSha256}; ${outputRoot}\n`,
+    const vercelCliPath = await readPinnedVercelCli(toolchainPolicy);
+    const packageLockBytes = await readFile(
+      path.join(repositoryRoot, "package-lock.json"),
     );
+    const effectivePublicEnvironment = {
+      ...process.env,
+      VITE_APP_BUILD_ID: sourceSha,
+      VITE_PERSISTENCE_RELEASE_CHANNEL: "release-a",
+      VITE_PERSISTENCE_LEGACY_CLEANUP: "false",
+    };
+    const publicBuildEnvironment = collectPublicBuildEnvironment(
+      effectivePublicEnvironment,
+    );
+    const parent = path.dirname(outputRoot);
+    await mkdir(parent, { recursive: true });
+    const scratchRoot = await mkdtemp(
+      path.join(parent, ".foundation-artifact-build-"),
+    );
+    const packageRoot = path.join(scratchRoot, "package");
+    await mkdir(packageRoot, { recursive: true });
+    try {
+      if (bootstrap) {
+        await buildBootstrapPackage({
+          packageRoot,
+          scratchRoot,
+          rawDistRoot: path.resolve(rawDistArgument),
+          foundationBaseline,
+          releasePolicy,
+          providerPolicy,
+          releaseContext,
+          archivePolicy,
+          vercelCliPath,
+        });
+      } else {
+        const buildInputClosure = calculateBuildInputClosure({
+          repositoryRoot,
+          sourceSha,
+        });
+        const independentOuterAgent =
+          await buildReproducibleIndependentOuterAgent({
+            scratchRoot,
+            sourceSha,
+          });
+        await buildSourceHardenedPackage({
+          packageRoot,
+          scratchRoot,
+          sourceSha,
+          releasePolicy,
+          releaseContext,
+          archivePolicy,
+          lockfileSha256: sha256Bytes(packageLockBytes),
+          buildInputClosureHash: buildInputClosure.sha256,
+          publicBuildEnvironment,
+          vercelCliPath,
+          standardDimensions,
+          containmentDimensions: reviewedBuild.authority.containmentDimensions,
+          buildAuthority: reviewedBuild.authority,
+          cspPolicy,
+          independentOuterAgent,
+        });
+      }
+      if (reviewedBuild !== null) {
+        const revalidated = await validateReviewedBuildAuthority({
+          store: releaseStateStore,
+          requirementsBytes: reviewedBuild.requirementsBytes,
+          expectedSha256: requirementsSha256Argument,
+          sourceSha,
+          releasePolicy,
+          providerPolicy,
+          toolchainPolicy,
+          cspPolicy,
+          dbContract,
+        });
+        if (
+          revalidated.requirementsSha256 !== reviewedBuild.requirementsSha256
+        ) {
+          throw new Error("Artifact build authority changed during the build");
+        }
+      }
+      const verification = await verifyReleasePackage({
+        packageRoot,
+        releasePolicy,
+        toolchainPolicy,
+        providerPolicy,
+        providerObservation,
+        dbContract,
+        cspPolicy,
+        requireProductionBindings: true,
+        root: repositoryRoot,
+        environment: process.env,
+        expectedBuildPurpose:
+          reviewedBuild?.authority.buildPurpose ?? "legacy-bootstrap",
+      });
+      await rename(packageRoot, outputRoot);
+      process.stdout.write(
+        `PASS release artifact build: ${verification.index.packageKind}; index ${verification.packageIndexSha256}; ${outputRoot}\n`,
+      );
+    } finally {
+      await rm(path.join(repositoryRoot, ".vercel"), {
+        recursive: true,
+        force: true,
+      });
+      await rm(scratchRoot, { recursive: true, force: true });
+    }
+    assertCheckoutStillClean();
   } finally {
-    await rm(path.join(repositoryRoot, ".vercel"), {
-      recursive: true,
-      force: true,
-    });
-    await rm(scratchRoot, { recursive: true, force: true });
+    await releaseStateStore?.close();
   }
-  assertCheckoutStillClean();
 };
 
 if (

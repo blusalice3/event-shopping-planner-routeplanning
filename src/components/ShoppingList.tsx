@@ -4,6 +4,8 @@ import React, {
   useMemo,
   useEffect,
   useCallback,
+  useLayoutEffect,
+  useReducer,
 } from "react";
 import ReactDOM from "react-dom";
 import {
@@ -14,12 +16,6 @@ import {
 import { HallDefinition, DayMapData } from "../types/map";
 import { getSpaceKey } from "../utils/spaceGrouping";
 import {
-  clearDynamicCssClassRule,
-  getDynamicCssClassName,
-  setDynamicCssClassRule,
-  updateDynamicCssClassRule,
-} from "../styles/useDynamicCssClass";
-import {
   parseGroupId,
   buildGroupId,
   getHallIdForItem,
@@ -27,7 +23,6 @@ import {
   sortItemsByHallOrder,
 } from "../utils/hallGrouping";
 import ShoppingItemCard from "./ShoppingItemCard";
-import "./ShoppingList.css";
 import LimitedPurchaseDialog from "./LimitedPurchaseDialog";
 import type {
   BulkLimitedMessageState,
@@ -76,15 +71,21 @@ import {
 } from "../features/lists/domain/rangeSelection";
 import {
   buildListRows,
+  createShoppingListControllerState,
   createLocalStorageListRendererPreferenceAdapter,
   evaluateVirtualListEligibility,
-  getFullListRendererAttributes,
-  getShoppingListRowAccessibilityAttributes,
+  FullListRenderer,
   resolveListRendererPreference,
   selectListRenderer,
+  shoppingListCommand,
+  shoppingListControllerReducer,
   VirtualListRenderer,
   type ListRendererPreferencePort,
+  type FullListRenderedItemRow,
+  type ShoppingListControllerCommand,
+  type ShoppingListControllerState,
   type ShoppingListItemRow,
+  type ShoppingListRow,
   type ShoppingListRowGroupInput,
 } from "../features/shopping-list";
 
@@ -485,8 +486,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onMoveItem,
   onEditRequest,
   onDeleteRequest,
-  selectedItemIds,
-  onSelectItem,
+  selectedItemIds: controlledSelectedItemIds,
+  onSelectItem: onSelectItemProp,
   onMoveToColumn: _onMoveToColumn,
   onRemoveFromColumn: _onRemoveFromColumn,
   columnType,
@@ -553,8 +554,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   // タッチドラッグ用state/ref
   const touchDragActive = useRef(false);
-  const touchDragRuleKey = React.useId();
-  const touchDragPositionClassName = getDynamicCssClassName(touchDragRuleKey);
   const touchLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -1494,6 +1493,58 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     spaceGroups,
   ]);
 
+  const listControllerModel = useMemo(() => {
+    const visibleModel = buildListRows({
+      items,
+      groups: listRowGroups,
+      column: columnType,
+      duplicateCircleItemIds,
+      highlightedItemId,
+    });
+    return {
+      ...visibleModel,
+      itemIds: items.map((item) => item.id),
+    };
+  }, [
+    columnType,
+    duplicateCircleItemIds,
+    highlightedItemId,
+    items,
+    listRowGroups,
+  ]);
+  const listControllerModelMembershipKey = JSON.stringify([
+    listControllerModel.itemIds,
+    listControllerModel.rows.map((row) => row.rowKey),
+  ]);
+
+  const [listControllerState, dispatchListController] = useReducer(
+    (
+      state: ShoppingListControllerState,
+      command: ShoppingListControllerCommand,
+    ) => shoppingListControllerReducer(listControllerModel, state, command),
+    createShoppingListControllerState(Array.from(controlledSelectedItemIds)),
+  );
+  const controlledSelectedItemIdsSignature = JSON.stringify(
+    Array.from(controlledSelectedItemIds).sort(),
+  );
+
+  useEffect(() => {
+    dispatchListController(
+      shoppingListCommand.replaceSelection(
+        JSON.parse(controlledSelectedItemIdsSignature) as string[],
+      ),
+    );
+  }, [controlledSelectedItemIdsSignature]);
+
+  useEffect(() => {
+    dispatchListController(shoppingListCommand.reconcileModel());
+  }, [listControllerModelMembershipKey]);
+
+  const selectedItemIds = useMemo(
+    () => new Set(listControllerState.selectedItemIds),
+    [listControllerState.selectedItemIds],
+  );
+
   const listReadModel = useMemo(
     () =>
       buildListRows({
@@ -1512,6 +1563,53 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       listRowGroups,
       selectedItemIds,
     ],
+  );
+
+  const onSelectItem = useCallback(
+    (
+      itemId: string,
+      sourceColumn: "execute" | "candidate" | undefined,
+      presentation: RangePresentation,
+    ) => {
+      dispatchListController(shoppingListCommand.toggleSelection(itemId));
+      onSelectItemProp(itemId, sourceColumn, presentation);
+    },
+    [onSelectItemProp],
+  );
+
+  const handleFocusedRowKeyChange = useCallback((rowKey: string | null) => {
+    dispatchListController(shoppingListCommand.focusRow(rowKey));
+    if (rowKey !== null) {
+      dispatchListController(shoppingListCommand.requestScroll(rowKey));
+    }
+  }, []);
+
+  const handleScrollRequestConsumed = useCallback((requestId: number) => {
+    dispatchListController(shoppingListCommand.consumeScroll(requestId));
+  }, []);
+
+  const handleFullListFocusCapture = useCallback(
+    (event: React.FocusEvent<HTMLDivElement>) => {
+      if (!(event.target instanceof HTMLElement)) return;
+      const rowElement = event.target.closest<HTMLElement>("[data-row-key]");
+      if (!rowElement || !containerRef.current?.contains(rowElement)) return;
+      handleFocusedRowKeyChange(rowElement.dataset.rowKey ?? null);
+    },
+    [handleFocusedRowKeyChange],
+  );
+
+  const handleFullListBlurCapture = useCallback(
+    (event: React.FocusEvent<HTMLDivElement>) => {
+      const nextTarget = event.relatedTarget;
+      if (
+        nextTarget instanceof Node &&
+        containerRef.current?.contains(nextTarget)
+      ) {
+        return;
+      }
+      handleFocusedRowKeyChange(null);
+    },
+    [handleFocusedRowKeyChange],
   );
 
   const listRendererPreference = useMemo(() => {
@@ -1552,10 +1650,23 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     virtualListEligibility,
     { forceFull: forceFullListRenderer },
   );
-  const fullListRendererAttributes = getFullListRendererAttributes(
-    listReadModel,
-    listRendererSelection.reason,
-  );
+  useLayoutEffect(() => {
+    const scrollRequest = listControllerState.scrollRequest;
+    if (!scrollRequest || listRendererSelection.engine !== "full") return;
+    const rowElement = Array.from(
+      containerRef.current?.querySelectorAll<HTMLElement>("[data-row-key]") ??
+        [],
+    ).find((element) => element.dataset.rowKey === scrollRequest.rowKey);
+    rowElement?.scrollIntoView?.({
+      block: scrollRequest.alignment,
+      behavior: "auto",
+    });
+    handleScrollRequestConsumed(scrollRequest.requestId);
+  }, [
+    handleScrollRequestConsumed,
+    listControllerState.scrollRequest,
+    listRendererSelection.engine,
+  ]);
 
   const rangePresentation = useMemo((): RangePresentation => {
     if (showSpaceGroups) {
@@ -2011,7 +2122,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       touchDragClone.current.remove();
       touchDragClone.current = null;
     }
-    clearDynamicCssClassRule(touchDragRuleKey);
     if (touchDragSourceEl.current) {
       touchDragSourceEl.current.setAttribute("draggable", "true");
       touchDragSourceEl.current.classList.remove("opacity-40");
@@ -2025,7 +2135,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     releaseTouchBodyScrollLock.current?.();
     releaseTouchBodyScrollLock.current = null;
     cleanUp();
-  }, [cleanUp, onSetSpaceGroupDragItemIds, touchDragRuleKey]);
+  }, [cleanUp, onSetSpaceGroupDragItemIds]);
 
   // クリーンアップ: コンポーネントアンマウント時
   useEffect(() => () => touchCleanUp(), [touchCleanUp]);
@@ -2034,19 +2144,19 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     (sourceEl: HTMLElement, touchX: number, touchY: number) => {
       const rect = sourceEl.getBoundingClientRect();
       const clone = sourceEl.cloneNode(true) as HTMLElement;
-      setDynamicCssClassRule(touchDragRuleKey, {
-        left: `${rect.left}px`,
-        top: `${touchY - 20}px`,
-        width: `${rect.width}px`,
-      });
+      clone.dataset.layoutLeft = `${Math.max(0, touchX - rect.width / 2)}px`;
+      clone.dataset.layoutTop = `${touchY - 20}px`;
+      clone.dataset.layoutWidth = `${rect.width}px`;
       clone.classList.add(
         "esp-shopping-touch-clone",
-        touchDragPositionClassName,
+        "esp-layout-left",
+        "esp-layout-top",
+        "esp-layout-width",
       );
       document.body.appendChild(clone);
       return clone;
     },
-    [touchDragPositionClassName, touchDragRuleKey],
+    [],
   );
 
   const handleTouchDragStart = useCallback(
@@ -2128,9 +2238,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       e.preventDefault(); // ドラッグ中はスクロール防止
 
       if (touchDragClone.current) {
-        updateDynamicCssClassRule(touchDragRuleKey, {
-          top: `${touch.clientY - 20}px`,
-        });
+        touchDragClone.current.dataset.layoutTop = `${touch.clientY - 20}px`;
       }
 
       // 自動スクロール
@@ -2179,7 +2287,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         }
       }
     },
-    [touchDragRuleKey],
+    [],
   );
 
   const handleItemTouchEnd = useCallback(() => {
@@ -2297,14 +2405,23 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   if (items.length === 0) {
     return (
-      <div
-        {...fullListRendererAttributes}
-        className="text-center text-slate-500 dark:text-slate-400 py-12 min-h-[200px] border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg relative"
-        onDragOver={!isInspecting ? handleContainerDragOver : undefined}
-        onDrop={!isInspecting ? handleDrop : undefined}
-      >
-        {limitedPurchaseOverlays}
-      </div>
+      <FullListRenderer
+        model={listReadModel}
+        selectionReason={listRendererSelection.reason}
+        accessibleLabel="買い物リスト"
+        focusedRowKey={listControllerState.focusedRowKey}
+        rootRef={containerRef}
+        rootProps={{
+          className:
+            "text-center text-slate-500 dark:text-slate-400 py-12 min-h-[200px] border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg relative",
+          onBlurCapture: handleFullListBlurCapture,
+          onDragOver: !isInspecting ? handleContainerDragOver : undefined,
+          onDrop: !isInspecting ? handleDrop : undefined,
+          onFocusCapture: handleFullListFocusCapture,
+        }}
+        beforeContent={limitedPurchaseOverlays}
+        renderRow={() => null}
+      />
     );
   }
 
@@ -2351,1357 +2468,1306 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
     const allCollapsed =
       spaceGroups.length > 0 && spaceGroups.every((g) => g.isCollapsed);
+    const hasPriorityGroups = spaceGroups.some(
+      (group) => group.priority !== "none",
+    );
+    const spaceGroupIndexByKey = new Map(
+      spaceGroups.map((group, index) => [group.groupKey, index] as const),
+    );
+    const renderSpaceGroupRow = (
+      row: Extract<ShoppingListRow, { kind: "group" }>,
+      renderedItemRows: readonly FullListRenderedItemRow[],
+    ): React.ReactNode => {
+      const groupIndex = spaceGroupIndexByKey.get(row.groupKey);
+      if (groupIndex === undefined) {
+        throw new Error(
+          `ShoppingList invariant failed: unknown space group ${row.groupKey}`,
+        );
+      }
+      const group = spaceGroups[groupIndex];
 
-    return (
-      <div
-        {...fullListRendererAttributes}
-        ref={containerRef}
-        className="relative space-y-1 pb-[var(--footer-height,96px)]"
-        onDragOver={!isInspecting ? handleContainerDragOver : undefined}
-        onDrop={!isInspecting ? handleDrop : undefined}
-        onDragLeave={() => setActiveDropTarget(null)}
-      >
-        {limitedPurchaseOverlays}
-        {/* 全スペース開閉ボタン */}
-        {onToggleAllSpaceCollapse && (
-          <div className="flex justify-end mb-1">
-            <button
-              onClick={() => onToggleAllSpaceCollapse(!allCollapsed)}
-              className="text-xs px-2 py-1 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
-            >
-              {allCollapsed ? "全て展開" : "全て折りたたむ"}
-            </button>
-          </div>
-        )}
-
-        {(() => {
-          const hasPriorityGroups = spaceGroups.some(
-            (g) => g.priority !== "none",
-          );
-          return spaceGroups.map((group, groupIndex) => {
-            const prevHallGroupId =
-              groupIndex > 0
-                ? spaceGroups[groupIndex - 1].hallGroupId
-                : undefined;
-            const showHallSectionHeader =
-              columnType !== "candidate" &&
-              group.hallGroupId !== prevHallGroupId &&
-              (hallDefinitions.length > 0 || hasPriorityGroups);
-            const hallSectionHeader = showHallSectionHeader
-              ? (() => {
-                  const headerStyle = getGroupHeaderStyle(
-                    group.hallGroupId,
-                    hallDefinitions,
-                  );
-                  const displayName = getGroupDisplayName(
-                    group.hallGroupId,
-                    hallDefinitions,
-                  );
-                  // このセクション内のアイテム数を算出
-                  let sectionItemCount = 0;
-                  for (let i = groupIndex; i < spaceGroups.length; i++) {
-                    if (
-                      i > groupIndex &&
-                      spaceGroups[i].hallGroupId !== group.hallGroupId
-                    )
-                      break;
-                    sectionItemCount += spaceGroups[i].items.length;
-                  }
-                  return (
-                    <div
-                      className={`sticky top-0 z-30 flex items-center justify-between overflow-hidden rounded-t-lg px-4 py-2 ${headerStyle.bgClass} ${groupIndex > 0 ? "mt-3" : ""}`}
-                    >
-                      <svg
-                        aria-hidden="true"
-                        className="absolute inset-y-0 left-0 h-full w-1"
-                        preserveAspectRatio="none"
-                        viewBox="0 0 4 100"
-                      >
-                        <rect
-                          fill={headerStyle.borderColor}
-                          height="100"
-                          width="4"
-                        />
-                      </svg>
-                      <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
-                        {displayName}
-                      </span>
-                      <span className="text-xs text-slate-600 dark:text-slate-300">
-                        {sectionItemCount}件
-                      </span>
-                    </div>
-                  );
-                })()
-              : null;
-
-            const block = group.spaceKey.split("-")[0];
-            const blockColor = spaceGroupBlockColorMap.get(block);
-
-            const allItemsSelected =
-              group.items.length > 0 &&
-              group.items.every((item) => selectedItemIds.has(item.id));
-            const someItemsSelected =
-              !allItemsSelected &&
-              group.items.some((item) => selectedItemIds.has(item.id));
-
-            const totalPrice = group.items.reduce(
-              (sum, item) => sum + (item.price ?? 0) * (item.quantity || 1),
-              0,
+      const prevHallGroupId =
+        groupIndex > 0 ? spaceGroups[groupIndex - 1].hallGroupId : undefined;
+      const showHallSectionHeader =
+        columnType !== "candidate" &&
+        group.hallGroupId !== prevHallGroupId &&
+        (hallDefinitions.length > 0 || hasPriorityGroups);
+      const hallSectionHeader = showHallSectionHeader
+        ? (() => {
+            const headerStyle = getGroupHeaderStyle(
+              group.hallGroupId,
+              hallDefinitions,
             );
-
-            // 上下移動の可否
-            const canMoveGroupUp = groupIndex > 0;
-            const canMoveGroupDown = groupIndex < spaceGroups.length - 1;
-
-            // スペースグループのチェックボックスクリック
-            const handleSpaceCheckbox = (
-              e: React.MouseEvent | React.ChangeEvent,
-            ) => {
-              e.stopPropagation();
-              const groupItemIds = group.items.map((item) => item.id);
-              // 折りたたみ時は範囲選択対応のハンドラーを使用
+            const displayName = getGroupDisplayName(
+              group.hallGroupId,
+              hallDefinitions,
+            );
+            // このセクション内のアイテム数を算出
+            let sectionItemCount = 0;
+            for (let i = groupIndex; i < spaceGroups.length; i++) {
               if (
-                group.isCollapsed &&
-                onSelectSpaceGroupForRange &&
-                columnType
-              ) {
-                onSelectSpaceGroupForRange(
-                  group.groupKey,
-                  groupItemIds,
-                  rangePresentation,
-                );
-                return;
-              }
-              if (onToggleRangeSelection) {
-                onToggleRangeSelection(groupItemIds);
-                return;
-              }
-              if (allItemsSelected) {
-                // 全解除
-                groupItemIds.forEach((id) =>
-                  onSelectItem(id, columnType, rangePresentation),
-                );
-              } else {
-                groupItemIds.forEach((id) => {
-                  if (!selectedItemIds.has(id)) {
-                    onSelectItem(id, columnType, rangePresentation);
-                  }
-                });
-              }
-            };
-
-            const handleSpaceGroupMoveUp = (e: React.MouseEvent) => {
-              e.stopPropagation();
-              if (!canMoveGroupUp || !onMoveItemUp) return;
-              const effectiveIds = getEffectiveDragIds(group);
-              if (onSetSpaceGroupDragItemIds) {
-                onSetSpaceGroupDragItemIds(effectiveIds);
-              }
-              onMoveItemUp(group.items[0].id, columnType);
-              if (onSetSpaceGroupDragItemIds) {
-                onSetSpaceGroupDragItemIds(null);
-              }
-            };
-
-            const handleSpaceGroupMoveDown = (e: React.MouseEvent) => {
-              e.stopPropagation();
-              if (!canMoveGroupDown || !onMoveItemDown) return;
-              const effectiveIds = getEffectiveDragIds(group);
-              if (onSetSpaceGroupDragItemIds) {
-                onSetSpaceGroupDragItemIds(effectiveIds);
-              }
-              onMoveItemDown(
-                group.items[group.items.length - 1].id,
-                columnType,
-              );
-              if (onSetSpaceGroupDragItemIds) {
-                onSetSpaceGroupDragItemIds(null);
-              }
-            };
-
-            // クロスグループチェーン表示情報
-            const crossRangeInGroup =
-              crossSpaceGroupRangeInfo &&
-              crossSpaceGroupRangeInfo.rangeGroupIndices.includes(groupIndex);
-            const isCrossStart =
-              crossSpaceGroupRangeInfo &&
-              groupIndex === crossSpaceGroupRangeInfo.startGroupIndex;
-            const isCrossEnd =
-              crossSpaceGroupRangeInfo &&
-              groupIndex === crossSpaceGroupRangeInfo.endGroupIndex;
-            const isCrossMiddle =
-              crossRangeInGroup && !isCrossStart && !isCrossEnd;
-
-            const showDropGuide =
-              group.isCollapsed &&
-              activeDropTarget?.id === group.items[0]?.id &&
-              activeDropTarget?.position === "top";
-
+                i > groupIndex &&
+                spaceGroups[i].hallGroupId !== group.hallGroupId
+              )
+                break;
+              sectionItemCount += spaceGroups[i].items.length;
+            }
             return (
-              <React.Fragment key={group.groupKey}>
-                {hallSectionHeader}
-                <div className="mb-1 relative">
-                  {/* ドロップ位置ガイド */}
-                  {showDropGuide && (
-                    <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
-                      <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
-                      <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
-                      <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
-                    </div>
-                  )}
-                  {/* スペースグループヘッダー */}
-                  <div
-                    className={`sticky top-0 z-20 rounded-lg border-l-4 border-l-[#9CA3AF] select-none cursor-pointer ${
-                      blockColor?.light || "bg-slate-100 dark:bg-slate-800"
-                    } hover:brightness-95 dark:hover:brightness-110 transition-all ${
-                      layoutMode === "smartphone" &&
-                      group.isCollapsed &&
-                      viewMode !== "execute"
-                        ? "flex flex-col"
-                        : "flex items-center"
-                    }`}
-                    onClick={() => onToggleSpaceCollapse?.(group.groupKey)}
-                    data-item-id={
-                      group.isCollapsed ? group.items[0]?.id : undefined
-                    }
-                    data-space-group-key={group.groupKey}
-                    data-space-navigation-visit-id={
-                      group.items[0]
-                        ? getExecutionVisitIdForItem(group.items[0])
-                        : undefined
-                    }
-                    data-space-navigation-anchor="heading"
-                    draggable={viewMode !== "execute" && group.isCollapsed}
-                    onDragStart={
-                      viewMode !== "execute" && group.isCollapsed
-                        ? (e) => handleSpaceGroupDragStart(e, group)
-                        : undefined
-                    }
-                    onDragOver={
-                      viewMode !== "execute"
-                        ? (e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            const firstItem = group.items[0];
-                            if (firstItem) {
-                              setActiveDropTarget({
-                                id: firstItem.id,
-                                position: "top",
-                              });
-                            }
-                          }
-                        : undefined
-                    }
-                    onDrop={viewMode !== "execute" ? handleDrop : undefined}
-                    onDragEnd={
-                      viewMode !== "execute" && group.isCollapsed
-                        ? handleSpaceGroupDragEnd
-                        : undefined
-                    }
-                    onTouchStart={
-                      viewMode !== "execute" && group.isCollapsed
-                        ? (e: React.TouchEvent<HTMLDivElement>) => {
-                            const target = e.target as HTMLElement;
-                            if (target.closest("[data-no-long-press]")) return;
-                            const touch = e.touches[0];
-                            touchStartX.current = touch.clientX;
-                            touchStartY.current = touch.clientY;
-                            const el = e.currentTarget;
-                            const firstItemId = group.items[0]?.id;
-                            if (!firstItemId) return;
-                            const effectiveIds = getEffectiveDragIds(group);
-                            touchLongPressTimer.current = setTimeout(() => {
-                              handleTouchDragStart(
-                                firstItemId,
-                                el,
-                                touch.clientX,
-                                touch.clientY,
-                                effectiveIds,
-                              );
-                            }, TOUCH_LONG_PRESS_MS);
-                          }
-                        : undefined
-                    }
-                    onTouchMove={
-                      viewMode !== "execute" && group.isCollapsed
-                        ? handleItemTouchMove
-                        : undefined
-                    }
-                    onTouchEnd={
-                      viewMode !== "execute" && group.isCollapsed
-                        ? handleItemTouchEnd
-                        : undefined
-                    }
-                    onTouchCancel={
-                      viewMode !== "execute" && group.isCollapsed
-                        ? handleItemTouchCancel
-                        : undefined
-                    }
-                  >
-                    {/* 折りたたみ時：編集モード＝チェックボックス+ドラッグハンドル+上下ボタン / 実行モード＝なし（サマリーはメインエリア右側に表示） */}
-                    {group.isCollapsed && viewMode !== "execute" && (
-                      <div
-                        data-drag-handle
-                        className={`flex flex-row items-center cursor-grab text-slate-400 dark:text-slate-500 ${
-                          layoutMode === "smartphone"
-                            ? "px-1 py-0.5 gap-0.5 border-b border-slate-200/80 dark:border-slate-700/80"
-                            : "px-1.5 py-1 gap-1 border-r border-slate-200/80 dark:border-slate-700/80"
-                        }`}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={allItemsSelected}
-                          ref={(el) => {
-                            if (el) el.indeterminate = someItemsSelected;
-                          }}
-                          onChange={handleSpaceCheckbox}
-                          onClick={(e) => e.stopPropagation()}
-                          data-no-long-press
-                          className={`rounded text-blue-600 focus:ring-blue-500 ${
-                            layoutMode === "smartphone" ? "w-4 h-4" : "w-5 h-5"
-                          }`}
-                        />
-                        {onMoveItemUp && (
-                          <button
-                            onClick={handleSpaceGroupMoveUp}
-                            disabled={!canMoveGroupUp}
-                            data-no-long-press
-                            className={`p-0.5 rounded-md transition-colors ${canMoveGroupUp ? "hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 cursor-pointer" : "text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-50"}`}
-                            aria-label="グループを上に移動"
-                          >
-                            <ChevronUpIcon
-                              className={
-                                layoutMode === "smartphone"
-                                  ? "w-3.5 h-3.5"
-                                  : "w-4 h-4"
-                              }
-                            />
-                          </button>
-                        )}
-                        <GripVerticalIcon
-                          className={
-                            layoutMode === "smartphone"
-                              ? "w-4 h-4 mx-1"
-                              : "w-5 h-5"
-                          }
-                        />
-                        {onMoveItemDown && (
-                          <button
-                            onClick={handleSpaceGroupMoveDown}
-                            disabled={!canMoveGroupDown}
-                            data-no-long-press
-                            className={`p-0.5 rounded-md transition-colors ${canMoveGroupDown ? "hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 cursor-pointer" : "text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-50"}`}
-                            aria-label="グループを下に移動"
-                          >
-                            <ChevronDownIcon
-                              className={
-                                layoutMode === "smartphone"
-                                  ? "w-3.5 h-3.5"
-                                  : "w-4 h-4"
-                              }
-                            />
-                          </button>
-                        )}
-                        {/* スマホ時：追加ボタンをコントロールバー右端に配置 */}
-                        {layoutMode === "smartphone" && onAddItem && (
-                          <>
-                            <div className="flex-1" />
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const spaceBlock = group.spaceKey.split("-")[0];
-                                const spaceNumber = group.spaceKey
-                                  .split("-")
-                                  .slice(1)
-                                  .join("-");
-                                const circles = [
-                                  ...new Set(
-                                    group.items
-                                      .map((item) => item.circle)
-                                      .filter(Boolean),
-                                  ),
-                                ];
-                                openAddDialog(
-                                  spaceBlock,
-                                  spaceNumber,
-                                  circles,
-                                  e.currentTarget,
-                                );
-                              }}
-                              className="px-1.5 py-0.5 mr-1 text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors"
-                              title="このスペースにアイテムを追加"
-                              aria-label="このスペースにアイテムを追加"
-                            >
-                              <svg
-                                className="w-4 h-4"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                stroke="currentColor"
-                                strokeWidth={2}
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  d="M12 4v16m8-8H4"
-                                />
-                              </svg>
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    )}
+              <div
+                className={`sticky top-0 z-30 flex items-center justify-between overflow-hidden rounded-t-lg px-4 py-2 ${headerStyle.bgClass} ${groupIndex > 0 ? "mt-3" : ""}`}
+              >
+                <svg
+                  aria-hidden="true"
+                  className="absolute inset-y-0 left-0 h-full w-1"
+                  preserveAspectRatio="none"
+                  viewBox="0 0 4 100"
+                >
+                  <rect fill={headerStyle.borderColor} height="100" width="4" />
+                </svg>
+                <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
+                  {displayName}
+                </span>
+                <span className="text-xs text-slate-600 dark:text-slate-300">
+                  {sectionItemCount}件
+                </span>
+              </div>
+            );
+          })()
+        : null;
 
-                    {/* メインのクリック可能エリア */}
-                    <div
-                      className={`flex-1 flex flex-col min-w-0 ${
-                        layoutMode === "smartphone"
-                          ? "px-2 py-1"
-                          : "px-3 py-1.5"
+      const block = group.spaceKey.split("-")[0];
+      const blockColor = spaceGroupBlockColorMap.get(block);
+
+      const allItemsSelected =
+        group.items.length > 0 &&
+        group.items.every((item) => selectedItemIds.has(item.id));
+      const someItemsSelected =
+        !allItemsSelected &&
+        group.items.some((item) => selectedItemIds.has(item.id));
+
+      const totalPrice = group.items.reduce(
+        (sum, item) => sum + (item.price ?? 0) * (item.quantity || 1),
+        0,
+      );
+
+      // 上下移動の可否
+      const canMoveGroupUp = groupIndex > 0;
+      const canMoveGroupDown = groupIndex < spaceGroups.length - 1;
+
+      // スペースグループのチェックボックスクリック
+      const handleSpaceCheckbox = (e: React.MouseEvent | React.ChangeEvent) => {
+        e.stopPropagation();
+        const groupItemIds = group.items.map((item) => item.id);
+        // 折りたたみ時は範囲選択対応のハンドラーを使用
+        if (group.isCollapsed && onSelectSpaceGroupForRange && columnType) {
+          onSelectSpaceGroupForRange(
+            group.groupKey,
+            groupItemIds,
+            rangePresentation,
+          );
+          return;
+        }
+        if (onToggleRangeSelection) {
+          onToggleRangeSelection(groupItemIds);
+          return;
+        }
+        if (allItemsSelected) {
+          // 全解除
+          groupItemIds.forEach((id) =>
+            onSelectItem(id, columnType, rangePresentation),
+          );
+        } else {
+          groupItemIds.forEach((id) => {
+            if (!selectedItemIds.has(id)) {
+              onSelectItem(id, columnType, rangePresentation);
+            }
+          });
+        }
+      };
+
+      const handleSpaceGroupMoveUp = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!canMoveGroupUp || !onMoveItemUp) return;
+        const effectiveIds = getEffectiveDragIds(group);
+        if (onSetSpaceGroupDragItemIds) {
+          onSetSpaceGroupDragItemIds(effectiveIds);
+        }
+        onMoveItemUp(group.items[0].id, columnType);
+        if (onSetSpaceGroupDragItemIds) {
+          onSetSpaceGroupDragItemIds(null);
+        }
+      };
+
+      const handleSpaceGroupMoveDown = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!canMoveGroupDown || !onMoveItemDown) return;
+        const effectiveIds = getEffectiveDragIds(group);
+        if (onSetSpaceGroupDragItemIds) {
+          onSetSpaceGroupDragItemIds(effectiveIds);
+        }
+        onMoveItemDown(group.items[group.items.length - 1].id, columnType);
+        if (onSetSpaceGroupDragItemIds) {
+          onSetSpaceGroupDragItemIds(null);
+        }
+      };
+
+      // クロスグループチェーン表示情報
+      const crossRangeInGroup =
+        crossSpaceGroupRangeInfo &&
+        crossSpaceGroupRangeInfo.rangeGroupIndices.includes(groupIndex);
+      const isCrossStart =
+        crossSpaceGroupRangeInfo &&
+        groupIndex === crossSpaceGroupRangeInfo.startGroupIndex;
+      const isCrossEnd =
+        crossSpaceGroupRangeInfo &&
+        groupIndex === crossSpaceGroupRangeInfo.endGroupIndex;
+      const isCrossMiddle = crossRangeInGroup && !isCrossStart && !isCrossEnd;
+
+      const showDropGuide =
+        group.isCollapsed &&
+        activeDropTarget?.id === group.items[0]?.id &&
+        activeDropTarget?.position === "top";
+
+      return (
+        <div className="space-y-1">
+          {hallSectionHeader}
+          <div className="mb-1 relative">
+            {/* ドロップ位置ガイド */}
+            {showDropGuide && (
+              <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
+                <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
+                <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
+                <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
+              </div>
+            )}
+            {/* スペースグループヘッダー */}
+            <div
+              className={`sticky top-0 z-20 rounded-lg border-l-4 border-l-[#9CA3AF] select-none cursor-pointer ${
+                blockColor?.light || "bg-slate-100 dark:bg-slate-800"
+              } hover:brightness-95 dark:hover:brightness-110 transition-all ${
+                layoutMode === "smartphone" &&
+                group.isCollapsed &&
+                viewMode !== "execute"
+                  ? "flex flex-col"
+                  : "flex items-center"
+              }`}
+              onClick={() => onToggleSpaceCollapse?.(group.groupKey)}
+              data-item-id={group.isCollapsed ? group.items[0]?.id : undefined}
+              data-space-group-key={group.groupKey}
+              data-space-navigation-visit-id={
+                group.items[0]
+                  ? getExecutionVisitIdForItem(group.items[0])
+                  : undefined
+              }
+              data-space-navigation-anchor="heading"
+              draggable={viewMode !== "execute" && group.isCollapsed}
+              onDragStart={
+                viewMode !== "execute" && group.isCollapsed
+                  ? (e) => handleSpaceGroupDragStart(e, group)
+                  : undefined
+              }
+              onDragOver={
+                viewMode !== "execute"
+                  ? (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const firstItem = group.items[0];
+                      if (firstItem) {
+                        setActiveDropTarget({
+                          id: firstItem.id,
+                          position: "top",
+                        });
+                      }
+                    }
+                  : undefined
+              }
+              onDrop={viewMode !== "execute" ? handleDrop : undefined}
+              onDragEnd={
+                viewMode !== "execute" && group.isCollapsed
+                  ? handleSpaceGroupDragEnd
+                  : undefined
+              }
+              onTouchStart={
+                viewMode !== "execute" && group.isCollapsed
+                  ? (e: React.TouchEvent<HTMLDivElement>) => {
+                      const target = e.target as HTMLElement;
+                      if (target.closest("[data-no-long-press]")) return;
+                      const touch = e.touches[0];
+                      touchStartX.current = touch.clientX;
+                      touchStartY.current = touch.clientY;
+                      const el = e.currentTarget;
+                      const firstItemId = group.items[0]?.id;
+                      if (!firstItemId) return;
+                      const effectiveIds = getEffectiveDragIds(group);
+                      touchLongPressTimer.current = setTimeout(() => {
+                        handleTouchDragStart(
+                          firstItemId,
+                          el,
+                          touch.clientX,
+                          touch.clientY,
+                          effectiveIds,
+                        );
+                      }, TOUCH_LONG_PRESS_MS);
+                    }
+                  : undefined
+              }
+              onTouchMove={
+                viewMode !== "execute" && group.isCollapsed
+                  ? handleItemTouchMove
+                  : undefined
+              }
+              onTouchEnd={
+                viewMode !== "execute" && group.isCollapsed
+                  ? handleItemTouchEnd
+                  : undefined
+              }
+              onTouchCancel={
+                viewMode !== "execute" && group.isCollapsed
+                  ? handleItemTouchCancel
+                  : undefined
+              }
+            >
+              {/* 折りたたみ時：編集モード＝チェックボックス+ドラッグハンドル+上下ボタン / 実行モード＝なし（サマリーはメインエリア右側に表示） */}
+              {group.isCollapsed && viewMode !== "execute" && (
+                <div
+                  data-drag-handle
+                  className={`flex flex-row items-center cursor-grab text-slate-400 dark:text-slate-500 ${
+                    layoutMode === "smartphone"
+                      ? "px-1 py-0.5 gap-0.5 border-b border-slate-200/80 dark:border-slate-700/80"
+                      : "px-1.5 py-1 gap-1 border-r border-slate-200/80 dark:border-slate-700/80"
+                  }`}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    checked={allItemsSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = someItemsSelected;
+                    }}
+                    onChange={handleSpaceCheckbox}
+                    onClick={(e) => e.stopPropagation()}
+                    data-no-long-press
+                    className={`rounded text-blue-600 focus:ring-blue-500 ${
+                      layoutMode === "smartphone" ? "w-4 h-4" : "w-5 h-5"
+                    }`}
+                  />
+                  {onMoveItemUp && (
+                    <button
+                      onClick={handleSpaceGroupMoveUp}
+                      disabled={!canMoveGroupUp}
+                      data-no-long-press
+                      className={`p-0.5 rounded-md transition-colors ${canMoveGroupUp ? "hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 cursor-pointer" : "text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-50"}`}
+                      aria-label="グループを上に移動"
+                    >
+                      <ChevronUpIcon
+                        className={
+                          layoutMode === "smartphone"
+                            ? "w-3.5 h-3.5"
+                            : "w-4 h-4"
+                        }
+                      />
+                    </button>
+                  )}
+                  <GripVerticalIcon
+                    className={
+                      layoutMode === "smartphone" ? "w-4 h-4 mx-1" : "w-5 h-5"
+                    }
+                  />
+                  {onMoveItemDown && (
+                    <button
+                      onClick={handleSpaceGroupMoveDown}
+                      disabled={!canMoveGroupDown}
+                      data-no-long-press
+                      className={`p-0.5 rounded-md transition-colors ${canMoveGroupDown ? "hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 cursor-pointer" : "text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-50"}`}
+                      aria-label="グループを下に移動"
+                    >
+                      <ChevronDownIcon
+                        className={
+                          layoutMode === "smartphone"
+                            ? "w-3.5 h-3.5"
+                            : "w-4 h-4"
+                        }
+                      />
+                    </button>
+                  )}
+                  {/* スマホ時：追加ボタンをコントロールバー右端に配置 */}
+                  {layoutMode === "smartphone" && onAddItem && (
+                    <>
+                      <div className="flex-1" />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const spaceBlock = group.spaceKey.split("-")[0];
+                          const spaceNumber = group.spaceKey
+                            .split("-")
+                            .slice(1)
+                            .join("-");
+                          const circles = [
+                            ...new Set(
+                              group.items
+                                .map((item) => item.circle)
+                                .filter(Boolean),
+                            ),
+                          ];
+                          openAddDialog(
+                            spaceBlock,
+                            spaceNumber,
+                            circles,
+                            e.currentTarget,
+                          );
+                        }}
+                        className="px-1.5 py-0.5 mr-1 text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors"
+                        title="このスペースにアイテムを追加"
+                        aria-label="このスペースにアイテムを追加"
+                      >
+                        <svg
+                          className="w-4 h-4"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M12 4v16m8-8H4"
+                          />
+                        </svg>
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* メインのクリック可能エリア */}
+              <div
+                className={`flex-1 flex flex-col min-w-0 ${
+                  layoutMode === "smartphone" ? "px-2 py-1" : "px-3 py-1.5"
+                }`}
+              >
+                <div className="flex items-center justify-between min-w-0">
+                  <div
+                    className={`flex items-center min-w-0 ${layoutMode === "smartphone" ? "gap-1" : "gap-2"}`}
+                  >
+                    <span
+                      className={`text-xs transition-transform duration-200 flex-shrink-0 ${
+                        group.isCollapsed ? "" : "rotate-90"
                       }`}
                     >
-                      <div className="flex items-center justify-between min-w-0">
-                        <div
-                          className={`flex items-center min-w-0 ${layoutMode === "smartphone" ? "gap-1" : "gap-2"}`}
+                      &#9654;
+                    </span>
+                    <span
+                      className={`font-bold text-slate-700 dark:text-slate-300 flex-shrink-0 ${
+                        layoutMode === "smartphone" ? "text-xs" : "text-sm"
+                      }`}
+                    >
+                      {group.displayName}
+                    </span>
+                    {(() => {
+                      const uniqueCircles = [
+                        ...new Set(
+                          group.items
+                            .map((item) => item.circle)
+                            .filter(Boolean),
+                        ),
+                      ];
+                      if (uniqueCircles.length === 0) return null;
+                      const displayText =
+                        layoutMode === "smartphone"
+                          ? uniqueCircles
+                              .map((c) =>
+                                c.length > 6 ? c.slice(0, 6) + "…" : c,
+                              )
+                              .join(" & ")
+                          : uniqueCircles.join(" & ");
+                      return (
+                        <span
+                          className={`font-bold text-slate-700 dark:text-slate-300 truncate ${
+                            layoutMode === "smartphone" ? "text-xs" : "text-sm"
+                          }`}
+                          title={uniqueCircles.join(" & ")}
                         >
-                          <span
-                            className={`text-xs transition-transform duration-200 flex-shrink-0 ${
-                              group.isCollapsed ? "" : "rotate-90"
-                            }`}
-                          >
-                            &#9654;
-                          </span>
-                          <span
-                            className={`font-bold text-slate-700 dark:text-slate-300 flex-shrink-0 ${
-                              layoutMode === "smartphone"
-                                ? "text-xs"
-                                : "text-sm"
-                            }`}
-                          >
-                            {group.displayName}
-                          </span>
-                          {(() => {
-                            const uniqueCircles = [
-                              ...new Set(
-                                group.items
-                                  .map((item) => item.circle)
-                                  .filter(Boolean),
-                              ),
-                            ];
-                            if (uniqueCircles.length === 0) return null;
-                            const displayText =
-                              layoutMode === "smartphone"
-                                ? uniqueCircles
-                                    .map((c) =>
-                                      c.length > 6 ? c.slice(0, 6) + "…" : c,
-                                    )
-                                    .join(" & ")
-                                : uniqueCircles.join(" & ");
-                            return (
-                              <span
-                                className={`font-bold text-slate-700 dark:text-slate-300 truncate ${
-                                  layoutMode === "smartphone"
-                                    ? "text-xs"
-                                    : "text-sm"
-                                }`}
-                                title={uniqueCircles.join(" & ")}
-                              >
-                                {displayText}
-                              </span>
-                            );
-                          })()}
-                        </div>
-                        <div
-                          className={`flex items-center flex-shrink-0 ${layoutMode === "smartphone" ? "gap-1" : "gap-2"}`}
-                        >
-                          {/* スマホ折りたたみ時：備考を💬/⚠️アイコンで表示 */}
-                          {layoutMode === "smartphone" &&
-                            group.isCollapsed &&
-                            (() => {
-                              const remarksItems = group.items.filter(
-                                (item) => item.remarks,
-                              );
-                              if (remarksItems.length === 0) return null;
-                              const hasWarningRemarks = remarksItems.some(
-                                (item) =>
-                                  item.remarks.includes("委託無") ||
-                                  item.remarks.includes("優先"),
-                              );
-                              const isExpanded = expandedRemarks.has(
-                                group.groupKey,
-                              );
-                              return (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setExpandedRemarks((prev) => {
-                                      const next = new Set(prev);
-                                      if (next.has(group.groupKey)) {
-                                        next.delete(group.groupKey);
-                                      } else {
-                                        next.add(group.groupKey);
-                                      }
-                                      return next;
-                                    });
-                                  }}
-                                  className={`text-sm leading-none p-0.5 rounded hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors ${isExpanded ? "bg-slate-200 dark:bg-slate-700" : ""}`}
-                                  title="備考を表示"
-                                >
-                                  {hasWarningRemarks ? "⚠️" : "💬"}
-                                </button>
-                              );
-                            })()}
-                          {/* 実行モード折りたたみ時：購入状態サマリー（色付き） */}
-                          {viewMode === "execute" &&
-                            group.isCollapsed &&
-                            (() => {
-                              const statusColorMap: Record<string, string> = {
-                                None: "text-red-600 dark:text-red-400 font-bold",
-                                Purchased: "text-green-600 dark:text-green-400",
-                                SoldOut: "text-red-600 dark:text-red-400",
-                                Postpone:
-                                  "text-purple-600 dark:text-purple-400",
-                                Late: "text-blue-600 dark:text-blue-400",
-                                LimitedPurchase:
-                                  "text-orange-600 dark:text-orange-400",
-                                Absent: "text-yellow-600 dark:text-yellow-400",
-                              };
-                              const statusAbbrevMap: [string, string][] = [
-                                ["None", "未"],
-                                ["Purchased", "購"],
-                                ["SoldOut", "売"],
-                                ["Postpone", "後"],
-                                ["Late", "遅"],
-                                ["LimitedPurchase", "限"],
-                                ["Absent", "欠"],
-                              ];
-                              const counts = new Map<string, number>();
-                              group.items.forEach((item) => {
-                                counts.set(
-                                  item.purchaseStatus,
-                                  (counts.get(item.purchaseStatus) || 0) + 1,
-                                );
+                          {displayText}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                  <div
+                    className={`flex items-center flex-shrink-0 ${layoutMode === "smartphone" ? "gap-1" : "gap-2"}`}
+                  >
+                    {/* スマホ折りたたみ時：備考を💬/⚠️アイコンで表示 */}
+                    {layoutMode === "smartphone" &&
+                      group.isCollapsed &&
+                      (() => {
+                        const remarksItems = group.items.filter(
+                          (item) => item.remarks,
+                        );
+                        if (remarksItems.length === 0) return null;
+                        const hasWarningRemarks = remarksItems.some(
+                          (item) =>
+                            item.remarks.includes("委託無") ||
+                            item.remarks.includes("優先"),
+                        );
+                        const isExpanded = expandedRemarks.has(group.groupKey);
+                        return (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedRemarks((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(group.groupKey)) {
+                                  next.delete(group.groupKey);
+                                } else {
+                                  next.add(group.groupKey);
+                                }
+                                return next;
                               });
-                              const entries = statusAbbrevMap.filter(
-                                ([s]) => (counts.get(s) || 0) > 0,
-                              );
-                              if (entries.length === 0) return null;
-                              return (
-                                <span
-                                  className={`flex items-center ${layoutMode === "smartphone" ? "gap-0.5" : "gap-1"}`}
-                                >
-                                  {entries.map(([status, abbrev]) => (
-                                    <span
-                                      key={status}
-                                      className={`font-medium ${statusColorMap[status]} ${
-                                        layoutMode === "smartphone"
-                                          ? "text-[10px]"
-                                          : "text-xs"
-                                      }`}
-                                    >
-                                      {abbrev}
-                                      {counts.get(status)}
-                                    </span>
-                                  ))}
-                                </span>
-                              );
-                            })()}
-                          {/* 件数表示（全モード共通） */}
+                            }}
+                            className={`text-sm leading-none p-0.5 rounded hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors ${isExpanded ? "bg-slate-200 dark:bg-slate-700" : ""}`}
+                            title="備考を表示"
+                          >
+                            {hasWarningRemarks ? "⚠️" : "💬"}
+                          </button>
+                        );
+                      })()}
+                    {/* 実行モード折りたたみ時：購入状態サマリー（色付き） */}
+                    {viewMode === "execute" &&
+                      group.isCollapsed &&
+                      (() => {
+                        const statusColorMap: Record<string, string> = {
+                          None: "text-red-600 dark:text-red-400 font-bold",
+                          Purchased: "text-green-600 dark:text-green-400",
+                          SoldOut: "text-red-600 dark:text-red-400",
+                          Postpone: "text-purple-600 dark:text-purple-400",
+                          Late: "text-blue-600 dark:text-blue-400",
+                          LimitedPurchase:
+                            "text-orange-600 dark:text-orange-400",
+                          Absent: "text-yellow-600 dark:text-yellow-400",
+                        };
+                        const statusAbbrevMap: [string, string][] = [
+                          ["None", "未"],
+                          ["Purchased", "購"],
+                          ["SoldOut", "売"],
+                          ["Postpone", "後"],
+                          ["Late", "遅"],
+                          ["LimitedPurchase", "限"],
+                          ["Absent", "欠"],
+                        ];
+                        const counts = new Map<string, number>();
+                        group.items.forEach((item) => {
+                          counts.set(
+                            item.purchaseStatus,
+                            (counts.get(item.purchaseStatus) || 0) + 1,
+                          );
+                        });
+                        const entries = statusAbbrevMap.filter(
+                          ([s]) => (counts.get(s) || 0) > 0,
+                        );
+                        if (entries.length === 0) return null;
+                        return (
                           <span
-                            className={`text-slate-500 dark:text-slate-400 ${
+                            className={`flex items-center ${layoutMode === "smartphone" ? "gap-0.5" : "gap-1"}`}
+                          >
+                            {entries.map(([status, abbrev]) => (
+                              <span
+                                key={status}
+                                className={`font-medium ${statusColorMap[status]} ${
+                                  layoutMode === "smartphone"
+                                    ? "text-[10px]"
+                                    : "text-xs"
+                                }`}
+                              >
+                                {abbrev}
+                                {counts.get(status)}
+                              </span>
+                            ))}
+                          </span>
+                        );
+                      })()}
+                    {/* 件数表示（全モード共通） */}
+                    <span
+                      className={`text-slate-500 dark:text-slate-400 ${
+                        layoutMode === "smartphone" ? "text-[10px]" : "text-xs"
+                      }`}
+                    >
+                      {group.items.length}件
+                    </span>
+                    {group.isCollapsed &&
+                      viewMode !== "execute" &&
+                      (() => {
+                        const allPriceNull = group.items.every(
+                          (item) => item.price == null,
+                        );
+                        if (allPriceNull) {
+                          return (
+                            <span
+                              className={`font-medium text-slate-500 dark:text-slate-400 ${
+                                layoutMode === "smartphone"
+                                  ? "text-[10px]"
+                                  : "text-xs"
+                              }`}
+                            >
+                              価格未定
+                            </span>
+                          );
+                        }
+                        return (
+                          <span
+                            className={`font-medium text-slate-600 dark:text-slate-300 ${
                               layoutMode === "smartphone"
                                 ? "text-[10px]"
                                 : "text-xs"
                             }`}
                           >
-                            {group.items.length}件
+                            {totalPrice.toLocaleString()}円
                           </span>
-                          {group.isCollapsed &&
-                            viewMode !== "execute" &&
-                            (() => {
-                              const allPriceNull = group.items.every(
-                                (item) => item.price == null,
-                              );
-                              if (allPriceNull) {
-                                return (
-                                  <span
-                                    className={`font-medium text-slate-500 dark:text-slate-400 ${
-                                      layoutMode === "smartphone"
-                                        ? "text-[10px]"
-                                        : "text-xs"
-                                    }`}
-                                  >
-                                    価格未定
-                                  </span>
-                                );
-                              }
-                              return (
-                                <span
-                                  className={`font-medium text-slate-600 dark:text-slate-300 ${
-                                    layoutMode === "smartphone"
-                                      ? "text-[10px]"
-                                      : "text-xs"
-                                  }`}
-                                >
-                                  {totalPrice.toLocaleString()}円
-                                </span>
-                              );
-                            })()}
-                        </div>
-                      </div>
-                      {/* 折りたたみ時の備考表示 */}
-                      {group.isCollapsed &&
-                        (() => {
-                          // スマホ時：💬/⚠️クリックで展開表示
-                          if (layoutMode === "smartphone") {
-                            if (!expandedRemarks.has(group.groupKey))
-                              return null;
-                            const remarksItems = group.items.filter(
-                              (item) => item.remarks,
-                            );
-                            if (remarksItems.length === 0) return null;
-                            return (
-                              <div className="flex flex-wrap gap-1 mt-0.5">
-                                {remarksItems.map((item) => (
-                                  <span
-                                    key={item.id}
-                                    className={`text-[10px] px-1 py-0.5 rounded bg-slate-200/60 dark:bg-slate-700/60 ${
-                                      item.remarks.includes("委託無") ||
-                                      item.remarks.includes("優先")
-                                        ? "text-red-600 dark:text-red-400 font-medium"
-                                        : "text-slate-600 dark:text-slate-400"
-                                    }`}
-                                  >
-                                    {item.remarks}
-                                  </span>
-                                ))}
-                              </div>
-                            );
-                          }
-                          // PC時：従来の備考表示
-                          const remarksItems = group.items.filter(
-                            (item) => item.remarks,
-                          );
-                          if (remarksItems.length === 0) return null;
-                          return (
-                            <div className="flex flex-wrap gap-1 mt-0.5 ml-4">
-                              {remarksItems.map((item) => {
-                                const isExpanded = expandedRemarks.has(item.id);
-                                const text = item.remarks;
-                                const needsTruncate = text.length >= 5;
-                                const displayText =
-                                  needsTruncate && !isExpanded
-                                    ? text.slice(0, 4) + "..."
-                                    : text;
-                                return (
-                                  <span
-                                    key={item.id}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      if (needsTruncate) {
-                                        setExpandedRemarks((prev) => {
-                                          const next = new Set(prev);
-                                          if (next.has(item.id)) {
-                                            next.delete(item.id);
-                                          } else {
-                                            next.add(item.id);
-                                          }
-                                          return next;
-                                        });
-                                      }
-                                    }}
-                                    className={`text-xs px-1 py-0.5 rounded bg-slate-200/60 dark:bg-slate-700/60 text-slate-600 dark:text-slate-400 ${needsTruncate ? "cursor-pointer hover:bg-slate-300 dark:hover:bg-slate-600" : ""}`}
-                                  >
-                                    {displayText}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          );
-                        })()}
-                      {/* 実行モード展開時：一括ステータス変更ボタン */}
-                      {viewMode === "execute" &&
-                        !isInspecting &&
-                        !group.isCollapsed &&
-                        onBulkStatusChange && (
-                          <div
-                            className={`max-w-full overflow-x-auto overflow-y-hidden ${layoutMode === "smartphone" ? "mt-0.5" : "mt-1 ml-4"}`}
-                          >
-                            <div className="ml-auto flex w-max max-w-none flex-nowrap justify-end gap-1">
-                              {[
-                                {
-                                  status: "Purchased" as PurchaseStatus,
-                                  label: "全購入",
-                                  activeColor:
-                                    "bg-green-700 text-white dark:bg-green-700",
-                                  hoverColor:
-                                    "hover:bg-green-100 dark:hover:bg-green-900/30",
-                                },
-                                {
-                                  status: "SoldOut" as PurchaseStatus,
-                                  label: "全売切",
-                                  activeColor:
-                                    "bg-red-600 text-white dark:bg-red-700",
-                                  hoverColor:
-                                    "hover:bg-red-100 dark:hover:bg-red-900/30",
-                                },
-                                {
-                                  status: "Absent" as PurchaseStatus,
-                                  label: "全欠席",
-                                  activeColor:
-                                    "bg-yellow-700 text-white dark:bg-yellow-700",
-                                  hoverColor:
-                                    "hover:bg-yellow-100 dark:hover:bg-yellow-900/30",
-                                },
-                                {
-                                  status: "Postpone" as PurchaseStatus,
-                                  label: "全後回",
-                                  activeColor:
-                                    "bg-purple-600 text-white dark:bg-purple-600",
-                                  hoverColor:
-                                    "hover:bg-purple-100 dark:hover:bg-purple-900/30",
-                                },
-                                {
-                                  status: "Late" as PurchaseStatus,
-                                  label: "全遅参",
-                                  activeColor:
-                                    "bg-blue-600 text-white dark:bg-blue-600",
-                                  hoverColor:
-                                    "hover:bg-blue-100 dark:hover:bg-blue-900/30",
-                                },
-                                {
-                                  status: "LimitedPurchase" as PurchaseStatus,
-                                  label: "全限数",
-                                  activeColor:
-                                    "bg-orange-700 text-white dark:bg-orange-700",
-                                  hoverColor:
-                                    "hover:bg-orange-100 dark:hover:bg-orange-900/30",
-                                },
-                              ].map(
-                                ({
-                                  status,
-                                  label,
-                                  activeColor,
-                                  hoverColor,
-                                }) => {
-                                  const allMatch = group.items.every(
-                                    (item) => item.purchaseStatus === status,
-                                  );
-                                  return (
-                                    <button
-                                      key={status}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleExecuteBulkStatusChange(
-                                          group.groupKey,
-                                          status,
-                                          group.items,
-                                        );
-                                      }}
-                                      className={`${layoutMode === "smartphone" ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-0.5 text-xs"} flex-shrink-0 whitespace-nowrap font-medium rounded transition-colors ${
-                                        allMatch
-                                          ? activeColor
-                                          : `bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-600 ${hoverColor}`
-                                      }`}
-                                    >
-                                      {label}
-                                    </button>
-                                  );
-                                },
-                              )}
-                            </div>
-                          </div>
-                        )}
-                    </div>
-                    {/* アイテム追加ボタン（編集モードPC時・実行モード時はここに配置、編集モードスマホ折りたたみ時はコントロールバーに移動済み） */}
-                    {!isInspecting &&
-                      !(
-                        viewMode !== "execute" &&
-                        layoutMode === "smartphone" &&
-                        group.isCollapsed
-                      ) &&
-                      onAddItem && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const spaceBlock = group.spaceKey.split("-")[0];
-                            const spaceNumber = group.spaceKey
-                              .split("-")
-                              .slice(1)
-                              .join("-");
-                            const circles = [
-                              ...new Set(
-                                group.items
-                                  .map((item) => item.circle)
-                                  .filter(Boolean),
-                              ),
-                            ];
-                            openAddDialog(
-                              spaceBlock,
-                              spaceNumber,
-                              circles,
-                              e.currentTarget,
-                            );
-                          }}
-                          className={`text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors ${
-                            layoutMode === "smartphone"
-                              ? "px-1.5 py-0.5 mr-1"
-                              : "px-2 py-1 mr-2"
-                          }`}
-                          title="このスペースにアイテムを追加"
-                          aria-label="このスペースにアイテムを追加"
-                        >
-                          <svg
-                            className={
-                              layoutMode === "smartphone"
-                                ? "w-4 h-4"
-                                : "w-5 h-5"
-                            }
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M12 4v16m8-8H4"
-                            />
-                          </svg>
-                        </button>
-                      )}
+                        );
+                      })()}
                   </div>
-
-                  {/* クロスグループチェーンUI（折りたたみヘッダー間） */}
-                  {!isInspecting &&
-                    crossRangeInGroup &&
-                    onToggleRangeSelection && (
-                      <div
-                        className={`absolute top-0 bottom-0 z-40 w-10 ${
-                          columnType === "candidate" ? "left-0" : "right-0"
-                        } cursor-pointer ${
-                          crossSpaceGroupRangeInfo!.onlyStartEndSelected
-                            ? "opacity-50 hover:opacity-100"
-                            : "opacity-100"
-                        }`}
-                        title={
-                          crossSpaceGroupRangeInfo!.allSelected
-                            ? "範囲内のチェックを外す"
-                            : "範囲内のチェックを入れる"
-                        }
-                        onClick={() =>
-                          onToggleRangeSelection(
-                            crossSpaceGroupRangeInfo!.rangeGroupItems.map(
-                              (item) => item.id,
-                            ),
-                          )
-                        }
-                      >
-                        <svg
-                          className={`absolute h-full w-full ${
-                            columnType === "candidate"
-                              ? "-left-[42px]"
-                              : "-right-[42px]"
-                          }`}
-                          preserveAspectRatio="none"
-                        >
-                          <defs>
-                            <linearGradient
-                              id={`chainMetal-cross-${group.groupKey}`}
-                              x1="0%"
-                              y1="0%"
-                              x2="100%"
-                              y2="0%"
+                </div>
+                {/* 折りたたみ時の備考表示 */}
+                {group.isCollapsed &&
+                  (() => {
+                    // スマホ時：💬/⚠️クリックで展開表示
+                    if (layoutMode === "smartphone") {
+                      if (!expandedRemarks.has(group.groupKey)) return null;
+                      const remarksItems = group.items.filter(
+                        (item) => item.remarks,
+                      );
+                      if (remarksItems.length === 0) return null;
+                      return (
+                        <div className="flex flex-wrap gap-1 mt-0.5">
+                          {remarksItems.map((item) => (
+                            <span
+                              key={item.id}
+                              className={`text-[10px] px-1 py-0.5 rounded bg-slate-200/60 dark:bg-slate-700/60 ${
+                                item.remarks.includes("委託無") ||
+                                item.remarks.includes("優先")
+                                  ? "text-red-600 dark:text-red-400 font-medium"
+                                  : "text-slate-600 dark:text-slate-400"
+                              }`}
                             >
-                              <stop offset="0%" stopColor="#9CA3AF" />
-                              <stop offset="50%" stopColor="#D1D5DB" />
-                              <stop offset="100%" stopColor="#9CA3AF" />
-                            </linearGradient>
-                            <pattern
-                              id={`chainPattern-cross-${group.groupKey}`}
-                              x="0"
-                              y="0"
-                              width="40"
-                              height="20"
-                              patternUnits="userSpaceOnUse"
+                              {item.remarks}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    }
+                    // PC時：従来の備考表示
+                    const remarksItems = group.items.filter(
+                      (item) => item.remarks,
+                    );
+                    if (remarksItems.length === 0) return null;
+                    return (
+                      <div className="flex flex-wrap gap-1 mt-0.5 ml-4">
+                        {remarksItems.map((item) => {
+                          const isExpanded = expandedRemarks.has(item.id);
+                          const text = item.remarks;
+                          const needsTruncate = text.length >= 5;
+                          const displayText =
+                            needsTruncate && !isExpanded
+                              ? text.slice(0, 4) + "..."
+                              : text;
+                          return (
+                            <span
+                              key={item.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (needsTruncate) {
+                                  setExpandedRemarks((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(item.id)) {
+                                      next.delete(item.id);
+                                    } else {
+                                      next.add(item.id);
+                                    }
+                                    return next;
+                                  });
+                                }
+                              }}
+                              className={`text-xs px-1 py-0.5 rounded bg-slate-200/60 dark:bg-slate-700/60 text-slate-600 dark:text-slate-400 ${needsTruncate ? "cursor-pointer hover:bg-slate-300 dark:hover:bg-slate-600" : ""}`}
                             >
-                              <rect
-                                x="14"
-                                y="-2"
-                                width="12"
-                                height="18"
-                                rx="6"
-                                fill="none"
-                                stroke={`url(#chainMetal-cross-${group.groupKey})`}
-                                strokeWidth="3"
-                              />
-                              <rect
-                                x="17"
-                                y="13"
-                                width="6"
-                                height="8"
-                                rx="2"
-                                fill={`url(#chainMetal-cross-${group.groupKey})`}
-                                stroke="#4B5563"
-                                strokeWidth="0.5"
-                              />
-                            </pattern>
-                          </defs>
-
-                          {isCrossStart && (
-                            <rect
-                              x="0"
-                              y="50%"
-                              width="40"
-                              height="50%"
-                              fill={`url(#chainPattern-cross-${group.groupKey})`}
-                            />
-                          )}
-                          {isCrossEnd && (
-                            <rect
-                              x="0"
-                              y="0"
-                              width="40"
-                              height="50%"
-                              fill={`url(#chainPattern-cross-${group.groupKey})`}
-                            />
-                          )}
-                          {isCrossMiddle && (
-                            <rect
-                              x="0"
-                              y="0"
-                              width="40"
-                              height="100%"
-                              fill={`url(#chainPattern-cross-${group.groupKey})`}
-                            />
-                          )}
-
-                          {isCrossStart && (
-                            <ellipse
-                              cx="20"
-                              cy="100%"
-                              rx="10"
-                              ry="5"
-                              fill="none"
-                              stroke={`url(#chainMetal-cross-${group.groupKey})`}
-                              strokeWidth="3"
-                            />
-                          )}
-                          {isCrossEnd && (
-                            <ellipse
-                              cx="20"
-                              cy="0"
-                              rx="10"
-                              ry="5"
-                              fill="none"
-                              stroke={`url(#chainMetal-cross-${group.groupKey})`}
-                              strokeWidth="3"
-                            />
-                          )}
-                        </svg>
-                      </div>
-                    )}
-
-                  {/* グループ内アイテム（展開時のみ表示） */}
-                  {!group.isCollapsed && (
-                    <div
-                      className={`mt-1 ${
-                        layoutMode === "smartphone" ? "space-y-2" : "space-y-4"
-                      }`}
-                    >
-                      {group.items.map((item, spaceItemIndex) => {
-                        const globalIndex = items.findIndex(
-                          (i) => i.id === item.id,
-                        );
-
-                        const isThisGroupInRange =
-                          spaceGroupRangeInfo &&
-                          spaceGroupRangeInfo.groupKey === group.groupKey;
-                        const isInRange =
-                          isThisGroupInRange &&
-                          spaceItemIndex >= spaceGroupRangeInfo!.startIndex &&
-                          spaceItemIndex <= spaceGroupRangeInfo!.endIndex;
-                        const isStart =
-                          isThisGroupInRange &&
-                          spaceItemIndex === spaceGroupRangeInfo!.startIndex;
-                        const isEnd =
-                          isThisGroupInRange &&
-                          spaceItemIndex === spaceGroupRangeInfo!.endIndex;
-                        const isMiddle =
-                          isThisGroupInRange &&
-                          spaceItemIndex > spaceGroupRangeInfo!.startIndex &&
-                          spaceItemIndex < spaceGroupRangeInfo!.endIndex;
-
-                        return (
-                          <div
-                            key={item.id}
-                            data-item-id={item.id}
-                            data-space-navigation-visit-id={getExecutionVisitIdForItem(
-                              item,
-                            )}
-                            data-space-navigation-anchor="item"
-                            draggable={!isInspecting}
-                            onDragStart={
-                              !isInspecting
-                                ? (e) => handleDragStart(e, item)
-                                : undefined
-                            }
-                            onDragOver={
-                              !isInspecting
-                                ? (e) => handleDragOver(e, item)
-                                : undefined
-                            }
-                            onDrop={!isInspecting ? handleDrop : undefined}
-                            onDragEnd={!isInspecting ? cleanUp : undefined}
-                            onTouchStart={
-                              !isInspecting
-                                ? (e) => handleItemTouchStart(e, item)
-                                : undefined
-                            }
-                            onTouchMove={
-                              !isInspecting ? handleItemTouchMove : undefined
-                            }
-                            onTouchEnd={
-                              !isInspecting ? handleItemTouchEnd : undefined
-                            }
-                            onTouchCancel={
-                              !isInspecting ? handleItemTouchCancel : undefined
-                            }
-                            className="transition-opacity duration-200 relative"
-                            data-is-selected={selectedItemIds.has(item.id)}
-                          >
-                            {activeDropTarget?.id === item.id &&
-                              activeDropTarget.position === "top" && (
-                                <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
-                                  <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
-                                  <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
-                                  <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
-                                </div>
-                              )}
-
-                            <ShoppingItemCard
-                              item={item}
-                              onUpdate={updateItemWithDeferredCleanup}
-                              isStriped={globalIndex % 2 !== 0}
-                              onEditRequest={onEditRequest}
-                              onDeleteRequest={onDeleteRequest}
-                              isSelected={selectedItemIds.has(item.id)}
-                              onSelectItem={(itemId) =>
-                                onSelectItem(
-                                  itemId,
-                                  columnType,
-                                  rangePresentation,
-                                )
-                              }
-                              blockBackgroundColor={blockColorMap.get(item.id)}
-                              onMoveUp={
-                                onMoveItemUp
-                                  ? () => onMoveItemUp(item.id, columnType)
-                                  : undefined
-                              }
-                              onMoveDown={
-                                onMoveItemDown
-                                  ? () => onMoveItemDown(item.id, columnType)
-                                  : undefined
-                              }
-                              canMoveUp={globalIndex > 0}
-                              canMoveDown={globalIndex < items.length - 1}
-                              isDuplicateCircle={duplicateCircleItemIds.has(
-                                item.id,
-                              )}
-                              isSearchMatch={highlightedItemId === item.id}
-                              layoutMode={layoutMode}
-                              viewMode={viewMode}
-                              highlightPrice={priceHighlightItemIds.has(
-                                item.id,
-                              )}
-                              highlightLimitedMissing={limitedMissingHighlightItemIds.has(
-                                item.id,
-                              )}
-                              getLatestItemById={getLatestItemById}
-                              onNotify={showLimitedMessage}
-                              onLimitedPurchaseDefer={
-                                viewMode === "execute" &&
-                                columnType === "execute"
-                                  ? markLimitedPurchaseQuantityDeferred
-                                  : undefined
-                              }
-                              onPostEventDistributionCheckRequest={
-                                viewMode === "execute" &&
-                                columnType === "execute"
-                                  ? (soldOutItem) =>
-                                      openPostEventDistributionCheck("single", [
-                                        soldOutItem,
-                                      ])
-                                  : undefined
-                              }
-                              purchaseStatusControlMode={
-                                purchaseStatusControlMode
-                              }
-                              skipLimitedPurchaseForSingleQuantity={
-                                skipLimitedPurchaseForSingleQuantity
-                              }
-                              readOnly={isInspecting}
-                            />
-
-                            {activeDropTarget?.id === item.id &&
-                              activeDropTarget.position === "bottom" && (
-                                <div className="absolute -bottom-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
-                                  <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
-                                  <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
-                                  <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
-                                </div>
-                              )}
-
-                            {/* チェーン範囲選択UI（スペースグループ内） */}
-                            {!isInspecting &&
-                              isInRange &&
-                              onToggleRangeSelection && (
-                                <div
-                                  className={`absolute top-0 bottom-0 z-40 w-10 ${
-                                    columnType === "candidate"
-                                      ? "left-0"
-                                      : "right-0"
-                                  } cursor-pointer ${
-                                    spaceGroupRangeInfo!.onlyStartEndSelected
-                                      ? "opacity-50 hover:opacity-100"
-                                      : "opacity-100"
-                                  }`}
-                                  title={
-                                    spaceGroupRangeInfo!.allSelected
-                                      ? "範囲内のチェックを外す"
-                                      : "範囲内のチェックを入れる"
-                                  }
-                                  onClick={() =>
-                                    onToggleRangeSelection(
-                                      spaceGroupRangeInfo!.rangeItems.map(
-                                        (rangeItem) => rangeItem.id,
-                                      ),
-                                    )
-                                  }
-                                >
-                                  <svg
-                                    className={`absolute h-full w-full ${
-                                      columnType === "candidate"
-                                        ? "-left-[42px]"
-                                        : "-right-[42px]"
-                                    }`}
-                                    preserveAspectRatio="none"
-                                  >
-                                    <defs>
-                                      <linearGradient
-                                        id={`chainMetal-space-${item.id}`}
-                                        x1="0%"
-                                        y1="0%"
-                                        x2="100%"
-                                        y2="0%"
-                                      >
-                                        <stop offset="0%" stopColor="#9CA3AF" />
-                                        <stop
-                                          offset="50%"
-                                          stopColor="#D1D5DB"
-                                        />
-                                        <stop
-                                          offset="100%"
-                                          stopColor="#9CA3AF"
-                                        />
-                                      </linearGradient>
-                                      <pattern
-                                        id={`chainPattern-space-${item.id}`}
-                                        x="0"
-                                        y="0"
-                                        width="40"
-                                        height="20"
-                                        patternUnits="userSpaceOnUse"
-                                      >
-                                        <rect
-                                          x="14"
-                                          y="-2"
-                                          width="12"
-                                          height="18"
-                                          rx="6"
-                                          fill="none"
-                                          stroke={`url(#chainMetal-space-${item.id})`}
-                                          strokeWidth="3"
-                                        />
-                                        <rect
-                                          x="17"
-                                          y="13"
-                                          width="6"
-                                          height="8"
-                                          rx="2"
-                                          fill={`url(#chainMetal-space-${item.id})`}
-                                          stroke="#4B5563"
-                                          strokeWidth="0.5"
-                                        />
-                                      </pattern>
-                                    </defs>
-
-                                    {isStart && (
-                                      <rect
-                                        x="0"
-                                        y="50%"
-                                        width="40"
-                                        height="50%"
-                                        fill={`url(#chainPattern-space-${item.id})`}
-                                      />
-                                    )}
-                                    {isEnd && (
-                                      <rect
-                                        x="0"
-                                        y="0"
-                                        width="40"
-                                        height="50%"
-                                        fill={`url(#chainPattern-space-${item.id})`}
-                                      />
-                                    )}
-                                    {isMiddle && (
-                                      <rect
-                                        x="0"
-                                        y="0"
-                                        width="40"
-                                        height="100%"
-                                        fill={`url(#chainPattern-space-${item.id})`}
-                                      />
-                                    )}
-
-                                    {isStart && (
-                                      <ellipse
-                                        cx="20"
-                                        cy="100%"
-                                        rx="10"
-                                        ry="5"
-                                        fill="none"
-                                        stroke={`url(#chainMetal-space-${item.id})`}
-                                        strokeWidth="3"
-                                      />
-                                    )}
-                                    {isEnd && (
-                                      <ellipse
-                                        cx="20"
-                                        cy="0"
-                                        rx="10"
-                                        ry="5"
-                                        fill="none"
-                                        stroke={`url(#chainMetal-space-${item.id})`}
-                                        strokeWidth="3"
-                                      />
-                                    )}
-                                  </svg>
-                                </div>
-                              )}
-                          </div>
-                        );
-                      })}
-                      {/* 実行モード: 全アイテム非未購入時のボタン */}
-                      {viewMode === "execute" &&
-                        !isInspecting &&
-                        (() => {
-                          const allNonNone = group.items.every(
-                            (item) => item.purchaseStatus !== "None",
+                              {displayText}
+                            </span>
                           );
-                          if (!allNonNone) return null;
-                          const isLastGroup =
-                            groupIndex === spaceGroups.length - 1;
-
-                          if (
-                            isLastGroup &&
-                            showPostponeFilterButton &&
-                            onActivatePostponeFilter
-                          ) {
-                            return (
-                              <button
-                                onClick={() => {
-                                  if (
-                                    blockPriceOrLimitedMissingIfNeeded(
-                                      group.groupKey,
-                                      group.items,
-                                    )
-                                  ) {
-                                    return;
-                                  }
-                                  onActivatePostponeFilter();
-                                }}
-                                className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-orange-700 hover:bg-orange-800 text-white dark:bg-orange-700 dark:hover:bg-orange-800 ${
-                                  layoutMode === "smartphone"
-                                    ? "text-sm"
-                                    : "text-sm"
-                                }`}
-                              >
-                                後回しでフィルタ
-                              </button>
-                            );
-                          }
-
-                          if (
-                            isLastGroup &&
-                            showLateFilterButton &&
-                            onActivateLateFilter
-                          ) {
-                            return (
-                              <button
-                                onClick={() => {
-                                  if (
-                                    blockPriceOrLimitedMissingIfNeeded(
-                                      group.groupKey,
-                                      group.items,
-                                    )
-                                  ) {
-                                    return;
-                                  }
-                                  onActivateLateFilter();
-                                }}
-                                className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-sky-700 hover:bg-sky-800 text-white dark:bg-sky-700 dark:hover:bg-sky-800 ${
-                                  layoutMode === "smartphone"
-                                    ? "text-sm"
-                                    : "text-sm"
-                                }`}
-                              >
-                                遅参でフィルタ
-                              </button>
-                            );
-                          }
-
-                          // 最下段以外: スペースを閉じて次のスペースを展開
-                          if (!isLastGroup && onCollapseAndOpenNext) {
-                            return (
-                              <button
-                                onClick={() => {
-                                  if (
-                                    blockPriceOrLimitedMissingIfNeeded(
-                                      group.groupKey,
-                                      group.items,
-                                    )
-                                  ) {
-                                    return;
-                                  }
-                                  onCollapseAndOpenNext(group.groupKey);
-                                }}
-                                className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-600 dark:hover:bg-blue-700 ${
-                                  layoutMode === "smartphone"
-                                    ? "text-sm"
-                                    : "text-sm"
-                                }`}
-                              >
-                                スペースを閉じて次のスペースを展開
-                              </button>
-                            );
-                          }
-
-                          return null;
-                        })()}
+                        })}
+                      </div>
+                    );
+                  })()}
+                {/* 実行モード展開時：一括ステータス変更ボタン */}
+                {viewMode === "execute" &&
+                  !isInspecting &&
+                  !group.isCollapsed &&
+                  onBulkStatusChange && (
+                    <div
+                      className={`max-w-full overflow-x-auto overflow-y-hidden ${layoutMode === "smartphone" ? "mt-0.5" : "mt-1 ml-4"}`}
+                    >
+                      <div className="ml-auto flex w-max max-w-none flex-nowrap justify-end gap-1">
+                        {[
+                          {
+                            status: "Purchased" as PurchaseStatus,
+                            label: "全購入",
+                            activeColor:
+                              "bg-green-700 text-white dark:bg-green-700",
+                            hoverColor:
+                              "hover:bg-green-100 dark:hover:bg-green-900/30",
+                          },
+                          {
+                            status: "SoldOut" as PurchaseStatus,
+                            label: "全売切",
+                            activeColor:
+                              "bg-red-600 text-white dark:bg-red-700",
+                            hoverColor:
+                              "hover:bg-red-100 dark:hover:bg-red-900/30",
+                          },
+                          {
+                            status: "Absent" as PurchaseStatus,
+                            label: "全欠席",
+                            activeColor:
+                              "bg-yellow-700 text-white dark:bg-yellow-700",
+                            hoverColor:
+                              "hover:bg-yellow-100 dark:hover:bg-yellow-900/30",
+                          },
+                          {
+                            status: "Postpone" as PurchaseStatus,
+                            label: "全後回",
+                            activeColor:
+                              "bg-purple-600 text-white dark:bg-purple-600",
+                            hoverColor:
+                              "hover:bg-purple-100 dark:hover:bg-purple-900/30",
+                          },
+                          {
+                            status: "Late" as PurchaseStatus,
+                            label: "全遅参",
+                            activeColor:
+                              "bg-blue-600 text-white dark:bg-blue-600",
+                            hoverColor:
+                              "hover:bg-blue-100 dark:hover:bg-blue-900/30",
+                          },
+                          {
+                            status: "LimitedPurchase" as PurchaseStatus,
+                            label: "全限数",
+                            activeColor:
+                              "bg-orange-700 text-white dark:bg-orange-700",
+                            hoverColor:
+                              "hover:bg-orange-100 dark:hover:bg-orange-900/30",
+                          },
+                        ].map(({ status, label, activeColor, hoverColor }) => {
+                          const allMatch = group.items.every(
+                            (item) => item.purchaseStatus === status,
+                          );
+                          return (
+                            <button
+                              key={status}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleExecuteBulkStatusChange(
+                                  group.groupKey,
+                                  status,
+                                  group.items,
+                                );
+                              }}
+                              className={`${layoutMode === "smartphone" ? "px-1.5 py-0.5 text-[10px]" : "px-2 py-0.5 text-xs"} flex-shrink-0 whitespace-nowrap font-medium rounded transition-colors ${
+                                allMatch
+                                  ? activeColor
+                                  : `bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-600 ${hoverColor}`
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
-                </div>
-              </React.Fragment>
-            );
-          });
-        })()}
+              </div>
+              {/* アイテム追加ボタン（編集モードPC時・実行モード時はここに配置、編集モードスマホ折りたたみ時はコントロールバーに移動済み） */}
+              {!isInspecting &&
+                !(
+                  viewMode !== "execute" &&
+                  layoutMode === "smartphone" &&
+                  group.isCollapsed
+                ) &&
+                onAddItem && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const spaceBlock = group.spaceKey.split("-")[0];
+                      const spaceNumber = group.spaceKey
+                        .split("-")
+                        .slice(1)
+                        .join("-");
+                      const circles = [
+                        ...new Set(
+                          group.items
+                            .map((item) => item.circle)
+                            .filter(Boolean),
+                        ),
+                      ];
+                      openAddDialog(
+                        spaceBlock,
+                        spaceNumber,
+                        circles,
+                        e.currentTarget,
+                      );
+                    }}
+                    className={`text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors ${
+                      layoutMode === "smartphone"
+                        ? "px-1.5 py-0.5 mr-1"
+                        : "px-2 py-1 mr-2"
+                    }`}
+                    title="このスペースにアイテムを追加"
+                    aria-label="このスペースにアイテムを追加"
+                  >
+                    <svg
+                      className={
+                        layoutMode === "smartphone" ? "w-4 h-4" : "w-5 h-5"
+                      }
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M12 4v16m8-8H4"
+                      />
+                    </svg>
+                  </button>
+                )}
+            </div>
 
-        {/* 新規アイテム追加ダイアログ（Portalでbody直下にレンダリング） */}
-        {addDialogOpen &&
+            {/* クロスグループチェーンUI（折りたたみヘッダー間） */}
+            {!isInspecting && crossRangeInGroup && onToggleRangeSelection && (
+              <div
+                className={`absolute top-0 bottom-0 z-40 w-10 ${
+                  columnType === "candidate" ? "left-0" : "right-0"
+                } cursor-pointer ${
+                  crossSpaceGroupRangeInfo!.onlyStartEndSelected
+                    ? "opacity-50 hover:opacity-100"
+                    : "opacity-100"
+                }`}
+                title={
+                  crossSpaceGroupRangeInfo!.allSelected
+                    ? "範囲内のチェックを外す"
+                    : "範囲内のチェックを入れる"
+                }
+                onClick={() =>
+                  onToggleRangeSelection(
+                    crossSpaceGroupRangeInfo!.rangeGroupItems.map(
+                      (item) => item.id,
+                    ),
+                  )
+                }
+              >
+                <svg
+                  className={`absolute h-full w-full ${
+                    columnType === "candidate"
+                      ? "-left-[42px]"
+                      : "-right-[42px]"
+                  }`}
+                  preserveAspectRatio="none"
+                >
+                  <defs>
+                    <linearGradient
+                      id={`chainMetal-cross-${group.groupKey}`}
+                      x1="0%"
+                      y1="0%"
+                      x2="100%"
+                      y2="0%"
+                    >
+                      <stop offset="0%" stopColor="#9CA3AF" />
+                      <stop offset="50%" stopColor="#D1D5DB" />
+                      <stop offset="100%" stopColor="#9CA3AF" />
+                    </linearGradient>
+                    <pattern
+                      id={`chainPattern-cross-${group.groupKey}`}
+                      x="0"
+                      y="0"
+                      width="40"
+                      height="20"
+                      patternUnits="userSpaceOnUse"
+                    >
+                      <rect
+                        x="14"
+                        y="-2"
+                        width="12"
+                        height="18"
+                        rx="6"
+                        fill="none"
+                        stroke={`url(#chainMetal-cross-${group.groupKey})`}
+                        strokeWidth="3"
+                      />
+                      <rect
+                        x="17"
+                        y="13"
+                        width="6"
+                        height="8"
+                        rx="2"
+                        fill={`url(#chainMetal-cross-${group.groupKey})`}
+                        stroke="#4B5563"
+                        strokeWidth="0.5"
+                      />
+                    </pattern>
+                  </defs>
+
+                  {isCrossStart && (
+                    <rect
+                      x="0"
+                      y="50%"
+                      width="40"
+                      height="50%"
+                      fill={`url(#chainPattern-cross-${group.groupKey})`}
+                    />
+                  )}
+                  {isCrossEnd && (
+                    <rect
+                      x="0"
+                      y="0"
+                      width="40"
+                      height="50%"
+                      fill={`url(#chainPattern-cross-${group.groupKey})`}
+                    />
+                  )}
+                  {isCrossMiddle && (
+                    <rect
+                      x="0"
+                      y="0"
+                      width="40"
+                      height="100%"
+                      fill={`url(#chainPattern-cross-${group.groupKey})`}
+                    />
+                  )}
+
+                  {isCrossStart && (
+                    <ellipse
+                      cx="20"
+                      cy="100%"
+                      rx="10"
+                      ry="5"
+                      fill="none"
+                      stroke={`url(#chainMetal-cross-${group.groupKey})`}
+                      strokeWidth="3"
+                    />
+                  )}
+                  {isCrossEnd && (
+                    <ellipse
+                      cx="20"
+                      cy="0"
+                      rx="10"
+                      ry="5"
+                      fill="none"
+                      stroke={`url(#chainMetal-cross-${group.groupKey})`}
+                      strokeWidth="3"
+                    />
+                  )}
+                </svg>
+              </div>
+            )}
+
+            {/* グループ内アイテム（展開時のみ表示） */}
+            {!group.isCollapsed && (
+              <div
+                role="list"
+                aria-label={`${row.label}の項目`}
+                className={`mt-1 ${
+                  layoutMode === "smartphone" ? "space-y-2" : "space-y-4"
+                }`}
+              >
+                {renderedItemRows.map((renderedItemRow, spaceItemIndex) => {
+                  const item = renderedItemRow.row.item;
+                  const globalIndex = items.findIndex((i) => i.id === item.id);
+
+                  const isThisGroupInRange =
+                    spaceGroupRangeInfo &&
+                    spaceGroupRangeInfo.groupKey === group.groupKey;
+                  const isInRange =
+                    isThisGroupInRange &&
+                    spaceItemIndex >= spaceGroupRangeInfo!.startIndex &&
+                    spaceItemIndex <= spaceGroupRangeInfo!.endIndex;
+                  const isStart =
+                    isThisGroupInRange &&
+                    spaceItemIndex === spaceGroupRangeInfo!.startIndex;
+                  const isEnd =
+                    isThisGroupInRange &&
+                    spaceItemIndex === spaceGroupRangeInfo!.endIndex;
+                  const isMiddle =
+                    isThisGroupInRange &&
+                    spaceItemIndex > spaceGroupRangeInfo!.startIndex &&
+                    spaceItemIndex < spaceGroupRangeInfo!.endIndex;
+
+                  return renderedItemRow.render(
+                    <div
+                      key={item.id}
+                      data-item-id={item.id}
+                      data-space-navigation-visit-id={getExecutionVisitIdForItem(
+                        item,
+                      )}
+                      data-space-navigation-anchor="item"
+                      draggable={!isInspecting}
+                      onDragStart={
+                        !isInspecting
+                          ? (e) => handleDragStart(e, item)
+                          : undefined
+                      }
+                      onDragOver={
+                        !isInspecting
+                          ? (e) => handleDragOver(e, item)
+                          : undefined
+                      }
+                      onDrop={!isInspecting ? handleDrop : undefined}
+                      onDragEnd={!isInspecting ? cleanUp : undefined}
+                      onTouchStart={
+                        !isInspecting
+                          ? (e) => handleItemTouchStart(e, item)
+                          : undefined
+                      }
+                      onTouchMove={
+                        !isInspecting ? handleItemTouchMove : undefined
+                      }
+                      onTouchEnd={
+                        !isInspecting ? handleItemTouchEnd : undefined
+                      }
+                      onTouchCancel={
+                        !isInspecting ? handleItemTouchCancel : undefined
+                      }
+                      className="transition-opacity duration-200 relative"
+                      data-is-selected={selectedItemIds.has(item.id)}
+                    >
+                      {activeDropTarget?.id === item.id &&
+                        activeDropTarget.position === "top" && (
+                          <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
+                            <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
+                            <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
+                            <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
+                          </div>
+                        )}
+
+                      <ShoppingItemCard
+                        item={item}
+                        onUpdate={updateItemWithDeferredCleanup}
+                        isStriped={globalIndex % 2 !== 0}
+                        onEditRequest={onEditRequest}
+                        onDeleteRequest={onDeleteRequest}
+                        isSelected={selectedItemIds.has(item.id)}
+                        onSelectItem={(itemId) =>
+                          onSelectItem(itemId, columnType, rangePresentation)
+                        }
+                        blockBackgroundColor={blockColorMap.get(item.id)}
+                        onMoveUp={
+                          onMoveItemUp
+                            ? () => onMoveItemUp(item.id, columnType)
+                            : undefined
+                        }
+                        onMoveDown={
+                          onMoveItemDown
+                            ? () => onMoveItemDown(item.id, columnType)
+                            : undefined
+                        }
+                        canMoveUp={globalIndex > 0}
+                        canMoveDown={globalIndex < items.length - 1}
+                        isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
+                        isSearchMatch={highlightedItemId === item.id}
+                        layoutMode={layoutMode}
+                        viewMode={viewMode}
+                        highlightPrice={priceHighlightItemIds.has(item.id)}
+                        highlightLimitedMissing={limitedMissingHighlightItemIds.has(
+                          item.id,
+                        )}
+                        getLatestItemById={getLatestItemById}
+                        onNotify={showLimitedMessage}
+                        onLimitedPurchaseDefer={
+                          viewMode === "execute" && columnType === "execute"
+                            ? markLimitedPurchaseQuantityDeferred
+                            : undefined
+                        }
+                        onPostEventDistributionCheckRequest={
+                          viewMode === "execute" && columnType === "execute"
+                            ? (soldOutItem) =>
+                                openPostEventDistributionCheck("single", [
+                                  soldOutItem,
+                                ])
+                            : undefined
+                        }
+                        purchaseStatusControlMode={purchaseStatusControlMode}
+                        skipLimitedPurchaseForSingleQuantity={
+                          skipLimitedPurchaseForSingleQuantity
+                        }
+                        readOnly={isInspecting}
+                      />
+
+                      {activeDropTarget?.id === item.id &&
+                        activeDropTarget.position === "bottom" && (
+                          <div className="absolute -bottom-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
+                            <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
+                            <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
+                            <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
+                          </div>
+                        )}
+
+                      {/* チェーン範囲選択UI（スペースグループ内） */}
+                      {!isInspecting && isInRange && onToggleRangeSelection && (
+                        <div
+                          className={`absolute top-0 bottom-0 z-40 w-10 ${
+                            columnType === "candidate" ? "left-0" : "right-0"
+                          } cursor-pointer ${
+                            spaceGroupRangeInfo!.onlyStartEndSelected
+                              ? "opacity-50 hover:opacity-100"
+                              : "opacity-100"
+                          }`}
+                          title={
+                            spaceGroupRangeInfo!.allSelected
+                              ? "範囲内のチェックを外す"
+                              : "範囲内のチェックを入れる"
+                          }
+                          onClick={() =>
+                            onToggleRangeSelection(
+                              spaceGroupRangeInfo!.rangeItems.map(
+                                (rangeItem) => rangeItem.id,
+                              ),
+                            )
+                          }
+                        >
+                          <svg
+                            className={`absolute h-full w-full ${
+                              columnType === "candidate"
+                                ? "-left-[42px]"
+                                : "-right-[42px]"
+                            }`}
+                            preserveAspectRatio="none"
+                          >
+                            <defs>
+                              <linearGradient
+                                id={`chainMetal-space-${item.id}`}
+                                x1="0%"
+                                y1="0%"
+                                x2="100%"
+                                y2="0%"
+                              >
+                                <stop offset="0%" stopColor="#9CA3AF" />
+                                <stop offset="50%" stopColor="#D1D5DB" />
+                                <stop offset="100%" stopColor="#9CA3AF" />
+                              </linearGradient>
+                              <pattern
+                                id={`chainPattern-space-${item.id}`}
+                                x="0"
+                                y="0"
+                                width="40"
+                                height="20"
+                                patternUnits="userSpaceOnUse"
+                              >
+                                <rect
+                                  x="14"
+                                  y="-2"
+                                  width="12"
+                                  height="18"
+                                  rx="6"
+                                  fill="none"
+                                  stroke={`url(#chainMetal-space-${item.id})`}
+                                  strokeWidth="3"
+                                />
+                                <rect
+                                  x="17"
+                                  y="13"
+                                  width="6"
+                                  height="8"
+                                  rx="2"
+                                  fill={`url(#chainMetal-space-${item.id})`}
+                                  stroke="#4B5563"
+                                  strokeWidth="0.5"
+                                />
+                              </pattern>
+                            </defs>
+
+                            {isStart && (
+                              <rect
+                                x="0"
+                                y="50%"
+                                width="40"
+                                height="50%"
+                                fill={`url(#chainPattern-space-${item.id})`}
+                              />
+                            )}
+                            {isEnd && (
+                              <rect
+                                x="0"
+                                y="0"
+                                width="40"
+                                height="50%"
+                                fill={`url(#chainPattern-space-${item.id})`}
+                              />
+                            )}
+                            {isMiddle && (
+                              <rect
+                                x="0"
+                                y="0"
+                                width="40"
+                                height="100%"
+                                fill={`url(#chainPattern-space-${item.id})`}
+                              />
+                            )}
+
+                            {isStart && (
+                              <ellipse
+                                cx="20"
+                                cy="100%"
+                                rx="10"
+                                ry="5"
+                                fill="none"
+                                stroke={`url(#chainMetal-space-${item.id})`}
+                                strokeWidth="3"
+                              />
+                            )}
+                            {isEnd && (
+                              <ellipse
+                                cx="20"
+                                cy="0"
+                                rx="10"
+                                ry="5"
+                                fill="none"
+                                stroke={`url(#chainMetal-space-${item.id})`}
+                                strokeWidth="3"
+                              />
+                            )}
+                          </svg>
+                        </div>
+                      )}
+                    </div>,
+                  );
+                })}
+                {/* 実行モード: 全アイテム非未購入時のボタン */}
+                {viewMode === "execute" &&
+                  !isInspecting &&
+                  (() => {
+                    const allNonNone = group.items.every(
+                      (item) => item.purchaseStatus !== "None",
+                    );
+                    if (!allNonNone) return null;
+                    const isLastGroup = groupIndex === spaceGroups.length - 1;
+
+                    if (
+                      isLastGroup &&
+                      showPostponeFilterButton &&
+                      onActivatePostponeFilter
+                    ) {
+                      return (
+                        <button
+                          onClick={() => {
+                            if (
+                              blockPriceOrLimitedMissingIfNeeded(
+                                group.groupKey,
+                                group.items,
+                              )
+                            ) {
+                              return;
+                            }
+                            onActivatePostponeFilter();
+                          }}
+                          className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-orange-700 hover:bg-orange-800 text-white dark:bg-orange-700 dark:hover:bg-orange-800 ${
+                            layoutMode === "smartphone" ? "text-sm" : "text-sm"
+                          }`}
+                        >
+                          後回しでフィルタ
+                        </button>
+                      );
+                    }
+
+                    if (
+                      isLastGroup &&
+                      showLateFilterButton &&
+                      onActivateLateFilter
+                    ) {
+                      return (
+                        <button
+                          onClick={() => {
+                            if (
+                              blockPriceOrLimitedMissingIfNeeded(
+                                group.groupKey,
+                                group.items,
+                              )
+                            ) {
+                              return;
+                            }
+                            onActivateLateFilter();
+                          }}
+                          className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-sky-700 hover:bg-sky-800 text-white dark:bg-sky-700 dark:hover:bg-sky-800 ${
+                            layoutMode === "smartphone" ? "text-sm" : "text-sm"
+                          }`}
+                        >
+                          遅参でフィルタ
+                        </button>
+                      );
+                    }
+
+                    // 最下段以外: スペースを閉じて次のスペースを展開
+                    if (!isLastGroup && onCollapseAndOpenNext) {
+                      return (
+                        <button
+                          onClick={() => {
+                            if (
+                              blockPriceOrLimitedMissingIfNeeded(
+                                group.groupKey,
+                                group.items,
+                              )
+                            ) {
+                              return;
+                            }
+                            onCollapseAndOpenNext(group.groupKey);
+                          }}
+                          className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-600 dark:hover:bg-blue-700 ${
+                            layoutMode === "smartphone" ? "text-sm" : "text-sm"
+                          }`}
+                        >
+                          スペースを閉じて次のスペースを展開
+                        </button>
+                      );
+                    }
+
+                    return null;
+                  })()}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    return (
+      <FullListRenderer
+        model={listReadModel}
+        selectionReason={listRendererSelection.reason}
+        accessibleLabel="買い物リスト"
+        focusedRowKey={listControllerState.focusedRowKey}
+        rootRef={containerRef}
+        rootProps={{
+          className: "relative space-y-1 pb-[var(--footer-height,96px)]",
+          onBlurCapture: handleFullListBlurCapture,
+          onDragOver: !isInspecting ? handleContainerDragOver : undefined,
+          onDrop: !isInspecting ? handleDrop : undefined,
+          onDragLeave: () => setActiveDropTarget(null),
+          onFocusCapture: handleFullListFocusCapture,
+        }}
+        beforeContent={
+          <>
+            {limitedPurchaseOverlays}
+            {onToggleAllSpaceCollapse && (
+              <div className="flex justify-end mb-1">
+                <button
+                  onClick={() => onToggleAllSpaceCollapse(!allCollapsed)}
+                  className="text-xs px-2 py-1 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
+                >
+                  {allCollapsed ? "全て展開" : "全て折りたたむ"}
+                </button>
+              </div>
+            )}
+          </>
+        }
+        renderGroup={renderSpaceGroupRow}
+        afterContent={
+          addDialogOpen &&
           !isInspecting &&
           ReactDOM.createPortal(
             <div
@@ -3858,7 +3924,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         value={newItemForm.price}
                         onChange={(e) => {
                           const value = e.target.value.replace(/[^0-9]/g, "");
-                          setNewItemForm((prev) => ({ ...prev, price: value }));
+                          setNewItemForm((prev) => ({
+                            ...prev,
+                            price: value,
+                          }));
                         }}
                         className={`${formInputClass} pr-12`}
                         placeholder="0"
@@ -4022,8 +4091,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               </div>
             </div>,
             document.body,
-          )}
-      </div>
+          )
+        }
+      />
     );
   }
 
@@ -4031,353 +4101,361 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   // ホール定義 0 件でも、優先度別の未定義セクション (highest/priority/none) が
   // 1 つでもあれば groupItemsByHallOrder が複数バケットを返す
   if (shouldShowHallGroups) {
-    return (
-      <div
-        {...fullListRendererAttributes}
-        ref={containerRef}
-        className="relative space-y-2 pb-[var(--footer-height,96px)]"
-        onDragLeave={() => setActiveDropTarget(null)}
-      >
-        {hallGroups.map((group, groupIndex) => {
-          const headerStyle = getGroupHeaderStyle(
-            group.groupId,
-            hallDefinitions,
-          );
-          const displayName = getGroupDisplayName(
-            group.groupId,
-            hallDefinitions,
-          );
+    const hallGroupIndexByKey = new Map(
+      hallGroups.map(
+        (group, index) =>
+          [group.groupId ?? `ungrouped:${index}`, index] as const,
+      ),
+    );
+    const renderHallGroupRow = (
+      row: Extract<ShoppingListRow, { kind: "group" }>,
+      renderedItemRows: readonly FullListRenderedItemRow[],
+    ): React.ReactNode => {
+      const groupIndex = hallGroupIndexByKey.get(row.groupKey);
+      if (groupIndex === undefined) {
+        throw new Error(
+          `ShoppingList invariant failed: unknown hall group ${row.groupKey}`,
+        );
+      }
+      const group = hallGroups[groupIndex];
 
-          // このグループ内での範囲選択情報
-          const isThisGroupInRange =
-            groupRangeInfo && groupRangeInfo.groupId === group.groupId;
+      const headerStyle = getGroupHeaderStyle(group.groupId, hallDefinitions);
+      const displayName = getGroupDisplayName(group.groupId, hallDefinitions);
 
-          return (
-            <div
-              key={group.groupId ?? `no-hall-${groupIndex}`}
-              className="mb-4"
+      // このグループ内での範囲選択情報
+      const isThisGroupInRange =
+        groupRangeInfo && groupRangeInfo.groupId === group.groupId;
+
+      return (
+        <div key={group.groupId ?? `no-hall-${groupIndex}`} className="mb-4">
+          {/* グループヘッダー */}
+          <div
+            className={`sticky top-0 z-20 flex items-center justify-between overflow-hidden rounded-t-lg px-4 py-2 ${headerStyle.bgClass}`}
+          >
+            <svg
+              aria-hidden="true"
+              className="absolute inset-y-0 left-0 h-full w-1"
+              preserveAspectRatio="none"
+              viewBox="0 0 4 100"
             >
-              {/* グループヘッダー */}
-              <div
-                className={`sticky top-0 z-20 flex items-center justify-between overflow-hidden rounded-t-lg px-4 py-2 ${headerStyle.bgClass}`}
-              >
-                <svg
-                  aria-hidden="true"
-                  className="absolute inset-y-0 left-0 h-full w-1"
-                  preserveAspectRatio="none"
-                  viewBox="0 0 4 100"
+              <rect fill={headerStyle.borderColor} height="100" width="4" />
+            </svg>
+            <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
+              {displayName}
+            </span>
+            <span className="text-xs text-slate-600 dark:text-slate-300">
+              {group.items.length}件
+            </span>
+          </div>
+
+          {/* グループ内アイテム */}
+          <div
+            role="list"
+            aria-label={`${row.label}の項目`}
+            className={`mt-2 ${
+              layoutMode === "smartphone" ? "space-y-2" : "space-y-4"
+            }`}
+          >
+            {renderedItemRows.map((renderedItemRow, hallIndex) => {
+              const item = renderedItemRow.row.item;
+              const globalIndex = items.findIndex((i) => i.id === item.id);
+
+              const isInRange =
+                isThisGroupInRange &&
+                hallIndex >= groupRangeInfo!.startIndex &&
+                hallIndex <= groupRangeInfo!.endIndex;
+              const isStart =
+                isThisGroupInRange && hallIndex === groupRangeInfo!.startIndex;
+              const isEnd =
+                isThisGroupInRange && hallIndex === groupRangeInfo!.endIndex;
+              const isMiddle =
+                isThisGroupInRange &&
+                hallIndex > groupRangeInfo!.startIndex &&
+                hallIndex < groupRangeInfo!.endIndex;
+
+              return renderedItemRow.render(
+                <div
+                  key={item.id}
+                  data-item-id={item.id}
+                  data-space-navigation-visit-id={getExecutionVisitIdForItem(
+                    item,
+                  )}
+                  data-space-navigation-anchor="item"
+                  draggable={!isInspecting}
+                  onDragStart={
+                    !isInspecting ? (e) => handleDragStart(e, item) : undefined
+                  }
+                  onDragOver={
+                    !isInspecting ? (e) => handleDragOver(e, item) : undefined
+                  }
+                  onDrop={!isInspecting ? handleDrop : undefined}
+                  onDragEnd={!isInspecting ? cleanUp : undefined}
+                  onTouchStart={
+                    !isInspecting
+                      ? (e) => handleItemTouchStart(e, item)
+                      : undefined
+                  }
+                  onTouchMove={!isInspecting ? handleItemTouchMove : undefined}
+                  onTouchEnd={!isInspecting ? handleItemTouchEnd : undefined}
+                  onTouchCancel={
+                    !isInspecting ? handleItemTouchCancel : undefined
+                  }
+                  className={`transition-opacity duration-200 relative ${
+                    group.priority === "highest"
+                      ? "bg-red-50/30 dark:bg-red-950/20"
+                      : group.priority === "priority"
+                        ? "bg-orange-50/30 dark:bg-orange-950/20"
+                        : ""
+                  }`}
+                  data-is-selected={selectedItemIds.has(item.id)}
                 >
-                  <rect fill={headerStyle.borderColor} height="100" width="4" />
-                </svg>
-                <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
-                  {displayName}
-                </span>
-                <span className="text-xs text-slate-600 dark:text-slate-300">
-                  {group.items.length}件
-                </span>
-              </div>
+                  {activeDropTarget?.id === item.id &&
+                    activeDropTarget.position === "top" && (
+                      <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
+                        <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
+                        <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
+                        <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
+                      </div>
+                    )}
 
-              {/* グループ内アイテム */}
-              <div
-                className={`mt-2 ${
-                  layoutMode === "smartphone" ? "space-y-2" : "space-y-4"
-                }`}
-              >
-                {group.items.map((item, hallIndex) => {
-                  const globalIndex = items.findIndex((i) => i.id === item.id);
+                  <ShoppingItemCard
+                    item={item}
+                    onUpdate={onUpdateItem}
+                    isStriped={globalIndex % 2 !== 0}
+                    onEditRequest={onEditRequest}
+                    onDeleteRequest={onDeleteRequest}
+                    isSelected={selectedItemIds.has(item.id)}
+                    onSelectItem={(itemId) =>
+                      onSelectItem(itemId, columnType, rangePresentation)
+                    }
+                    blockBackgroundColor={blockColorMap.get(item.id)}
+                    onMoveUp={
+                      onMoveItemUp
+                        ? () => onMoveItemUp(item.id, columnType)
+                        : undefined
+                    }
+                    onMoveDown={
+                      onMoveItemDown
+                        ? () => onMoveItemDown(item.id, columnType)
+                        : undefined
+                    }
+                    canMoveUp={globalIndex > 0}
+                    canMoveDown={globalIndex < items.length - 1}
+                    isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
+                    isSearchMatch={highlightedItemId === item.id}
+                    layoutMode={layoutMode}
+                    viewMode={viewMode}
+                    hallIndex={hallIndex}
+                    priorityLevel={group.priority}
+                    highlightPrice={priceHighlightItemIds.has(item.id)}
+                    highlightLimitedMissing={limitedMissingHighlightItemIds.has(
+                      item.id,
+                    )}
+                    getLatestItemById={getLatestItemById}
+                    onNotify={showLimitedMessage}
+                    onPostEventDistributionCheckRequest={
+                      viewMode === "execute" && columnType === "execute"
+                        ? (soldOutItem) =>
+                            openPostEventDistributionCheck("single", [
+                              soldOutItem,
+                            ])
+                        : undefined
+                    }
+                    purchaseStatusControlMode={purchaseStatusControlMode}
+                    skipLimitedPurchaseForSingleQuantity={
+                      skipLimitedPurchaseForSingleQuantity
+                    }
+                    readOnly={isInspecting}
+                  />
 
-                  const isInRange =
-                    isThisGroupInRange &&
-                    hallIndex >= groupRangeInfo!.startIndex &&
-                    hallIndex <= groupRangeInfo!.endIndex;
-                  const isStart =
-                    isThisGroupInRange &&
-                    hallIndex === groupRangeInfo!.startIndex;
-                  const isEnd =
-                    isThisGroupInRange &&
-                    hallIndex === groupRangeInfo!.endIndex;
-                  const isMiddle =
-                    isThisGroupInRange &&
-                    hallIndex > groupRangeInfo!.startIndex &&
-                    hallIndex < groupRangeInfo!.endIndex;
+                  {activeDropTarget?.id === item.id &&
+                    activeDropTarget.position === "bottom" && (
+                      <div className="absolute -bottom-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
+                        <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
+                        <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
+                        <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
+                      </div>
+                    )}
 
-                  return (
+                  {/* 範囲選択表示とチェーン選択UI（グループ内のみ） */}
+                  {!isInspecting && isInRange && onToggleRangeSelection && (
                     <div
-                      key={item.id}
-                      data-item-id={item.id}
-                      data-space-navigation-visit-id={getExecutionVisitIdForItem(
-                        item,
-                      )}
-                      data-space-navigation-anchor="item"
-                      draggable={!isInspecting}
-                      onDragStart={
-                        !isInspecting
-                          ? (e) => handleDragStart(e, item)
-                          : undefined
-                      }
-                      onDragOver={
-                        !isInspecting
-                          ? (e) => handleDragOver(e, item)
-                          : undefined
-                      }
-                      onDrop={!isInspecting ? handleDrop : undefined}
-                      onDragEnd={!isInspecting ? cleanUp : undefined}
-                      onTouchStart={
-                        !isInspecting
-                          ? (e) => handleItemTouchStart(e, item)
-                          : undefined
-                      }
-                      onTouchMove={
-                        !isInspecting ? handleItemTouchMove : undefined
-                      }
-                      onTouchEnd={
-                        !isInspecting ? handleItemTouchEnd : undefined
-                      }
-                      onTouchCancel={
-                        !isInspecting ? handleItemTouchCancel : undefined
-                      }
-                      className={`transition-opacity duration-200 relative ${
-                        group.priority === "highest"
-                          ? "bg-red-50/30 dark:bg-red-950/20"
-                          : group.priority === "priority"
-                            ? "bg-orange-50/30 dark:bg-orange-950/20"
-                            : ""
+                      className={`absolute top-0 bottom-0 z-40 w-10 ${
+                        columnType === "candidate" ? "left-0" : "right-0"
+                      } cursor-pointer ${
+                        groupRangeInfo!.onlyStartEndSelected
+                          ? "opacity-50 hover:opacity-100"
+                          : "opacity-100"
                       }`}
-                      data-is-selected={selectedItemIds.has(item.id)}
+                      title={
+                        groupRangeInfo!.allSelected
+                          ? "範囲内のチェックを外す"
+                          : "範囲内のチェックを入れる"
+                      }
+                      onClick={() =>
+                        onToggleRangeSelection(
+                          groupRangeInfo!.rangeItems.map(
+                            (rangeItem) => rangeItem.id,
+                          ),
+                        )
+                      }
                     >
-                      {activeDropTarget?.id === item.id &&
-                        activeDropTarget.position === "top" && (
-                          <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
-                            <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
-                            <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
-                            <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
-                          </div>
-                        )}
-
-                      <ShoppingItemCard
-                        item={item}
-                        onUpdate={onUpdateItem}
-                        isStriped={globalIndex % 2 !== 0}
-                        onEditRequest={onEditRequest}
-                        onDeleteRequest={onDeleteRequest}
-                        isSelected={selectedItemIds.has(item.id)}
-                        onSelectItem={(itemId) =>
-                          onSelectItem(itemId, columnType, rangePresentation)
-                        }
-                        blockBackgroundColor={blockColorMap.get(item.id)}
-                        onMoveUp={
-                          onMoveItemUp
-                            ? () => onMoveItemUp(item.id, columnType)
-                            : undefined
-                        }
-                        onMoveDown={
-                          onMoveItemDown
-                            ? () => onMoveItemDown(item.id, columnType)
-                            : undefined
-                        }
-                        canMoveUp={globalIndex > 0}
-                        canMoveDown={globalIndex < items.length - 1}
-                        isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
-                        isSearchMatch={highlightedItemId === item.id}
-                        layoutMode={layoutMode}
-                        viewMode={viewMode}
-                        hallIndex={hallIndex}
-                        priorityLevel={group.priority}
-                        highlightPrice={priceHighlightItemIds.has(item.id)}
-                        highlightLimitedMissing={limitedMissingHighlightItemIds.has(
-                          item.id,
-                        )}
-                        getLatestItemById={getLatestItemById}
-                        onNotify={showLimitedMessage}
-                        onPostEventDistributionCheckRequest={
-                          viewMode === "execute" && columnType === "execute"
-                            ? (soldOutItem) =>
-                                openPostEventDistributionCheck("single", [
-                                  soldOutItem,
-                                ])
-                            : undefined
-                        }
-                        purchaseStatusControlMode={purchaseStatusControlMode}
-                        skipLimitedPurchaseForSingleQuantity={
-                          skipLimitedPurchaseForSingleQuantity
-                        }
-                        readOnly={isInspecting}
-                      />
-
-                      {activeDropTarget?.id === item.id &&
-                        activeDropTarget.position === "bottom" && (
-                          <div className="absolute -bottom-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
-                            <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
-                            <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
-                            <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
-                          </div>
-                        )}
-
-                      {/* 範囲選択表示とチェーン選択UI（グループ内のみ） */}
-                      {!isInspecting && isInRange && onToggleRangeSelection && (
-                        <div
-                          className={`absolute top-0 bottom-0 z-40 w-10 ${
-                            columnType === "candidate" ? "left-0" : "right-0"
-                          } cursor-pointer ${
-                            groupRangeInfo!.onlyStartEndSelected
-                              ? "opacity-50 hover:opacity-100"
-                              : "opacity-100"
-                          }`}
-                          title={
-                            groupRangeInfo!.allSelected
-                              ? "範囲内のチェックを外す"
-                              : "範囲内のチェックを入れる"
-                          }
-                          onClick={() =>
-                            onToggleRangeSelection(
-                              groupRangeInfo!.rangeItems.map(
-                                (rangeItem) => rangeItem.id,
-                              ),
-                            )
-                          }
-                        >
-                          <svg
-                            className={`absolute h-full w-full ${
-                              columnType === "candidate"
-                                ? "-left-[42px]"
-                                : "-right-[42px]"
-                            }`}
-                            preserveAspectRatio="none"
+                      <svg
+                        className={`absolute h-full w-full ${
+                          columnType === "candidate"
+                            ? "-left-[42px]"
+                            : "-right-[42px]"
+                        }`}
+                        preserveAspectRatio="none"
+                      >
+                        <defs>
+                          <linearGradient
+                            id={`chainMetal-group-${item.id}`}
+                            x1="0%"
+                            y1="0%"
+                            x2="100%"
+                            y2="0%"
                           >
-                            <defs>
-                              <linearGradient
-                                id={`chainMetal-group-${item.id}`}
-                                x1="0%"
-                                y1="0%"
-                                x2="100%"
-                                y2="0%"
-                              >
-                                <stop offset="0%" stopColor="#9CA3AF" />
-                                <stop offset="50%" stopColor="#D1D5DB" />
-                                <stop offset="100%" stopColor="#9CA3AF" />
-                              </linearGradient>
-                              <pattern
-                                id={`chainPattern-group-${item.id}`}
-                                x="0"
-                                y="0"
-                                width="40"
-                                height="20"
-                                patternUnits="userSpaceOnUse"
-                              >
-                                <rect
-                                  x="14"
-                                  y="-2"
-                                  width="12"
-                                  height="18"
-                                  rx="6"
-                                  fill="none"
-                                  stroke={`url(#chainMetal-group-${item.id})`}
-                                  strokeWidth="3"
-                                />
-                                <rect
-                                  x="17"
-                                  y="13"
-                                  width="6"
-                                  height="8"
-                                  rx="2"
-                                  fill={`url(#chainMetal-group-${item.id})`}
-                                  stroke="#4B5563"
-                                  strokeWidth="0.5"
-                                />
-                              </pattern>
-                            </defs>
+                            <stop offset="0%" stopColor="#9CA3AF" />
+                            <stop offset="50%" stopColor="#D1D5DB" />
+                            <stop offset="100%" stopColor="#9CA3AF" />
+                          </linearGradient>
+                          <pattern
+                            id={`chainPattern-group-${item.id}`}
+                            x="0"
+                            y="0"
+                            width="40"
+                            height="20"
+                            patternUnits="userSpaceOnUse"
+                          >
+                            <rect
+                              x="14"
+                              y="-2"
+                              width="12"
+                              height="18"
+                              rx="6"
+                              fill="none"
+                              stroke={`url(#chainMetal-group-${item.id})`}
+                              strokeWidth="3"
+                            />
+                            <rect
+                              x="17"
+                              y="13"
+                              width="6"
+                              height="8"
+                              rx="2"
+                              fill={`url(#chainMetal-group-${item.id})`}
+                              stroke="#4B5563"
+                              strokeWidth="0.5"
+                            />
+                          </pattern>
+                        </defs>
 
-                            {isStart && (
-                              <rect
-                                x="0"
-                                y="50%"
-                                width="40"
-                                height="50%"
-                                fill={`url(#chainPattern-group-${item.id})`}
-                              />
-                            )}
-                            {isEnd && (
-                              <rect
-                                x="0"
-                                y="0"
-                                width="40"
-                                height="50%"
-                                fill={`url(#chainPattern-group-${item.id})`}
-                              />
-                            )}
-                            {isMiddle && (
-                              <rect
-                                x="0"
-                                y="0"
-                                width="40"
-                                height="100%"
-                                fill={`url(#chainPattern-group-${item.id})`}
-                              />
-                            )}
+                        {isStart && (
+                          <rect
+                            x="0"
+                            y="50%"
+                            width="40"
+                            height="50%"
+                            fill={`url(#chainPattern-group-${item.id})`}
+                          />
+                        )}
+                        {isEnd && (
+                          <rect
+                            x="0"
+                            y="0"
+                            width="40"
+                            height="50%"
+                            fill={`url(#chainPattern-group-${item.id})`}
+                          />
+                        )}
+                        {isMiddle && (
+                          <rect
+                            x="0"
+                            y="0"
+                            width="40"
+                            height="100%"
+                            fill={`url(#chainPattern-group-${item.id})`}
+                          />
+                        )}
 
-                            {/* 端点のリング */}
-                            {isStart && (
-                              <ellipse
-                                cx="20"
-                                cy="100%"
-                                rx="10"
-                                ry="5"
-                                fill="none"
-                                stroke={`url(#chainMetal-group-${item.id})`}
-                                strokeWidth="3"
-                              />
-                            )}
-                            {isEnd && (
-                              <ellipse
-                                cx="20"
-                                cy="0"
-                                rx="10"
-                                ry="5"
-                                fill="none"
-                                stroke={`url(#chainMetal-group-${item.id})`}
-                                strokeWidth="3"
-                              />
-                            )}
+                        {/* 端点のリング */}
+                        {isStart && (
+                          <ellipse
+                            cx="20"
+                            cy="100%"
+                            rx="10"
+                            ry="5"
+                            fill="none"
+                            stroke={`url(#chainMetal-group-${item.id})`}
+                            strokeWidth="3"
+                          />
+                        )}
+                        {isEnd && (
+                          <ellipse
+                            cx="20"
+                            cy="0"
+                            rx="10"
+                            ry="5"
+                            fill="none"
+                            stroke={`url(#chainMetal-group-${item.id})`}
+                            strokeWidth="3"
+                          />
+                        )}
 
-                            {/* 中心の丸 */}
-                            {isStart && (
-                              <circle
-                                cx="20"
-                                cy="100%"
-                                r="4"
-                                fill={`url(#chainMetal-group-${item.id})`}
-                                stroke="#4B5563"
-                                strokeWidth="0.5"
-                              />
-                            )}
-                            {isEnd && (
-                              <circle
-                                cx="20"
-                                cy="0"
-                                r="4"
-                                fill={`url(#chainMetal-group-${item.id})`}
-                                stroke="#4B5563"
-                                strokeWidth="0.5"
-                              />
-                            )}
-                          </svg>
-                        </div>
-                      )}
+                        {/* 中心の丸 */}
+                        {isStart && (
+                          <circle
+                            cx="20"
+                            cy="100%"
+                            r="4"
+                            fill={`url(#chainMetal-group-${item.id})`}
+                            stroke="#4B5563"
+                            strokeWidth="0.5"
+                          />
+                        )}
+                        {isEnd && (
+                          <circle
+                            cx="20"
+                            cy="0"
+                            r="4"
+                            fill={`url(#chainMetal-group-${item.id})`}
+                            stroke="#4B5563"
+                            strokeWidth="0.5"
+                          />
+                        )}
+                      </svg>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+                  )}
+                </div>,
+              );
+            })}
+          </div>
+        </div>
+      );
+    };
+
+    return (
+      <FullListRenderer
+        model={listReadModel}
+        selectionReason={listRendererSelection.reason}
+        accessibleLabel="買い物リスト"
+        focusedRowKey={listControllerState.focusedRowKey}
+        rootRef={containerRef}
+        rootProps={{
+          className: "relative space-y-2 pb-[var(--footer-height,96px)]",
+          onBlurCapture: handleFullListBlurCapture,
+          onDragLeave: () => setActiveDropTarget(null),
+          onFocusCapture: handleFullListFocusCapture,
+        }}
+        renderGroup={renderHallGroupRow}
+      />
     );
   }
 
   const renderUngroupedItemRow = (
     row: ShoppingListItemRow,
     index: number,
-    nestedInVirtualList: boolean,
   ): React.ReactElement => {
     const item = row.item;
     const isInRange =
@@ -4390,9 +4468,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     return (
       <div
         key={row.rowKey}
-        {...(nestedInVirtualList
-          ? {}
-          : getShoppingListRowAccessibilityAttributes(row))}
         data-item-id={item.id}
         data-space-navigation-visit-id={getExecutionVisitIdForItem(item)}
         data-space-navigation-anchor="item"
@@ -4724,6 +4799,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       <VirtualListRenderer
         model={listReadModel}
         accessibleLabel="買い物リスト"
+        focusedRowKey={listControllerState.focusedRowKey}
+        scrollRequest={listControllerState.scrollRequest}
+        onFocusedRowKeyChange={handleFocusedRowKeyChange}
+        onScrollRequestConsumed={handleScrollRequestConsumed}
         estimateSizePx={
           virtualListEligibility.rowHeightPx ??
           VIRTUAL_LIST_ESTIMATED_ROW_HEIGHT_PX
@@ -4735,28 +4814,32 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         rootRef={containerRef}
         onDragLeave={() => setActiveDropTarget(null)}
         renderRow={(row, index) =>
-          row.kind === "item" ? renderUngroupedItemRow(row, index, true) : null
+          row.kind === "item" ? renderUngroupedItemRow(row, index) : null
         }
       />
     );
   }
 
   return (
-    <div
-      {...fullListRendererAttributes}
-      ref={containerRef}
-      role="list"
-      aria-label="買い物リスト"
-      className={`relative ${
-        layoutMode === "smartphone" ? "space-y-2" : "space-y-4"
-      } pb-[var(--footer-height,96px)]`}
-      onDragLeave={() => setActiveDropTarget(null)}
-    >
-      {limitedPurchaseOverlays}
-      {listReadModel.itemRows.map((row, index) =>
-        renderUngroupedItemRow(row, index, false),
-      )}
-    </div>
+    <FullListRenderer
+      model={listReadModel}
+      selectionReason={listRendererSelection.reason}
+      accessibleLabel="買い物リスト"
+      focusedRowKey={listControllerState.focusedRowKey}
+      rootRef={containerRef}
+      rootProps={{
+        className: `relative ${
+          layoutMode === "smartphone" ? "space-y-2" : "space-y-4"
+        } pb-[var(--footer-height,96px)]`,
+        onBlurCapture: handleFullListBlurCapture,
+        onDragLeave: () => setActiveDropTarget(null),
+        onFocusCapture: handleFullListFocusCapture,
+      }}
+      beforeContent={limitedPurchaseOverlays}
+      renderRow={(row, index) =>
+        row.kind === "item" ? renderUngroupedItemRow(row, index) : null
+      }
+    />
   );
 };
 

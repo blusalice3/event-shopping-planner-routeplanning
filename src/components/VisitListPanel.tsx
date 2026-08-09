@@ -12,7 +12,6 @@ import { parseGroupId, groupItemsByHallOrder } from "../utils/hallGrouping";
 import { findRouteLookupNumberCell } from "../utils/mapRoutingSignature";
 import { acquireBodyScrollLock } from "../utils/bodyScrollLock";
 import { useModalDialogBehavior } from "../hooks/useModalDialogBehavior";
-import { useDynamicCssClass } from "../styles/useDynamicCssClass";
 import GripVerticalIcon from "./icons/GripVerticalIcon";
 
 // 優先度レベルの型
@@ -207,13 +206,8 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
   const isDraggingSheet = useRef(false);
   const startY = useRef(0);
   const startHeight = useRef(0);
-  const bottomSheetHeightClassName = useDynamicCssClass({
-    height: `${bottomSheetHeight}%`,
-  });
-  const floatingDragClassName = useDynamicCssClass({
-    left: `${(touchDragPosition?.x ?? 100) - 100}px`,
-    top: `${(touchDragPosition?.y ?? 30) - 30}px`,
-  });
+  const floatingDragLeft = `${(touchDragPosition?.x ?? 100) - 100}px`;
+  const floatingDragTop = `${(touchDragPosition?.y ?? 30) - 30}px`;
   const viewportWidth =
     typeof window === "undefined"
       ? Number.POSITIVE_INFINITY
@@ -222,10 +216,14 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     typeof window === "undefined"
       ? Number.POSITIVE_INFINITY
       : window.innerHeight;
-  const priorityMenuClassName = useDynamicCssClass({
-    left: `${Math.min(menuPosition?.x ?? 0, viewportWidth - 180)}px`,
-    top: `${Math.min(menuPosition?.y ?? 0, viewportHeight - 150)}px`,
-  });
+  const priorityMenuLeft = `${Math.min(
+    menuPosition?.x ?? 0,
+    viewportWidth - 180,
+  )}px`;
+  const priorityMenuTop = `${Math.min(
+    menuPosition?.y ?? 0,
+    viewportHeight - 150,
+  )}px`;
 
   // 履歴に追加
   const pushHistory = useCallback(
@@ -1005,7 +1003,8 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
         {/* ボトムシート */}
         <div
           ref={bottomSheetRef}
-          className={`absolute bottom-0 left-0 right-0 flex flex-col rounded-t-2xl bg-white shadow-2xl pointer-events-auto dark:bg-slate-900 ${bottomSheetHeightClassName}`}
+          data-layout-height={`${bottomSheetHeight}%`}
+          className="esp-layout-height absolute bottom-0 left-0 right-0 flex flex-col rounded-t-2xl bg-white shadow-2xl pointer-events-auto dark:bg-slate-900"
         >
           {/* ドラッグハンドル */}
           <div
@@ -1356,7 +1355,9 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
         {/* フローティングドラッグアイテム */}
         {touchDragItem && touchDragPosition && (
           <div
-            className={`fixed z-[100] w-[200px] rounded-lg border-2 border-blue-500 bg-white px-4 py-2 shadow-2xl pointer-events-none dark:bg-slate-800 ${floatingDragClassName}`}
+            data-layout-left={floatingDragLeft}
+            data-layout-top={floatingDragTop}
+            className="esp-layout-left esp-layout-top fixed z-[100] w-[200px] rounded-lg border-2 border-blue-500 bg-white px-4 py-2 shadow-2xl pointer-events-none dark:bg-slate-800"
           >
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 flex items-center justify-center text-white rounded-full text-xs font-bold bg-blue-600">
@@ -1763,7 +1764,9 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
       {/* 優先度メニュー */}
       {menuItem && menuPosition && (
         <div
-          className={`fixed z-50 min-w-[160px] rounded-lg border border-slate-200 bg-white py-2 shadow-xl dark:border-slate-700 dark:bg-slate-800 ${priorityMenuClassName}`}
+          data-layout-left={priorityMenuLeft}
+          data-layout-top={priorityMenuTop}
+          className="esp-layout-left esp-layout-top fixed z-50 min-w-[160px] rounded-lg border border-slate-200 bg-white py-2 shadow-xl dark:border-slate-700 dark:bg-slate-800"
         >
           <div className="px-3 py-1 text-xs text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 mb-1">
             優先度設定
@@ -1835,7 +1838,9 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
       {/* フローティングドラッグアイテム */}
       {touchDragItem && touchDragPosition && (
         <div
-          className={`fixed z-[100] w-[200px] rounded-lg border-2 border-blue-500 bg-white px-4 py-2 shadow-2xl pointer-events-none dark:bg-slate-800 ${floatingDragClassName}`}
+          data-layout-left={floatingDragLeft}
+          data-layout-top={floatingDragTop}
+          className="esp-layout-left esp-layout-top fixed z-[100] w-[200px] rounded-lg border-2 border-blue-500 bg-white px-4 py-2 shadow-2xl pointer-events-none dark:bg-slate-800"
         >
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 flex items-center justify-center text-white rounded-full text-xs font-bold bg-blue-600">

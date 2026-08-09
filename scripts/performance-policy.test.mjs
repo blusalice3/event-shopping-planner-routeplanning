@@ -13,6 +13,7 @@ import {
   projectRoot,
   sha256,
 } from "./foundation-policy-utils.mjs";
+import { buildPerformanceEvidenceEnvelope } from "./lib/performance-evidence-builder.mjs";
 
 const clone = (value) => structuredClone(value);
 const primarySamples = Array.from({ length: 30 }, (_, index) => index + 1);
@@ -251,6 +252,35 @@ const bindP3Budget = async () => {
           .get(id)
           .requiredAssertions.map((assertion) => [assertion, true]),
       ),
+      executionBinding: {
+        adapterContract: "public-artifact-surface-v1",
+        fixturePayload: {
+          generator: "policy-test-v1",
+          seed: 1967,
+          cardinality: id === "xlsx-worker-export-roundtrip" ? 50_000 : 10,
+          payloadSha256: "4".repeat(64),
+          semanticSha256: "5".repeat(64),
+        },
+        faultInjection: null,
+        setup:
+          id === "xlsx-worker-export-roundtrip"
+            ? {
+                method: "indexeddb-schema-exact-single-transaction-stage-v1",
+                timing: "excluded-from-measurement-v1",
+                readback: "separate-readonly-transaction-v1",
+                databaseName: "EventShoppingPlannerDB",
+                databaseVersion: 5,
+                storeName: "eventLists",
+                controlStoreName: "syncQueue",
+                key: "data",
+                transactionStores: ["eventLists", "syncQueue"],
+                payloadSha256: "4".repeat(64),
+                semanticSha256: "5".repeat(64),
+                itemCount: 50_000,
+                revision: `performance-stage:${"4".repeat(64)}`,
+              }
+            : null,
+      },
     };
   });
   const evidence = {
@@ -312,6 +342,49 @@ test("accepts a source-bound P3 evidence envelope with 30 recomputable samples",
     envelope,
   });
   assert.deepEqual(result.errors, []);
+});
+
+test("builds evidence only from a complete closed 30-sample input", async () => {
+  const { context, envelope } = await bindP3Budget();
+  const input = {
+    schemaVersion: 1,
+    evidenceId: envelope.evidence.evidenceId,
+    gate: envelope.evidence.gate,
+    collectedAtUtc: envelope.evidence.collectedAtUtc,
+    source: clone(envelope.evidence.source),
+    environment: clone(envelope.evidence.environment),
+    scenarios: envelope.evidence.scenarios.map((scenario) => ({
+      id: scenario.id,
+      samples: [...scenario.samples],
+      supplementarySamples: Object.fromEntries(
+        scenario.supplementaryMetrics.map((metric) => [
+          metric.name,
+          [...metric.samples],
+        ]),
+      ),
+      outcomeAssertions: clone(scenario.outcomeAssertions),
+      executionBinding: clone(scenario.executionBinding),
+    })),
+  };
+
+  assert.deepEqual(
+    buildPerformanceEvidenceEnvelope({ context, input }),
+    envelope,
+  );
+
+  const truncated = clone(input);
+  truncated.scenarios[0].samples.pop();
+  assert.throws(
+    () => buildPerformanceEvidenceEnvelope({ context, input: truncated }),
+    /exactly 30 finite nonnegative samples/,
+  );
+
+  const extended = clone(input);
+  extended.scenarios[0].unknown = true;
+  assert.throws(
+    () => buildPerformanceEvidenceEnvelope({ context, input: extended }),
+    /must contain exactly/,
+  );
 });
 
 test("rejects evidence when a 30-sample series is truncated", async () => {

@@ -12,11 +12,11 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { useDynamicCssClass } from "../../../styles/useDynamicCssClass";
 import type {
   ShoppingListReadModel,
   ShoppingListRow,
 } from "../model/buildListRows";
+import type { ListScrollRequest } from "../controller/listController";
 import { getShoppingListRowAccessibilityAttributes } from "./rowAccessibility";
 
 export interface VirtualListWindow {
@@ -46,6 +46,10 @@ interface VirtualListRuntimeRendererProps extends VirtualListRendererBaseProps {
   readonly beforeContent?: React.ReactNode;
   readonly rootRef?: React.Ref<HTMLDivElement>;
   readonly onDragLeave?: React.DragEventHandler<HTMLDivElement>;
+  readonly focusedRowKey?: string | null;
+  readonly scrollRequest?: ListScrollRequest | null;
+  readonly onFocusedRowKeyChange?: (rowKey: string | null) => void;
+  readonly onScrollRequestConsumed?: (requestId: number) => void;
 }
 
 export type VirtualListRendererProps =
@@ -139,16 +143,16 @@ const MeasuredVirtualRow = ({
   measureElement,
   renderRow,
 }: MeasuredVirtualRowProps): React.ReactElement => {
-  const positionClassName = useDynamicCssClass({
-    transform: `translateY(${Math.max(0, virtualItem.start - scrollMargin)}px)`,
-  });
-
   return (
     <div
       {...getShoppingListRowAccessibilityAttributes(modelRow)}
       ref={measureElement}
       data-index={virtualItem.index}
-      className={`esp-virtual-list-row ${positionClassName}`}
+      data-layout-translate-y={`${Math.max(
+        0,
+        virtualItem.start - scrollMargin,
+      )}px`}
+      className="esp-virtual-list-row esp-layout-translate-y"
     >
       {renderRow(modelRow, virtualItem.index)}
     </div>
@@ -166,10 +170,20 @@ const RuntimeVirtualListRenderer = ({
   beforeContent,
   rootRef: suppliedRootRef,
   onDragLeave,
+  focusedRowKey: suppliedFocusedRowKey,
+  scrollRequest,
+  onFocusedRowKeyChange,
+  onScrollRequestConsumed,
 }: VirtualListRuntimeRendererProps): React.ReactElement => {
   const rootElementRef = useRef<HTMLDivElement | null>(null);
   const [rootElement, setRootElement] = useState<HTMLDivElement | null>(null);
-  const [focusedRowKey, setFocusedRowKey] = useState<string | null>(null);
+  const [localFocusedRowKey, setLocalFocusedRowKey] = useState<string | null>(
+    null,
+  );
+  const focusedRowKey =
+    suppliedFocusedRowKey === undefined
+      ? localFocusedRowKey
+      : suppliedFocusedRowKey;
   const focusSnapshotRef = useRef<FocusSnapshot | null>(null);
   const scrollAnchorRef = useRef<VirtualScrollAnchor | null>(null);
   const previousRowKeySignatureRef = useRef<string | null>(null);
@@ -222,9 +236,6 @@ const RuntimeVirtualListRenderer = ({
     scrollMargin,
   });
   const virtualItems = virtualizer.getVirtualItems();
-  const canvasHeightClassName = useDynamicCssClass({
-    height: `${virtualizer.getTotalSize()}px`,
-  });
   const rowKeySignature = useMemo(
     () => JSON.stringify(model.rows.map((row) => row.rowKey)),
     [model.rows],
@@ -239,10 +250,20 @@ const RuntimeVirtualListRenderer = ({
     [suppliedRootRef],
   );
 
+  const updateFocusedRowKey = useCallback(
+    (rowKey: string | null) => {
+      if (suppliedFocusedRowKey === undefined) {
+        setLocalFocusedRowKey(rowKey);
+      }
+      onFocusedRowKeyChange?.(rowKey);
+    },
+    [onFocusedRowKeyChange, suppliedFocusedRowKey],
+  );
+
   const clearFocusSnapshot = useCallback(() => {
     focusSnapshotRef.current = null;
-    setFocusedRowKey(null);
-  }, []);
+    updateFocusedRowKey(null);
+  }, [updateFocusedRowKey]);
 
   const handleFocusCapture = useCallback(
     (event: React.FocusEvent<HTMLDivElement>) => {
@@ -255,9 +276,9 @@ const RuntimeVirtualListRenderer = ({
         event.target,
       );
       focusSnapshotRef.current = { rowKey, focusableIndex };
-      setFocusedRowKey(rowKey);
+      updateFocusedRowKey(rowKey);
     },
-    [],
+    [updateFocusedRowKey],
   );
 
   const handleBlurCapture = useCallback(
@@ -311,6 +332,21 @@ const RuntimeVirtualListRenderer = ({
         : undefined;
     focusTarget?.focus({ preventScroll: true });
   }, [rowIndexByKey, virtualItems]);
+
+  useEffect(() => {
+    if (!scrollRequest) return;
+    const rowIndex = rowIndexByKey.get(scrollRequest.rowKey);
+    if (rowIndex !== undefined) {
+      virtualizer.scrollToIndex(rowIndex, {
+        align:
+          scrollRequest.alignment === "nearest"
+            ? "auto"
+            : scrollRequest.alignment,
+        behavior: "auto",
+      });
+    }
+    onScrollRequestConsumed?.(scrollRequest.requestId);
+  }, [onScrollRequestConsumed, rowIndexByKey, scrollRequest, virtualizer]);
 
   useLayoutEffect(() => {
     const previousSignature = previousRowKeySignatureRef.current;
@@ -368,13 +404,18 @@ const RuntimeVirtualListRenderer = ({
       data-list-row-keys-stable={model.hasStableRowKeys ? "true" : "false"}
       data-list-window-start={windowStart}
       data-list-window-end={windowEnd}
+      data-list-controller="shared"
+      data-list-focused-row-key={focusedRowKey ?? undefined}
       className={`esp-virtual-list ${className ?? ""}`.trim()}
       onBlurCapture={handleBlurCapture}
       onDragLeave={onDragLeave}
       onFocusCapture={handleFocusCapture}
     >
       {beforeContent}
-      <div className={`esp-virtual-list-canvas ${canvasHeightClassName}`}>
+      <div
+        className="esp-virtual-list-canvas esp-layout-height"
+        data-layout-height={`${virtualizer.getTotalSize()}px`}
+      >
         {virtualItems.map((virtualItem) => {
           const modelRow = model.rows[virtualItem.index];
           return modelRow ? (

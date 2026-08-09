@@ -52,6 +52,7 @@ const makeEnvelope = () => ({
   sourceSha,
   stage: "pre-promotion",
   v1Evidence: evidenceReference,
+  performanceEvidence: null,
 });
 
 test("closed envelope keys stay identical to the frozen schema", async () => {
@@ -244,6 +245,7 @@ test("accepts a complete pre-promotion immutable hash chain", async () => {
       sourceSha,
       stage: "pre-promotion",
       v1Evidence: v1EvidenceReference,
+      performanceEvidence: null,
     };
     await writeFile(bundlePath, canonicalJsonBytes(bundle));
 

@@ -3,6 +3,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { validateReleaseAEvidence } from "./verify-release-a-evidence.mjs";
+import { assertPerformanceArtifactValueForAcceptedGate } from "./lib/performance-evidence-identity.mjs";
 import {
   parseJsonStrict,
   sha256Bytes,
@@ -42,6 +43,7 @@ export const BUNDLE_KEYS = [
   "dbCompatibilityContract",
   "kind",
   "packageIndex",
+  "performanceEvidence",
   "providerAssignmentEvidence",
   "providerDeploymentEvidence",
   "providerPolicy",
@@ -159,6 +161,10 @@ export const verifyReleaseAEvidenceBundle = async ({
   const approvalObjects = await Promise.all(
     bundle.approvals.map((approval) => resolveObject(approval)),
   );
+  const performanceEvidence =
+    bundle.performanceEvidence === null
+      ? null
+      : await resolveObject(bundle.performanceEvidence);
   let assignmentEvidence = null;
   if (bundle.providerAssignmentEvidence !== null) {
     assignmentEvidence = await resolveObject(bundle.providerAssignmentEvidence);
@@ -365,6 +371,29 @@ export const verifyReleaseAEvidenceBundle = async ({
       throw new Error(
         "Only an assigned standard can have acceptance-final evidence",
       );
+    }
+    const performanceArtifact = assertPerformanceArtifactValueForAcceptedGate({
+      acceptedGate: releaseStateEvent.payload?.acceptedGate,
+      value: performanceEvidence,
+      label: "Acceptance performance evidence",
+    });
+    if (bundle.performanceEvidence !== null) {
+      const performanceSourceSha =
+        performanceArtifact.artifactKind === "performance-inherited-closure/v1"
+          ? performanceArtifact.value.closure.p8Source.gitCommitSha
+          : performanceArtifact.value.evidence.source.gitCommitSha;
+      if (
+        performanceSourceSha !== bundle.sourceSha ||
+        !releaseStateEvent.evidenceRefs.some(
+          (reference) =>
+            reference.uri === bundle.performanceEvidence.uri &&
+            reference.sha256 === bundle.performanceEvidence.sha256,
+        )
+      ) {
+        throw new Error(
+          "Acceptance performance evidence identity or source binding differs",
+        );
+      }
     }
     const roles = new Set(approvalObjects.map((approval) => approval.role));
     for (const role of [

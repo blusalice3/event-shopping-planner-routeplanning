@@ -15,6 +15,7 @@ import type {
 import {
   useSpaceNavigatorSettings,
   type SpaceNavigatorSettings,
+  type SpaceNavigatorSettingsPersistencePort,
 } from "./hooks/useSpaceNavigatorSettings";
 
 export type SpaceNavigatorMode = "execute" | "focus";
@@ -124,13 +125,21 @@ const SpaceNavigatorContext = createContext<SpaceNavigatorContextValue | null>(
   null,
 );
 
+const volatileSpaceNavigatorSettingsPersistence: SpaceNavigatorSettingsPersistencePort =
+  {
+    loadPreference: () => null,
+    savePreference: () => undefined,
+  };
+
 export function SpaceNavigatorProvider({
   children,
+  settingsPersistence = volatileSpaceNavigatorSettingsPersistence,
 }: {
   children: React.ReactNode;
+  settingsPersistence?: SpaceNavigatorSettingsPersistencePort;
 }) {
   const { settings, updateSettings, resetSettings } =
-    useSpaceNavigatorSettings();
+    useSpaceNavigatorSettings(settingsPersistence);
   const [registration, setRegistration] =
     useState<SpaceNavigatorRegistration | null>(null);
   const registrationRef = useRef<SpaceNavigatorRegistration | null>(null);

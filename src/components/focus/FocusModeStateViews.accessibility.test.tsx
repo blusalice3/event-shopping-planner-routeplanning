@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { AutoAdvanceCountdown } from "./AutoAdvanceCountdown";
 import { ResumeChoiceDialogView } from "./FocusModeStateViews";
 
 describe("focus mode accessible white-text backgrounds", () => {
@@ -48,15 +47,6 @@ describe("focus mode accessible white-text backgrounds", () => {
     expect(within(lastChangeButton).getByText(/A-01 Circle/)).not.toHaveClass(
       "text-white/85",
       "opacity-85",
-    );
-  });
-
-  it("uses the AA orange floor for the auto-advance notice", () => {
-    render(<AutoAdvanceCountdown countdown={3} />);
-
-    expect(screen.getByText("3秒後に次の訪問先へ移動します...")).toHaveClass(
-      "bg-orange-700",
-      "text-white",
     );
   });
 });

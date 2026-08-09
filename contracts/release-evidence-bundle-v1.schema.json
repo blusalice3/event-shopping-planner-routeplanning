@@ -29,6 +29,16 @@
     "v1Evidence": {
       "$ref": "#/$defs/immutableRef"
     },
+    "performanceEvidence": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/immutableRef"
+        }
+      ]
+    },
     "packageIndex": {
       "$ref": "#/$defs/immutableRef"
     },
@@ -77,6 +87,7 @@
     "sourceSha",
     "releaseRole",
     "v1Evidence",
+    "performanceEvidence",
     "packageIndex",
     "artifactManifest",
     "providerDeploymentEvidence",

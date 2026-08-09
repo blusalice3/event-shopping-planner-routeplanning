@@ -12,14 +12,42 @@ on:
         required: true
         type: choice
         options:
+          - produce-artifact-build-requirements
           - build-and-verify
+          - produce-policy-activation-qa-build-requirements
+          - build-policy-activation-qa
           - deploy-prebuilt
+          - collect-prepromotion-evidence-source
+          - produce-prepromotion-evidence
           - produce-promotion-subject
           - prepare-and-promote
           - record-promotion
           - reconcile
+          - initialize-acceptance-collector
+          - collect-continuous-sample
+          - finalize-acceptance-evidence
+          - publish-acceptance-evidence
+          - produce-own-gate-performance-evidence
+          - produce-performance-inherited-closure
+          - produce-acceptance-requirements
           - produce-acceptance-inputs
           - accept-standard
+          - produce-policy-activation-qa-package
+          - produce-policy-activation-qa-execution-subject
+          - execute-policy-activation-qa
+          - produce-policy-activation-closure
+          - produce-policy-activation-subject
+          - activate-policy
+          - activate-policy-floor
+          - plan-archive-recovery
+          - produce-archive-recovery-subject
+          - execute-reviewed-archive-recovery
+          - produce-state-initialization-subject
+          - initialize-release-state
+          - produce-db-contract-activation-subject
+          - activate-db-contract
+          - produce-operation-abort-subject
+          - abort-pending-operation
       release_role:
         description: Prebuilt package role for deploy-prebuilt
         required: true
@@ -28,8 +56,38 @@ on:
         options:
           - standard
           - containment
+      archive_recovery_action:
+        description: Action using a verified Release State artifact archive
+        required: false
+        default: rollback
+        type: choice
+        options:
+          - rollback
+          - redeploy-standard
+          - redeploy-containment
+          - activate-containment
+      archive_recovery_binding_id:
+        description: Exact DeploymentBinding ID selected for recovery
+        required: false
+        default: ""
+        type: string
+      archive_recovery_source_sha:
+        description: Exact source SHA bound to the archived deployment
+        required: false
+        default: ""
+        type: string
       artifact_run_id:
         description: build-and-verify run containing the immutable package
+        required: false
+        default: ""
+        type: string
+      artifact_build_requirements_run_id:
+        description: Prior protected run containing reviewed artifact build requirements
+        required: false
+        default: ""
+        type: string
+      artifact_build_requirements_sha256:
+        description: Reviewed authoritative artifact build requirements SHA-256
         required: false
         default: ""
         type: string
@@ -48,8 +106,28 @@ on:
         required: false
         default: ""
         type: string
+      standard_deployment_binding_sha256:
+        description: Reviewed standard DeploymentBinding SHA-256 for pre-promotion collection
+        required: false
+        default: ""
+        type: string
+      containment_deployment_binding_sha256:
+        description: Reviewed containment DeploymentBinding SHA-256 for pre-promotion collection
+        required: false
+        default: ""
+        type: string
       prepromotion_evidence_run_id:
         description: Trusted run containing the stored pre-promotion evidence set
+        required: false
+        default: ""
+        type: string
+      prepromotion_evidence_source_run_id:
+        description: Trusted collector run containing pre-promotion evidence references
+        required: false
+        default: ""
+        type: string
+      prepromotion_evidence_source_sha256:
+        description: Reviewed pre-promotion evidence source SHA-256
         required: false
         default: ""
         type: string
@@ -59,12 +137,97 @@ on:
         default: ""
         type: string
       subject_run_id:
-        description: produce-promotion-subject run containing the reviewed subject
+        description: Trusted producer run containing the reviewed operation subject
         required: false
         default: ""
         type: string
       subject_sha256:
-        description: Reviewed canonical promotion subject SHA-256
+        description: Reviewed canonical operation subject SHA-256
+        required: false
+        default: ""
+        type: string
+      bootstrap_recovery_sha256:
+        description: Immutable bootstrap DeploymentBinding evidence SHA-256
+        required: false
+        default: ""
+        type: string
+      db_contract_sha256:
+        description: Immutable DB compatibility contract evidence SHA-256
+        required: false
+        default: ""
+        type: string
+      legacy_observation_sha256:
+        description: Immutable legacy production observation evidence SHA-256
+        required: false
+        default: ""
+        type: string
+      release_policy_sha256:
+        description: Immutable active release policy evidence SHA-256
+        required: false
+        default: ""
+        type: string
+      policy_activation_gate:
+        description: Exact policy phase gate reviewed for activation
+        required: false
+        default: P1-PWA
+        type: choice
+        options:
+          - P1-PWA
+          - P2A-LOCAL
+          - P2B-REPORT
+          - P3-XLSX
+          - P4-CSP
+          - P5-DUAL
+          - P5-LIST
+          - P7-IDB
+          - P8-CLEAN
+      policy_target_source_sha:
+        description: Candidate source SHA bound to the nonproduction QA pair
+        required: false
+        default: ""
+        type: string
+      proposed_release_policy_sha256:
+        description: Immutable proposed release policy SHA-256
+        required: false
+        default: ""
+        type: string
+      active_release_policy_sha256:
+        description: Immutable target active release policy SHA-256
+        required: false
+        default: ""
+        type: string
+      approval_policy_sha256:
+        description: Immutable configured approval policy SHA-256
+        required: false
+        default: ""
+        type: string
+      policy_closure_bundle_sha256:
+        description: Immutable authoritative policy activation closure SHA-256
+        required: false
+        default: ""
+        type: string
+      policy_qa_package_sha256:
+        description: Immutable nonpromotable policy QA package SHA-256
+        required: false
+        default: ""
+        type: string
+      policy_qa_execution_subject_run_id:
+        description: Prior protected run containing the reviewed Policy QA execution subject
+        required: false
+        default: ""
+        type: string
+      policy_qa_execution_subject_sha256:
+        description: Reviewed canonical Policy QA execution subject SHA-256
+        required: false
+        default: ""
+        type: string
+      policy_qa_execution_run_id:
+        description: Prior protected run containing the reviewed Policy QA execution bundle
+        required: false
+        default: ""
+        type: string
+      policy_qa_execution_sha256:
+        description: Reviewed canonical Policy QA execution bundle SHA-256
         required: false
         default: ""
         type: string
@@ -78,8 +241,68 @@ on:
         required: false
         default: ""
         type: string
+      acceptance_evidence_source_run_id:
+        description: Prior protected collector/finalizer run containing exact acceptance sources
+        required: false
+        default: ""
+        type: string
+      acceptance_collector_receipt_sha256:
+        description: Reviewed immutable acceptance collector receipt SHA-256
+        required: false
+        default: ""
+        type: string
       acceptance_inputs_run_id:
         description: produce-acceptance-inputs run containing canonical acceptance inputs
+        required: false
+        default: ""
+        type: string
+      acceptance_requirements_run_id:
+        description: Prior producer run containing canonical authoritative acceptance requirements
+        required: false
+        default: ""
+        type: string
+      acceptance_requirements_sha256:
+        description: Reviewed canonical authoritative acceptance requirements SHA-256
+        required: false
+        default: ""
+        type: string
+      performance_evidence_run_id:
+        description: Trusted run containing reviewed canonical performance evidence or closure
+        required: false
+        default: ""
+        type: string
+      performance_evidence_sha256:
+        description: Reviewed canonical performance evidence or closure SHA-256
+        required: false
+        default: ""
+        type: string
+      performance_raw_samples_run_id:
+        description: Prior trusted run containing reviewed canonical raw performance samples
+        required: false
+        default: ""
+        type: string
+      performance_raw_samples_sha256:
+        description: Reviewed canonical raw performance samples SHA-256
+        required: false
+        default: ""
+        type: string
+      p0_accepted_event_sha256:
+        description: Immutable P0-RELEASE accepted event SHA-256 for the P8 performance closure
+        required: false
+        default: ""
+        type: string
+      p3_accepted_event_sha256:
+        description: Immutable P3-XLSX accepted event SHA-256 for the P8 performance closure
+        required: false
+        default: ""
+        type: string
+      p5d_accepted_event_sha256:
+        description: Immutable P5-DUAL accepted event SHA-256 for the P8 performance closure
+        required: false
+        default: ""
+        type: string
+      p5e_accepted_event_sha256:
+        description: Immutable P5-LIST accepted event SHA-256 for the P8 performance closure
         required: false
         default: ""
         type: string
@@ -98,6 +321,11 @@ on:
         required: false
         default: ""
         type: string
+      companion_terminal_event_sha256:
+        description: Exact package-redeploy-activated Release State event hash, or empty
+        required: false
+        default: ""
+        type: string
       continuous_probe_sha256:
         description: Reviewed canonical continuous production probe SHA-256
         required: false
@@ -105,6 +333,16 @@ on:
         type: string
       companion_recovery_drill_sha256:
         description: Reviewed canonical companion recovery drill SHA-256 when required
+        required: false
+        default: ""
+        type: string
+      terminal_bundle_sha256:
+        description: Reviewed acceptance-final release evidence bundle SHA-256
+        required: false
+        default: ""
+        type: string
+      terminal_object_set_sha256:
+        description: Reviewed acceptance-final immutable object-set SHA-256
         required: false
         default: ""
         type: string
@@ -127,22 +365,61 @@ jobs:
       REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
       REQUESTED_OPERATION: ${{ inputs.operation }}
       REQUESTED_RELEASE_ROLE: ${{ inputs.release_role }}
+      REQUESTED_ARCHIVE_RECOVERY_ACTION: ${{ inputs.archive_recovery_action }}
+      REQUESTED_ARCHIVE_RECOVERY_BINDING_ID: ${{ inputs.archive_recovery_binding_id }}
+      REQUESTED_ARCHIVE_RECOVERY_SOURCE_SHA: ${{ inputs.archive_recovery_source_sha }}
       REQUESTED_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+      REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_RUN_ID: ${{ inputs.artifact_build_requirements_run_id }}
+      REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256: ${{ inputs.artifact_build_requirements_sha256 }}
       REQUESTED_REPLAY_RECEIPT_RUN_ID: ${{ inputs.replay_receipt_run_id }}
       REQUESTED_STANDARD_DEPLOYMENT_RUN_ID: ${{ inputs.standard_deployment_run_id }}
       REQUESTED_CONTAINMENT_DEPLOYMENT_RUN_ID: ${{ inputs.containment_deployment_run_id }}
+      REQUESTED_STANDARD_DEPLOYMENT_BINDING_SHA256: ${{ inputs.standard_deployment_binding_sha256 }}
+      REQUESTED_CONTAINMENT_DEPLOYMENT_BINDING_SHA256: ${{ inputs.containment_deployment_binding_sha256 }}
       REQUESTED_PREPROMOTION_EVIDENCE_RUN_ID: ${{ inputs.prepromotion_evidence_run_id }}
+      REQUESTED_PREPROMOTION_EVIDENCE_SOURCE_RUN_ID: ${{ inputs.prepromotion_evidence_source_run_id }}
+      REQUESTED_PREPROMOTION_EVIDENCE_SOURCE_SHA256: ${{ inputs.prepromotion_evidence_source_sha256 }}
       REQUESTED_OPERATION_ID: ${{ inputs.operation_id }}
       REQUESTED_SUBJECT_RUN_ID: ${{ inputs.subject_run_id }}
       REQUESTED_SUBJECT_SHA256: ${{ inputs.subject_sha256 }}
+      REQUESTED_BOOTSTRAP_RECOVERY_SHA256: ${{ inputs.bootstrap_recovery_sha256 }}
+      REQUESTED_DB_CONTRACT_SHA256: ${{ inputs.db_contract_sha256 }}
+      REQUESTED_LEGACY_OBSERVATION_SHA256: ${{ inputs.legacy_observation_sha256 }}
+      REQUESTED_RELEASE_POLICY_SHA256: ${{ inputs.release_policy_sha256 }}
+      REQUESTED_POLICY_ACTIVATION_GATE: ${{ inputs.policy_activation_gate }}
+      REQUESTED_POLICY_TARGET_SOURCE_SHA: ${{ inputs.policy_target_source_sha }}
+      REQUESTED_PROPOSED_RELEASE_POLICY_SHA256: ${{ inputs.proposed_release_policy_sha256 }}
+      REQUESTED_ACTIVE_RELEASE_POLICY_SHA256: ${{ inputs.active_release_policy_sha256 }}
+      REQUESTED_APPROVAL_POLICY_SHA256: ${{ inputs.approval_policy_sha256 }}
+      REQUESTED_POLICY_CLOSURE_BUNDLE_SHA256: ${{ inputs.policy_closure_bundle_sha256 }}
+      REQUESTED_POLICY_QA_PACKAGE_SHA256: ${{ inputs.policy_qa_package_sha256 }}
+      REQUESTED_POLICY_QA_EXECUTION_SUBJECT_RUN_ID: ${{ inputs.policy_qa_execution_subject_run_id }}
+      REQUESTED_POLICY_QA_EXECUTION_SUBJECT_SHA256: ${{ inputs.policy_qa_execution_subject_sha256 }}
+      REQUESTED_POLICY_QA_EXECUTION_RUN_ID: ${{ inputs.policy_qa_execution_run_id }}
+      REQUESTED_POLICY_QA_EXECUTION_SHA256: ${{ inputs.policy_qa_execution_sha256 }}
       REQUESTED_PROMOTION_RUN_ID: ${{ inputs.promotion_run_id }}
       REQUESTED_ACCEPTANCE_EVIDENCE_RUN_ID: ${{ inputs.acceptance_evidence_run_id }}
+      REQUESTED_ACCEPTANCE_EVIDENCE_SOURCE_RUN_ID: ${{ inputs.acceptance_evidence_source_run_id }}
+      REQUESTED_ACCEPTANCE_COLLECTOR_RECEIPT_SHA256: ${{ inputs.acceptance_collector_receipt_sha256 }}
       REQUESTED_ACCEPTANCE_INPUTS_RUN_ID: ${{ inputs.acceptance_inputs_run_id }}
+      REQUESTED_ACCEPTANCE_REQUIREMENTS_RUN_ID: ${{ inputs.acceptance_requirements_run_id }}
+      REQUESTED_ACCEPTANCE_REQUIREMENTS_SHA256: ${{ inputs.acceptance_requirements_sha256 }}
+      REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID: ${{ inputs.performance_evidence_run_id }}
+      REQUESTED_PERFORMANCE_EVIDENCE_SHA256: ${{ inputs.performance_evidence_sha256 }}
+      REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ID: ${{ inputs.performance_raw_samples_run_id }}
+      REQUESTED_PERFORMANCE_RAW_SAMPLES_SHA256: ${{ inputs.performance_raw_samples_sha256 }}
+      REQUESTED_P0_ACCEPTED_EVENT_SHA256: ${{ inputs.p0_accepted_event_sha256 }}
+      REQUESTED_P3_ACCEPTED_EVENT_SHA256: ${{ inputs.p3_accepted_event_sha256 }}
+      REQUESTED_P5D_ACCEPTED_EVENT_SHA256: ${{ inputs.p5d_accepted_event_sha256 }}
+      REQUESTED_P5E_ACCEPTED_EVENT_SHA256: ${{ inputs.p5e_accepted_event_sha256 }}
       REQUESTED_EVIDENCE_SHA256: ${{ inputs.evidence_sha256 }}
       REQUESTED_CONTINUOUS_PROBE_SOURCE_SHA256: ${{ inputs.continuous_probe_source_sha256 }}
       REQUESTED_COMPANION_RECOVERY_SOURCE_SHA256: ${{ inputs.companion_recovery_source_sha256 }}
+      REQUESTED_COMPANION_TERMINAL_EVENT_SHA256: ${{ inputs.companion_terminal_event_sha256 }}
       REQUESTED_CONTINUOUS_PROBE_SHA256: ${{ inputs.continuous_probe_sha256 }}
       REQUESTED_COMPANION_RECOVERY_DRILL_SHA256: ${{ inputs.companion_recovery_drill_sha256 }}
+      REQUESTED_TERMINAL_BUNDLE_SHA256: ${{ inputs.terminal_bundle_sha256 }}
+      REQUESTED_TERMINAL_OBJECT_SET_SHA256: ${{ inputs.terminal_object_set_sha256 }}
       RELEASE_STATE_NAMESPACE: ${{ vars.RELEASE_STATE_NAMESPACE }}
       RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
       RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
@@ -164,12 +441,118 @@ jobs:
           ) {
             throw "replay_receipt_run_id must identify a prior trusted workflow run"
           }
+          $hasPerformanceRun = -not [string]::IsNullOrEmpty($env:REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID)
+          $hasPerformanceHash = -not [string]::IsNullOrEmpty($env:REQUESTED_PERFORMANCE_EVIDENCE_SHA256)
+          if ($hasPerformanceRun -ne $hasPerformanceHash) {
+            throw "performance evidence run and reviewed SHA-256 must be supplied together"
+          }
+          if (
+            $hasPerformanceRun -and (
+              $env:REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID -notmatch $runIdPattern -or
+              $env:REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID -eq $env:GITHUB_RUN_ID -or
+              $env:REQUESTED_PERFORMANCE_EVIDENCE_SHA256 -notmatch $sha256Pattern
+            )
+          ) {
+            throw "performance evidence must identify an exact prior trusted run and reviewed SHA-256"
+          }
+          $hasPerformanceRawRun = -not [string]::IsNullOrEmpty($env:REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ID)
+          $hasPerformanceRawHash = -not [string]::IsNullOrEmpty($env:REQUESTED_PERFORMANCE_RAW_SAMPLES_SHA256)
+          if ($hasPerformanceRawRun -ne $hasPerformanceRawHash) {
+            throw "raw performance samples run and reviewed SHA-256 must be supplied together"
+          }
+          if (
+            $hasPerformanceRawRun -and (
+              $env:REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ID -notmatch $runIdPattern -or
+              $env:REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ID -eq $env:GITHUB_RUN_ID -or
+              $env:REQUESTED_PERFORMANCE_RAW_SAMPLES_SHA256 -notmatch $sha256Pattern
+            )
+          ) {
+            throw "raw performance samples must identify an exact prior trusted run and reviewed SHA-256"
+          }
+          if (
+            $env:REQUESTED_OPERATION -ne 'produce-own-gate-performance-evidence' -and
+            ($hasPerformanceRawRun -or $hasPerformanceRawHash)
+          ) {
+            throw "raw performance sample inputs are forbidden for this operation"
+          }
+          $hasStandardDeploymentBindingHash = -not [string]::IsNullOrEmpty($env:REQUESTED_STANDARD_DEPLOYMENT_BINDING_SHA256)
+          $hasContainmentDeploymentBindingHash = -not [string]::IsNullOrEmpty($env:REQUESTED_CONTAINMENT_DEPLOYMENT_BINDING_SHA256)
+          if (
+            $env:REQUESTED_OPERATION -ne 'collect-prepromotion-evidence-source' -and
+            ($hasStandardDeploymentBindingHash -or $hasContainmentDeploymentBindingHash)
+          ) {
+            throw "reviewed deployment binding hashes are forbidden for this operation"
+          }
 
           switch ($env:REQUESTED_OPERATION) {
-            'build-and-verify' {}
+            'produce-artifact-build-requirements' {
+              if ($env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$') {
+                throw "production artifact build requirements require operation_id"
+              }
+            }
+            'produce-policy-activation-qa-build-requirements' {
+              if (
+                $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' -or
+                $env:REQUESTED_POLICY_TARGET_SOURCE_SHA -notmatch '^[0-9a-f]{40}$' -or
+                $env:REQUESTED_PROPOSED_RELEASE_POLICY_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_ACTIVE_RELEASE_POLICY_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "policy QA artifact build requirements require exact source and policy authority"
+              }
+            }
+            'build-and-verify' {
+              if (
+                $env:REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_RUN_ID -eq $env:GITHUB_RUN_ID -or
+                $env:REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "production build requires reviewed requirements from a distinct prior run"
+              }
+            }
+            'build-policy-activation-qa' {
+              if (
+                $env:REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_RUN_ID -eq $env:GITHUB_RUN_ID -or
+                $env:REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_POLICY_TARGET_SOURCE_SHA -ne $env:REQUESTED_SOURCE_SHA
+              ) {
+                throw "policy QA build requires reviewed requirements and an exact target checkout"
+              }
+            }
             'deploy-prebuilt' {
-              if ($env:REQUESTED_ARTIFACT_RUN_ID -notmatch $runIdPattern) {
-                throw "artifact_run_id is required for deploy-prebuilt"
+              if (
+                $env:REQUESTED_ARTIFACT_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "artifact_run_id and reviewed build requirements are required for deploy-prebuilt"
+              }
+            }
+            'collect-prepromotion-evidence-source' {
+              $authorityRunIds = @(
+                $env:REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_RUN_ID,
+                $env:REQUESTED_STANDARD_DEPLOYMENT_RUN_ID,
+                $env:REQUESTED_CONTAINMENT_DEPLOYMENT_RUN_ID
+              )
+              if (
+                @($authorityRunIds | Where-Object { $_ -notmatch $runIdPattern -or $_ -eq $env:GITHUB_RUN_ID }).Count -ne 0 -or
+                @($authorityRunIds | Select-Object -Unique).Count -ne 3 -or
+                $env:REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256 -notmatch $sha256Pattern -or
+                -not $hasStandardDeploymentBindingHash -or
+                -not $hasContainmentDeploymentBindingHash -or
+                $env:REQUESTED_STANDARD_DEPLOYMENT_BINDING_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_CONTAINMENT_DEPLOYMENT_BINDING_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_STANDARD_DEPLOYMENT_BINDING_SHA256 -eq $env:REQUESTED_CONTAINMENT_DEPLOYMENT_BINDING_SHA256
+              ) {
+                throw "pre-promotion collection requires three distinct prior runs and exact reviewed authority hashes"
+              }
+            }
+            'produce-prepromotion-evidence' {
+              if (
+                $env:REQUESTED_PREPROMOTION_EVIDENCE_SOURCE_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_PREPROMOTION_EVIDENCE_SOURCE_RUN_ID -eq $env:GITHUB_RUN_ID -or
+                $env:REQUESTED_PREPROMOTION_EVIDENCE_SOURCE_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "pre-promotion evidence source run and reviewed SHA-256 are required"
               }
             }
             'produce-promotion-subject' {
@@ -198,9 +581,153 @@ jobs:
               }
             }
             'reconcile' {}
+            'plan-archive-recovery' {
+              if (
+                [string]::IsNullOrEmpty($env:REQUESTED_ARCHIVE_RECOVERY_BINDING_ID) -or
+                $env:REQUESTED_ARCHIVE_RECOVERY_BINDING_ID.Length -gt 255 -or
+                $env:REQUESTED_ARCHIVE_RECOVERY_SOURCE_SHA -notmatch '^[0-9a-f]{40}$' -or
+                $env:REQUESTED_ARCHIVE_RECOVERY_ACTION -notmatch '^(rollback|redeploy-standard|redeploy-containment|activate-containment)$'
+              ) {
+                throw "archive recovery action and exact binding id are required"
+              }
+            }
+            'produce-archive-recovery-subject' {
+              if (
+                [string]::IsNullOrEmpty($env:REQUESTED_ARCHIVE_RECOVERY_BINDING_ID) -or
+                $env:REQUESTED_ARCHIVE_RECOVERY_BINDING_ID.Length -gt 255 -or
+                $env:REQUESTED_ARCHIVE_RECOVERY_SOURCE_SHA -notmatch '^[0-9a-f]{40}$' -or
+                $env:REQUESTED_ARCHIVE_RECOVERY_ACTION -notmatch '^(rollback|redeploy-standard|redeploy-containment|activate-containment)$' -or
+                $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+              ) {
+                throw "archive recovery subject production requires an action, exact binding/source, and operation id"
+              }
+            }
+            'execute-reviewed-archive-recovery' {
+              if (
+                $env:REQUESTED_SUBJECT_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_SUBJECT_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "archive recovery execution requires a prior subject run and reviewed subject SHA-256"
+              }
+              if ($env:REQUESTED_SUBJECT_RUN_ID -eq $env:GITHUB_RUN_ID) {
+                throw "archive recovery subject must come from a prior workflow run"
+              }
+            }
+            'produce-state-initialization-subject' {
+              if (
+                $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' -or
+                $env:REQUESTED_BOOTSTRAP_RECOVERY_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_DB_CONTRACT_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_LEGACY_OBSERVATION_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_RELEASE_POLICY_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "state initialization subject requires an operation id and four reviewed evidence hashes"
+              }
+            }
+            'produce-db-contract-activation-subject' {
+              if (
+                $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' -or
+                $env:REQUESTED_DB_CONTRACT_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "DB contract activation subject requires an operation id and reviewed contract hash"
+              }
+            }
+            'produce-operation-abort-subject' {
+              if ($env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$') {
+                throw "operation abort subject requires an operation id"
+              }
+            }
+            'initialize-release-state' {
+              if (
+                $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' -or
+                $env:REQUESTED_SUBJECT_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_SUBJECT_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_SUBJECT_RUN_ID -eq $env:GITHUB_RUN_ID
+              ) {
+                throw "state initialization requires a prior reviewed subject artifact"
+              }
+            }
+            'activate-db-contract' {
+              if (
+                $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' -or
+                $env:REQUESTED_SUBJECT_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_SUBJECT_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_SUBJECT_RUN_ID -eq $env:GITHUB_RUN_ID
+              ) {
+                throw "DB contract activation requires a prior reviewed subject artifact"
+              }
+            }
+            'abort-pending-operation' {
+              if (
+                $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' -or
+                $env:REQUESTED_SUBJECT_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_SUBJECT_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_SUBJECT_RUN_ID -eq $env:GITHUB_RUN_ID
+              ) {
+                throw "operation abort requires a prior reviewed subject artifact"
+              }
+            }
+            'initialize-acceptance-collector' {}
+            'collect-continuous-sample' {
+              if (
+                $env:REQUESTED_ACCEPTANCE_EVIDENCE_SOURCE_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_ACCEPTANCE_EVIDENCE_SOURCE_RUN_ID -eq $env:GITHUB_RUN_ID -or
+                $env:REQUESTED_ACCEPTANCE_COLLECTOR_RECEIPT_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_CONTINUOUS_PROBE_SOURCE_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "continuous collection requires a reviewed prior source and receipt from a distinct run"
+              }
+            }
+            'finalize-acceptance-evidence' {
+              if (
+                $env:REQUESTED_ACCEPTANCE_EVIDENCE_SOURCE_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_ACCEPTANCE_EVIDENCE_SOURCE_RUN_ID -eq $env:GITHUB_RUN_ID -or
+                $env:REQUESTED_ACCEPTANCE_COLLECTOR_RECEIPT_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_CONTINUOUS_PROBE_SOURCE_SHA256 -notmatch $sha256Pattern -or
+                (
+                  -not [string]::IsNullOrEmpty($env:REQUESTED_COMPANION_TERMINAL_EVENT_SHA256) -and
+                  $env:REQUESTED_COMPANION_TERMINAL_EVENT_SHA256 -notmatch $sha256Pattern
+                )
+              ) {
+                throw "acceptance finalization requires a reviewed prior chain and optional exact terminal event"
+              }
+            }
+            'publish-acceptance-evidence' {
+              if (
+                $env:REQUESTED_ACCEPTANCE_EVIDENCE_SOURCE_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_ACCEPTANCE_EVIDENCE_SOURCE_RUN_ID -eq $env:GITHUB_RUN_ID -or
+                $env:REQUESTED_ACCEPTANCE_COLLECTOR_RECEIPT_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_EVIDENCE_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_CONTINUOUS_PROBE_SOURCE_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "acceptance collector run and reviewed evidence/source hashes are required"
+              }
+              if (
+                -not [string]::IsNullOrEmpty($env:REQUESTED_COMPANION_RECOVERY_SOURCE_SHA256) -and
+                $env:REQUESTED_COMPANION_RECOVERY_SOURCE_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "companion_recovery_source_sha256 must be empty or a reviewed SHA-256"
+              }
+            }
+            'produce-acceptance-requirements' {}
+            'produce-own-gate-performance-evidence' {
+              if (
+                -not $hasPerformanceRawRun -or
+                -not $hasPerformanceRawHash -or
+                $hasPerformanceRun -or
+                $hasPerformanceHash
+              ) {
+                throw "own-gate performance production requires only reviewed raw samples from a distinct prior run"
+              }
+            }
             'produce-acceptance-inputs' {
               if (
                 $env:REQUESTED_ACCEPTANCE_EVIDENCE_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_ACCEPTANCE_EVIDENCE_RUN_ID -eq $env:GITHUB_RUN_ID -or
+                $env:REQUESTED_ACCEPTANCE_REQUIREMENTS_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_ACCEPTANCE_REQUIREMENTS_RUN_ID -eq $env:GITHUB_RUN_ID -or
+                $env:REQUESTED_ACCEPTANCE_REQUIREMENTS_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_ACCEPTANCE_COLLECTOR_RECEIPT_SHA256 -notmatch $sha256Pattern -or
                 $env:REQUESTED_EVIDENCE_SHA256 -notmatch $sha256Pattern -or
                 $env:REQUESTED_CONTINUOUS_PROBE_SOURCE_SHA256 -notmatch $sha256Pattern
               ) {
@@ -212,21 +739,142 @@ jobs:
               ) {
                 throw "companion_recovery_source_sha256 must be empty or a reviewed SHA-256"
               }
+              $producerRunIds = @(
+                $env:REQUESTED_ACCEPTANCE_EVIDENCE_RUN_ID,
+                $env:REQUESTED_ACCEPTANCE_REQUIREMENTS_RUN_ID
+              )
+              if ($hasPerformanceRun) {
+                $producerRunIds += $env:REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID
+              }
+              if (@($producerRunIds | Select-Object -Unique).Count -ne $producerRunIds.Count) {
+                throw "acceptance input artifacts must come from distinct producer runs"
+              }
             }
             'accept-standard' {
               if (
                 $env:REQUESTED_ACCEPTANCE_EVIDENCE_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_ACCEPTANCE_EVIDENCE_RUN_ID -eq $env:GITHUB_RUN_ID -or
                 $env:REQUESTED_ACCEPTANCE_INPUTS_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_ACCEPTANCE_INPUTS_RUN_ID -eq $env:GITHUB_RUN_ID -or
+                $env:REQUESTED_ACCEPTANCE_REQUIREMENTS_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_ACCEPTANCE_REQUIREMENTS_RUN_ID -eq $env:GITHUB_RUN_ID -or
+                $env:REQUESTED_ACCEPTANCE_REQUIREMENTS_SHA256 -notmatch $sha256Pattern -or
                 $env:REQUESTED_EVIDENCE_SHA256 -notmatch $sha256Pattern -or
-                $env:REQUESTED_CONTINUOUS_PROBE_SHA256 -notmatch $sha256Pattern
+                $env:REQUESTED_CONTINUOUS_PROBE_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_TERMINAL_BUNDLE_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_TERMINAL_OBJECT_SET_SHA256 -notmatch $sha256Pattern
               ) {
-                throw "reviewed evidence and canonical continuous probe inputs are required"
+                throw "prior reviewed canonical probe and terminal bundle closure are required"
               }
               if (
                 -not [string]::IsNullOrEmpty($env:REQUESTED_COMPANION_RECOVERY_DRILL_SHA256) -and
                 $env:REQUESTED_COMPANION_RECOVERY_DRILL_SHA256 -notmatch $sha256Pattern
               ) {
                 throw "companion_recovery_drill_sha256 must be empty or a reviewed SHA-256"
+              }
+              $producerRunIds = @(
+                $env:REQUESTED_ACCEPTANCE_EVIDENCE_RUN_ID,
+                $env:REQUESTED_ACCEPTANCE_INPUTS_RUN_ID,
+                $env:REQUESTED_ACCEPTANCE_REQUIREMENTS_RUN_ID
+              )
+              if ($hasPerformanceRun) {
+                $producerRunIds += $env:REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID
+              }
+              if (@($producerRunIds | Select-Object -Unique).Count -ne $producerRunIds.Count) {
+                throw "acceptance artifacts must come from distinct producer runs"
+              }
+            }
+            'produce-performance-inherited-closure' {
+              $acceptedEventHashes = @(
+                $env:REQUESTED_P0_ACCEPTED_EVENT_SHA256,
+                $env:REQUESTED_P3_ACCEPTED_EVENT_SHA256,
+                $env:REQUESTED_P5D_ACCEPTED_EVENT_SHA256,
+                $env:REQUESTED_P5E_ACCEPTED_EVENT_SHA256
+              )
+              if (
+                @($acceptedEventHashes | Where-Object { $_ -notmatch $sha256Pattern }).Count -ne 0 -or
+                @($acceptedEventHashes | Select-Object -Unique).Count -ne 4
+              ) {
+                throw "P8 performance closure requires four distinct reviewed accepted event SHA-256 values"
+              }
+            }
+            'produce-policy-activation-qa-package' {
+              if (
+                $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' -or
+                $env:REQUESTED_ARTIFACT_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_ARTIFACT_RUN_ID -eq $env:GITHUB_RUN_ID -or
+                $env:REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_POLICY_TARGET_SOURCE_SHA -notmatch '^[0-9a-f]{40}$' -or
+                $env:REQUESTED_PROPOSED_RELEASE_POLICY_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_POLICY_ACTIVATION_GATE -notin @(
+                  'P1-PWA', 'P2A-LOCAL', 'P2B-REPORT', 'P3-XLSX',
+                  'P4-CSP', 'P5-DUAL', 'P5-LIST', 'P7-IDB'
+                )
+              ) {
+                throw "policy QA package requires a prior candidate pair and exact gate/policy/source authority"
+              }
+            }
+            'produce-policy-activation-qa-execution-subject' {
+              $subjectHashes = @(
+                $env:REQUESTED_PROPOSED_RELEASE_POLICY_SHA256,
+                $env:REQUESTED_ACTIVE_RELEASE_POLICY_SHA256,
+                $env:REQUESTED_APPROVAL_POLICY_SHA256,
+                $env:REQUESTED_POLICY_QA_PACKAGE_SHA256
+              )
+              if (
+                $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' -or
+                $env:REQUESTED_POLICY_TARGET_SOURCE_SHA -notmatch '^[0-9a-f]{40}$' -or
+                @($subjectHashes | Where-Object { $_ -notmatch $sha256Pattern }).Count -ne 0
+              ) {
+                throw "policy QA execution subject requires exact policy/package/source authority"
+              }
+            }
+            'execute-policy-activation-qa' {
+              if (
+                $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' -or
+                $env:REQUESTED_POLICY_QA_EXECUTION_SUBJECT_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_POLICY_QA_EXECUTION_SUBJECT_RUN_ID -eq $env:GITHUB_RUN_ID -or
+                $env:REQUESTED_POLICY_QA_EXECUTION_SUBJECT_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "policy QA execution requires a reviewed subject from a distinct prior run"
+              }
+            }
+            'produce-policy-activation-closure' {
+              if (
+                $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' -or
+                $env:REQUESTED_POLICY_QA_EXECUTION_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_POLICY_QA_EXECUTION_RUN_ID -eq $env:GITHUB_RUN_ID -or
+                $env:REQUESTED_POLICY_QA_EXECUTION_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "policy closure requires one reviewed QA execution bundle from a distinct prior run"
+              }
+            }
+            'produce-policy-activation-subject' {
+              if (
+                $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' -or
+                $env:REQUESTED_PROPOSED_RELEASE_POLICY_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_ACTIVE_RELEASE_POLICY_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_POLICY_CLOSURE_BUNDLE_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "policy subject requires operation id and three reviewed immutable references"
+              }
+            }
+            'activate-policy' {
+              if (
+                $env:REQUESTED_SUBJECT_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_SUBJECT_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_SUBJECT_RUN_ID -eq $env:GITHUB_RUN_ID
+              ) {
+                throw "subject_run_id and reviewed subject_sha256 are required for policy activation"
+              }
+            }
+            'activate-policy-floor' {
+              if (
+                $env:REQUESTED_SUBJECT_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_SUBJECT_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_SUBJECT_RUN_ID -eq $env:GITHUB_RUN_ID
+              ) {
+                throw "subject_run_id and reviewed subject_sha256 are required for policy activation"
               }
             }
             default {
@@ -246,16 +894,28 @@ jobs:
 
       - name: Pin npm
         shell: pwsh
-        run: npm install --global npm@11.19.0
+        run: |
+          npm install --global npm@11.19.0
+          if ($LASTEXITCODE -ne 0) {
+            throw "npm pin failed with exit code $LASTEXITCODE"
+          }
 
       - name: Install exact dependency graph
         shell: pwsh
-        run: npm ci
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) {
+            throw "dependency installation failed with exit code $LASTEXITCODE"
+          }
 
       - name: Verify protected source identity
         shell: pwsh
         run: |
-          $actual = (git rev-parse HEAD).Trim()
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) {
+            throw "source identity lookup failed with exit code $LASTEXITCODE"
+          }
+          $actual = $actual.Trim()
           if ($actual -ne $env:REQUESTED_SOURCE_SHA) {
             throw "checked-out source differs from requested source"
           }
@@ -265,38 +925,235 @@ jobs:
           if ($env:GITHUB_REF -ne 'refs/heads/main' -or $env:GITHUB_REF_PROTECTED -ne 'true') {
             throw "release operation must run from protected main"
           }
-          if ((git status --porcelain).Length -ne 0) {
+          $worktreeStatus = git status --porcelain
+          if ($LASTEXITCODE -ne 0) {
+            throw "worktree status lookup failed with exit code $LASTEXITCODE"
+          }
+          if ($worktreeStatus.Length -ne 0) {
             throw "release checkout is dirty"
           }
-          if ((node --version) -ne 'v24.19.0' -or (npm --version) -ne '11.19.0') {
+          $nodeVersion = node --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "Node runtime lookup failed with exit code $LASTEXITCODE"
+          }
+          $npmVersion = npm --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "npm runtime lookup failed with exit code $LASTEXITCODE"
+          }
+          if ($nodeVersion -ne 'v24.19.0' -or $npmVersion -ne '11.19.0') {
             throw "release runtime differs from the pinned toolchain"
           }
 
+      - name: Produce authoritative artifact build requirements
+        if: inputs.operation == 'produce-artifact-build-requirements' || inputs.operation == 'produce-policy-activation-qa-build-requirements'
+        shell: pwsh
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'artifact-build-requirements-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $requirementsPath = Join-Path $outputPath 'artifact-build-requirements.json'
+          if ($env:REQUESTED_OPERATION -eq 'produce-artifact-build-requirements') {
+            npm run release:produce-input -- artifact-build-requirements `
+              --namespace $env:RELEASE_STATE_NAMESPACE `
+              --operation-id $env:REQUESTED_OPERATION_ID `
+              --source-sha $env:REQUESTED_SOURCE_SHA `
+              --target-source-sha $env:REQUESTED_SOURCE_SHA `
+              --output $requirementsPath
+            if ($LASTEXITCODE -ne 0) {
+              throw "artifact build requirements producer failed with exit code $LASTEXITCODE"
+            }
+          } else {
+            npm run release:produce-input -- policy-activation-qa-build-requirements `
+              --namespace $env:RELEASE_STATE_NAMESPACE `
+              --operation-id $env:REQUESTED_OPERATION_ID `
+              --source-sha $env:REQUESTED_SOURCE_SHA `
+              --target-source-sha $env:REQUESTED_POLICY_TARGET_SOURCE_SHA `
+              --proposed-policy-sha256 $env:REQUESTED_PROPOSED_RELEASE_POLICY_SHA256 `
+              --active-policy-sha256 $env:REQUESTED_ACTIVE_RELEASE_POLICY_SHA256 `
+              --output $requirementsPath
+            if ($LASTEXITCODE -ne 0) {
+              throw "Policy QA build requirements producer failed with exit code $LASTEXITCODE"
+            }
+          }
+          $hash = (Get-FileHash -LiteralPath $requirementsPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Artifact build requirements SHA-256: ``$hash``" -Encoding utf8
+
+      - name: Upload production artifact build requirements
+        if: inputs.operation == 'produce-artifact-build-requirements'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-artifact-build-requirements-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/artifact-build-requirements-output/artifact-build-requirements.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Policy QA artifact build requirements
+        if: inputs.operation == 'produce-policy-activation-qa-build-requirements'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-policy-qa-build-requirements-${{ inputs.policy_target_source_sha }}
+          path: ${{ runner.temp }}/artifact-build-requirements-output/artifact-build-requirements.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Download reviewed production artifact build requirements
+        if: inputs.operation == 'build-and-verify' || inputs.operation == 'collect-prepromotion-evidence-source'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-artifact-build-requirements-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/artifact-build-requirements
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.artifact_build_requirements_run_id }}
+
+      - name: Download reviewed standard deployment for pre-promotion collection
+        if: inputs.operation == 'collect-prepromotion-evidence-source'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-deployment-${{ inputs.source_sha }}-standard
+          path: ${{ runner.temp }}/prepromotion-standard-deployment
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.standard_deployment_run_id }}
+
+      - name: Download reviewed containment deployment for pre-promotion collection
+        if: inputs.operation == 'collect-prepromotion-evidence-source'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-deployment-${{ inputs.source_sha }}-containment
+          path: ${{ runner.temp }}/prepromotion-containment-deployment
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.containment_deployment_run_id }}
+
+      - name: Download reviewed Policy QA artifact build requirements
+        if: inputs.operation == 'build-policy-activation-qa'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-policy-qa-build-requirements-${{ inputs.policy_target_source_sha }}
+          path: ${{ runner.temp }}/artifact-build-requirements
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.artifact_build_requirements_run_id }}
+
       - name: Collect authoritative provider configuration
-        if: inputs.operation == 'build-and-verify' || inputs.operation == 'deploy-prebuilt'
+        if: inputs.operation == 'build-and-verify' || inputs.operation == 'build-policy-activation-qa' || inputs.operation == 'deploy-prebuilt' || inputs.operation == 'collect-prepromotion-evidence-source' || inputs.operation == 'produce-archive-recovery-subject'
         shell: pwsh
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           $observationPath = Join-Path $env:RUNNER_TEMP 'provider-observation.json'
           npm run provider:observe -- --output $observationPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "provider observation failed with exit code $LASTEXITCODE"
+          }
 
       - name: Verify source and foundation policies
         shell: pwsh
         run: |
           npm run test:encoding
+          if ($LASTEXITCODE -ne 0) {
+            throw "encoding verification failed with exit code $LASTEXITCODE"
+          }
           npm run verify:foundation
+          if ($LASTEXITCODE -ne 0) {
+            throw "foundation policy verification failed with exit code $LASTEXITCODE"
+          }
           npm run verify:db-compatibility
+          if ($LASTEXITCODE -ne 0) {
+            throw "DB compatibility verification failed with exit code $LASTEXITCODE"
+          }
           if (
             $env:REQUESTED_OPERATION -eq 'build-and-verify' -or
-            $env:REQUESTED_OPERATION -eq 'deploy-prebuilt'
+            $env:REQUESTED_OPERATION -eq 'build-policy-activation-qa' -or
+            $env:REQUESTED_OPERATION -eq 'deploy-prebuilt' -or
+            $env:REQUESTED_OPERATION -eq 'collect-prepromotion-evidence-source' -or
+            $env:REQUESTED_OPERATION -eq 'produce-archive-recovery-subject'
           ) {
             $observationPath = Join-Path $env:RUNNER_TEMP 'provider-observation.json'
             npm run verify:provider-policy -- --require-configured --observation $observationPath
+            if ($LASTEXITCODE -ne 0) {
+              throw "provider policy verification failed with exit code $LASTEXITCODE"
+            }
           }
 
-      - name: Build and verify immutable package
-        if: inputs.operation == 'build-and-verify'
+      - name: Collect protected pre-promotion evidence source
+        if: inputs.operation == 'collect-prepromotion-evidence-source'
+        shell: pwsh
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          function Assert-ExactFlatArtifactFiles([string] $Root, [string[]] $ExpectedNames) {
+            if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
+              throw "Reviewed artifact directory is absent: $Root"
+            }
+            $entries = @(Get-ChildItem -LiteralPath $Root -Force -Recurse)
+            if (@($entries | Where-Object { $_.PSIsContainer -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) }).Count -ne 0) {
+              throw "Reviewed artifact contains a directory or reparse point: $Root"
+            }
+            $actualNames = @($entries | ForEach-Object { $_.Name } | Sort-Object)
+            $expected = @($ExpectedNames | Sort-Object)
+            if ($actualNames.Count -ne $expected.Count -or ($actualNames -join "`n") -ne ($expected -join "`n")) {
+              throw "Reviewed artifact file set is not exact: $Root"
+            }
+          }
+
+          $requirementsRoot = Join-Path $env:RUNNER_TEMP 'artifact-build-requirements'
+          $standardRoot = Join-Path $env:RUNNER_TEMP 'prepromotion-standard-deployment'
+          $containmentRoot = Join-Path $env:RUNNER_TEMP 'prepromotion-containment-deployment'
+          Assert-ExactFlatArtifactFiles $requirementsRoot @('artifact-build-requirements.json')
+          Assert-ExactFlatArtifactFiles $standardRoot @('deployment-binding.json', 'prebuilt-deployment-receipt.json')
+          Assert-ExactFlatArtifactFiles $containmentRoot @('deployment-binding.json', 'prebuilt-deployment-receipt.json')
+
+          $requirementsPath = Join-Path $requirementsRoot 'artifact-build-requirements.json'
+          $standardBindingPath = Join-Path $standardRoot 'deployment-binding.json'
+          $containmentBindingPath = Join-Path $containmentRoot 'deployment-binding.json'
+          $observationPath = Join-Path $env:RUNNER_TEMP 'provider-observation.json'
+          $actualRequirementsHash = (Get-FileHash -LiteralPath $requirementsPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $actualStandardBindingHash = (Get-FileHash -LiteralPath $standardBindingPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $actualContainmentBindingHash = (Get-FileHash -LiteralPath $containmentBindingPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $providerObservationHash = (Get-FileHash -LiteralPath $observationPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualRequirementsHash -ne $env:REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256) {
+            throw "artifact build requirements differ from their reviewed SHA-256"
+          }
+          if ($actualStandardBindingHash -ne $env:REQUESTED_STANDARD_DEPLOYMENT_BINDING_SHA256) {
+            throw "standard DeploymentBinding differs from its reviewed SHA-256"
+          }
+          if ($actualContainmentBindingHash -ne $env:REQUESTED_CONTAINMENT_DEPLOYMENT_BINDING_SHA256) {
+            throw "containment DeploymentBinding differs from its reviewed SHA-256"
+          }
+
+          $outputRoot = Join-Path $env:RUNNER_TEMP 'prepromotion-evidence-source-output'
+          if (Test-Path -LiteralPath $outputRoot) {
+            throw "pre-promotion evidence source output already exists"
+          }
+          New-Item -ItemType Directory -Path $outputRoot -ErrorAction Stop | Out-Null
+          $sourcePath = Join-Path $outputRoot 'pre-promotion-evidence-source.json'
+          npm run release:collect-prepromotion-evidence -- `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --source-sha $env:REQUESTED_SOURCE_SHA `
+            --run-id $env:GITHUB_RUN_ID `
+            --standard-binding $standardBindingPath `
+            --containment-binding $containmentBindingPath `
+            --build-requirements $requirementsPath `
+            --build-requirements-sha256 $env:REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256 `
+            --provider-observation $observationPath `
+            --provider-observation-sha256 $providerObservationHash `
+            --output $sourcePath
+          if ($LASTEXITCODE -ne 0) {
+            throw "protected pre-promotion evidence collection failed with exit code $LASTEXITCODE"
+          }
+          $sourceHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Pre-promotion evidence source SHA-256: ``$sourceHash``" -Encoding utf8
+
+      - name: Upload protected pre-promotion evidence source
+        if: inputs.operation == 'collect-prepromotion-evidence-source'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-prepromotion-evidence-source-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/prepromotion-evidence-source-output/pre-promotion-evidence-source.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Build and verify reviewed immutable package
+        if: inputs.operation == 'build-and-verify' || inputs.operation == 'build-policy-activation-qa'
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -304,15 +1161,40 @@ jobs:
         shell: pwsh
         run: |
           $observationPath = Join-Path $env:RUNNER_TEMP 'provider-observation.json'
-          $packagePath = Join-Path $env:RUNNER_TEMP 'foundation-release-package'
-          npm run artifact:build -- --output $packagePath --provider-observation $observationPath
+          $requirementsPath = Join-Path $env:RUNNER_TEMP 'artifact-build-requirements/artifact-build-requirements.json'
+          $actualRequirementsHash = (Get-FileHash -LiteralPath $requirementsPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualRequirementsHash -ne $env:REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256) {
+            throw "artifact build requirements differ from their reviewed SHA-256"
+          }
+          $packagePath = if ($env:REQUESTED_OPERATION -eq 'build-and-verify') {
+            Join-Path $env:RUNNER_TEMP 'foundation-release-package'
+          } else {
+            Join-Path $env:RUNNER_TEMP 'foundation-policy-qa-build-package'
+          }
+          npm run artifact:build -- `
+            --output $packagePath `
+            --provider-observation $observationPath `
+            --build-requirements $requirementsPath `
+            --build-requirements-sha256 $env:REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256
+          if ($LASTEXITCODE -ne 0) {
+            throw "reviewed artifact build failed with exit code $LASTEXITCODE"
+          }
 
       - name: Upload verified immutable package
         if: inputs.operation == 'build-and-verify'
         uses: actions/upload-artifact@v4
         with:
-          name: foundation-release-${{ inputs.source_sha }}
+          name: foundation-release-${{ inputs.source_sha }}-${{ inputs.artifact_build_requirements_sha256 }}
           path: ${{ runner.temp }}/foundation-release-package
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload verified nonpromotable Policy QA build pair
+        if: inputs.operation == 'build-policy-activation-qa'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-policy-qa-build-${{ inputs.policy_target_source_sha }}-${{ inputs.artifact_build_requirements_sha256 }}
+          path: ${{ runner.temp }}/foundation-policy-qa-build-package
           if-no-files-found: error
           retention-days: 30
 
@@ -320,7 +1202,7 @@ jobs:
         if: inputs.operation == 'deploy-prebuilt'
         uses: actions/download-artifact@v4
         with:
-          name: foundation-release-${{ inputs.source_sha }}
+          name: foundation-release-${{ inputs.source_sha }}-${{ inputs.artifact_build_requirements_sha256 }}
           path: ${{ runner.temp }}/foundation-release-package
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ inputs.artifact_run_id }}
@@ -359,6 +1241,9 @@ jobs:
             --provider-observation $observationPath `
             --idempotency-key $idempotencyKey `
             --receipt $receiptPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "prebuilt deployment failed with exit code $LASTEXITCODE"
+          }
           $publishedReceiptPath = Join-Path $outputPath 'prebuilt-deployment-receipt.json'
           if ($receiptPath -ne $publishedReceiptPath) {
             Copy-Item -LiteralPath $receiptPath -Destination $publishedReceiptPath -ErrorAction Stop
@@ -371,6 +1256,9 @@ jobs:
             --deployment-receipt $publishedReceiptPath `
             --provider-observation $observationPath `
             --output $bindingPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "deployment binding production failed with exit code $LASTEXITCODE"
+          }
 
       - name: Upload immutable deployment receipt and binding
         if: inputs.operation == 'deploy-prebuilt'
@@ -378,6 +1266,50 @@ jobs:
         with:
           name: foundation-deployment-${{ inputs.source_sha }}-${{ inputs.release_role }}
           path: ${{ runner.temp }}/deployment-output
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Download reviewed pre-promotion evidence source
+        if: inputs.operation == 'produce-prepromotion-evidence'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-prepromotion-evidence-source-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/prepromotion-evidence-source
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.prepromotion_evidence_source_run_id }}
+
+      - name: Produce canonical pre-promotion evidence set
+        if: inputs.operation == 'produce-prepromotion-evidence'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $sourcePath = Join-Path $env:RUNNER_TEMP 'prepromotion-evidence-source/pre-promotion-evidence-source.json'
+          $actualSourceHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSourceHash -ne $env:REQUESTED_PREPROMOTION_EVIDENCE_SOURCE_SHA256) {
+            throw "pre-promotion evidence source differs from its reviewed SHA-256"
+          }
+          $outputPath = Join-Path $env:RUNNER_TEMP 'prepromotion-evidence-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $evidenceSetPath = Join-Path $outputPath 'pre-promotion-evidence-set.json'
+          npm run release:produce-input -- prepromotion-evidence-set `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --source $sourcePath `
+            --source-sha $env:REQUESTED_SOURCE_SHA `
+            --source-sha256 $env:REQUESTED_PREPROMOTION_EVIDENCE_SOURCE_SHA256 `
+            --output $evidenceSetPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "pre-promotion evidence production failed with exit code $LASTEXITCODE"
+          }
+          $evidenceSetHash = (Get-FileHash -LiteralPath $evidenceSetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Pre-promotion evidence set SHA-256: ``$evidenceSetHash``" -Encoding utf8
+
+      - name: Upload canonical pre-promotion evidence set
+        if: inputs.operation == 'produce-prepromotion-evidence'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-prepromotion-evidence-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/prepromotion-evidence-output
           if-no-files-found: error
           retention-days: 30
 
@@ -422,6 +1354,9 @@ jobs:
             --containment-binding (Join-Path $env:RUNNER_TEMP 'containment-deployment/deployment-binding.json') `
             --evidence-set (Join-Path $env:RUNNER_TEMP 'prepromotion-evidence/pre-promotion-evidence-set.json') `
             --output $subjectPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "promotion subject production failed with exit code $LASTEXITCODE"
+          }
           $hash = (Get-FileHash -LiteralPath $subjectPath -Algorithm SHA256).Hash.ToLowerInvariant()
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Promotion subject SHA-256: ``$hash``" -Encoding utf8
 
@@ -473,20 +1408,32 @@ jobs:
             --subject $subjectPath `
             --subject-sha256 $env:REQUESTED_SUBJECT_SHA256 `
             --output $preparedPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "promotion preparation failed with exit code $LASTEXITCODE"
+          }
           npm run release:promote-prepared -- `
             --prepared-result $preparedPath `
             --receipt $receiptPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "prepared promotion failed with exit code $LASTEXITCODE"
+          }
           npm run provider:validate-production-assignment -- assignment-authority `
             --namespace $env:RELEASE_STATE_NAMESPACE `
             --prepared-result $preparedPath `
             --promotion-receipt $receiptPath `
             --assignment-authority $authorityPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "assignment authority validation failed with exit code $LASTEXITCODE"
+          }
           npm run release:lifecycle -- record-assignment `
             --namespace $env:RELEASE_STATE_NAMESPACE `
             --prepared-result $preparedPath `
             --promotion-receipt $receiptPath `
             --assignment-authority $authorityPath `
             --output $assignmentRecordPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "assignment lifecycle recording failed with exit code $LASTEXITCODE"
+          }
           npm run provider:validate-production-assignment -- assignment-validation `
             --namespace $env:RELEASE_STATE_NAMESPACE `
             --prepared-result $preparedPath `
@@ -494,6 +1441,9 @@ jobs:
             --assignment-authority $authorityPath `
             --assignment-validation $assignmentPath `
             --production-probe $probePath
+          if ($LASTEXITCODE -ne 0) {
+            throw "production assignment validation failed with exit code $LASTEXITCODE"
+          }
           npm run release:lifecycle -- record-promotion `
             --namespace $env:RELEASE_STATE_NAMESPACE `
             --prepared-result $preparedPath `
@@ -502,6 +1452,9 @@ jobs:
             --assignment-validation $assignmentPath `
             --production-probe $probePath `
             --output $lifecyclePath
+          if ($LASTEXITCODE -ne 0) {
+            throw "promotion lifecycle recording failed with exit code $LASTEXITCODE"
+          }
 
       - name: Upload promotion recovery chain
         if: always() && inputs.operation == 'prepare-and-promote'
@@ -547,12 +1500,18 @@ jobs:
             --prepared-result $preparedPath `
             --promotion-receipt $receiptPath `
             --assignment-authority $authorityPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "assignment authority revalidation failed with exit code $LASTEXITCODE"
+          }
           npm run release:lifecycle -- record-assignment `
             --namespace $env:RELEASE_STATE_NAMESPACE `
             --prepared-result $preparedPath `
             --promotion-receipt $receiptPath `
             --assignment-authority $authorityPath `
             --output $assignmentRecordPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "resumed assignment recording failed with exit code $LASTEXITCODE"
+          }
           npm run provider:validate-production-assignment -- assignment-validation `
             --namespace $env:RELEASE_STATE_NAMESPACE `
             --prepared-result $preparedPath `
@@ -560,6 +1519,9 @@ jobs:
             --assignment-authority $authorityPath `
             --assignment-validation $assignmentPath `
             --production-probe $probePath
+          if ($LASTEXITCODE -ne 0) {
+            throw "resumed assignment validation failed with exit code $LASTEXITCODE"
+          }
           npm run release:lifecycle -- record-promotion `
             --namespace $env:RELEASE_STATE_NAMESPACE `
             --prepared-result $preparedPath `
@@ -568,6 +1530,9 @@ jobs:
             --assignment-validation $assignmentPath `
             --production-probe $probePath `
             --output $lifecyclePath
+          if ($LASTEXITCODE -ne 0) {
+            throw "resumed promotion recording failed with exit code $LASTEXITCODE"
+          }
 
       - name: Upload resumed promotion chain
         if: always() && inputs.operation == 'record-promotion'
@@ -592,10 +1557,16 @@ jobs:
           npm run release:produce-input -- provider-observation `
             --namespace $env:RELEASE_STATE_NAMESPACE `
             --output $observationPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "reconciliation observation failed with exit code $LASTEXITCODE"
+          }
           npm run release:protected -- reconcile `
             --namespace $env:RELEASE_STATE_NAMESPACE `
             --provider-observation $observationPath `
             --output $resultPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "release reconciliation failed with exit code $LASTEXITCODE"
+          }
 
       - name: Upload reconciliation evidence
         if: always() && inputs.operation == 'reconcile'
@@ -606,6 +1577,383 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Produce authoritative acceptance requirements
+        if: inputs.operation == 'produce-acceptance-requirements'
+        shell: pwsh
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'acceptance-requirements-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $requirementsPath = Join-Path $outputPath 'acceptance-requirements.json'
+          npm run release:lifecycle -- describe-acceptance-requirements `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --output $requirementsPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "authoritative acceptance requirements production failed with exit code $LASTEXITCODE"
+          }
+          $requirementsHash = (Get-FileHash -LiteralPath $requirementsPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Acceptance requirements SHA-256: ``$requirementsHash``" -Encoding utf8
+
+      - name: Upload authoritative acceptance requirements
+        if: inputs.operation == 'produce-acceptance-requirements'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-acceptance-requirements-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/acceptance-requirements-output/acceptance-requirements.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Download reviewed raw performance samples
+        if: inputs.operation == 'produce-own-gate-performance-evidence'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-performance-raw-samples-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/performance-raw-input
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.performance_raw_samples_run_id }}
+
+      - name: Produce authoritative own-gate performance evidence
+        if: inputs.operation == 'produce-own-gate-performance-evidence'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $rawInputPath = Join-Path $env:RUNNER_TEMP 'performance-raw-input'
+          $rawSamplesPath = Join-Path $rawInputPath 'raw-performance-samples.json'
+          $rawFiles = @(Get-ChildItem -LiteralPath $rawInputPath -File -Recurse)
+          $rawDirectories = @(Get-ChildItem -LiteralPath $rawInputPath -Directory -Recurse)
+          if (
+            $rawFiles.Count -ne 1 -or
+            $rawDirectories.Count -ne 0 -or
+            $rawFiles[0].FullName -ne [IO.Path]::GetFullPath($rawSamplesPath)
+          ) {
+            throw "reviewed raw performance artifact file set is not closed"
+          }
+          $actualRawSamplesHash = (Get-FileHash -LiteralPath $rawSamplesPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualRawSamplesHash -ne $env:REQUESTED_PERFORMANCE_RAW_SAMPLES_SHA256) {
+            throw "raw performance samples differ from their reviewed SHA-256"
+          }
+          $outputPath = Join-Path $env:RUNNER_TEMP 'performance-own-gate-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $evidencePath = Join-Path $outputPath 'performance-evidence.json'
+          $receiptPath = Join-Path $outputPath 'performance-evidence-producer-receipt.json'
+          npm run performance:own-gate-evidence:produce -- `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --raw-samples $rawSamplesPath `
+            --raw-samples-sha256 $env:REQUESTED_PERFORMANCE_RAW_SAMPLES_SHA256 `
+            --raw-samples-run-id $env:REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ID `
+            --output $evidencePath `
+            --receipt-output $receiptPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "own-gate performance evidence producer failed with exit code $LASTEXITCODE"
+          }
+          $outputNames = @(
+            Get-ChildItem -LiteralPath $outputPath -File |
+              ForEach-Object { $_.Name } |
+              Sort-Object
+          )
+          if (
+            $outputNames.Count -ne 2 -or
+            $outputNames[0] -ne 'performance-evidence-producer-receipt.json' -or
+            $outputNames[1] -ne 'performance-evidence.json'
+          ) {
+            throw "own-gate performance evidence artifact file set is not closed"
+          }
+          $evidenceHash = (Get-FileHash -LiteralPath $evidencePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $receiptHash = (Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Own-gate performance evidence SHA-256: ``$evidenceHash``" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Own-gate producer receipt SHA-256: ``$receiptHash``" -Encoding utf8
+
+      - name: Upload authoritative own-gate performance evidence
+        if: inputs.operation == 'produce-own-gate-performance-evidence'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-performance-own-gate-evidence-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/performance-own-gate-output/performance-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Build authoritative inherited performance closure
+        if: inputs.operation == 'produce-performance-inherited-closure'
+        shell: pwsh
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'performance-closure-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $closurePath = Join-Path $outputPath 'performance-evidence.json'
+          npm run performance:inherited-closure:build -- `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --closure-id "perf-closure-$env:REQUESTED_SOURCE_SHA" `
+            --p0-accepted-event-sha256 $env:REQUESTED_P0_ACCEPTED_EVENT_SHA256 `
+            --p3-accepted-event-sha256 $env:REQUESTED_P3_ACCEPTED_EVENT_SHA256 `
+            --p5d-accepted-event-sha256 $env:REQUESTED_P5D_ACCEPTED_EVENT_SHA256 `
+            --p5e-accepted-event-sha256 $env:REQUESTED_P5E_ACCEPTED_EVENT_SHA256 `
+            --output $closurePath
+          if ($LASTEXITCODE -ne 0) {
+            throw "performance inherited closure build failed with exit code $LASTEXITCODE"
+          }
+          $closureHash = (Get-FileHash -LiteralPath $closurePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Performance closure SHA-256: ``$closureHash``" -Encoding utf8
+
+      - name: Upload authoritative inherited performance closure
+        if: inputs.operation == 'produce-performance-inherited-closure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-performance-inherited-closure-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/performance-closure-output/performance-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Download reviewed prior acceptance collector chain
+        if: inputs.operation == 'collect-continuous-sample' || inputs.operation == 'finalize-acceptance-evidence'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-acceptance-collector-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/acceptance-collector-prior
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.acceptance_evidence_source_run_id }}
+
+      - name: Collect immutable acceptance authority and production samples
+        if: inputs.operation == 'initialize-acceptance-collector' || inputs.operation == 'collect-continuous-sample' || inputs.operation == 'finalize-acceptance-evidence'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          RELEASE_A_EVIDENCE_URL: ${{ secrets.RELEASE_A_EVIDENCE_URL }}
+          RELEASE_A_EVIDENCE_TOKEN: ${{ secrets.RELEASE_A_EVIDENCE_TOKEN }}
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'acceptance-collector-output'
+          $collectorCommand = switch ($env:REQUESTED_OPERATION) {
+            'initialize-acceptance-collector' { 'initialize' }
+            'collect-continuous-sample' { 'append' }
+            'finalize-acceptance-evidence' { 'finalize' }
+            default { throw "unsupported acceptance collector operation" }
+          }
+          $collectorArguments = @(
+            'run',
+            'release:acceptance-collector',
+            '--',
+            $collectorCommand,
+            '--namespace',
+            $env:RELEASE_STATE_NAMESPACE
+          )
+          if ($collectorCommand -ne 'initialize') {
+            $priorPath = Join-Path $env:RUNNER_TEMP 'acceptance-collector-prior'
+            $priorSourcePath = Join-Path $priorPath 'continuous-production-probe-source.json'
+            $priorReceiptPath = Join-Path $priorPath 'acceptance-collector-receipt.json'
+            $actualSourceHash = (Get-FileHash -LiteralPath $priorSourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $actualReceiptHash = (Get-FileHash -LiteralPath $priorReceiptPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if (
+              $actualSourceHash -ne $env:REQUESTED_CONTINUOUS_PROBE_SOURCE_SHA256 -or
+              $actualReceiptHash -ne $env:REQUESTED_ACCEPTANCE_COLLECTOR_RECEIPT_SHA256
+            ) {
+              throw "prior acceptance collector artifact differs from reviewed hashes"
+            }
+            $priorNames = @(
+              Get-ChildItem -LiteralPath $priorPath -File |
+                ForEach-Object { $_.Name } |
+                Sort-Object
+            )
+            if (
+              $priorNames.Count -ne 2 -or
+              $priorNames[0] -ne 'acceptance-collector-receipt.json' -or
+              $priorNames[1] -ne 'continuous-production-probe-source.json'
+            ) {
+              throw "prior acceptance collector artifact file set is not closed"
+            }
+            $collectorArguments += @(
+              '--prior-source',
+              $priorSourcePath,
+              '--prior-source-sha256',
+              $env:REQUESTED_CONTINUOUS_PROBE_SOURCE_SHA256,
+              '--prior-receipt',
+              $priorReceiptPath,
+              '--prior-receipt-sha256',
+              $env:REQUESTED_ACCEPTANCE_COLLECTOR_RECEIPT_SHA256
+            )
+          }
+          if ($collectorCommand -eq 'finalize') {
+            $terminalEventHash = if ([string]::IsNullOrEmpty($env:REQUESTED_COMPANION_TERMINAL_EVENT_SHA256)) {
+              'none'
+            } else {
+              $env:REQUESTED_COMPANION_TERMINAL_EVENT_SHA256
+            }
+            $collectorArguments += @(
+              '--companion-terminal-event-sha256',
+              $terminalEventHash
+            )
+          }
+          $collectorArguments += @('--output-directory', $outputPath)
+          & npm @collectorArguments
+          if ($LASTEXITCODE -ne 0) {
+            throw "acceptance collector failed with exit code $LASTEXITCODE"
+          }
+          $sourceHash = (Get-FileHash -LiteralPath (Join-Path $outputPath 'continuous-production-probe-source.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+          $receiptHash = (Get-FileHash -LiteralPath (Join-Path $outputPath 'acceptance-collector-receipt.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Acceptance collector source SHA-256: ``$sourceHash``" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Acceptance collector receipt SHA-256: ``$receiptHash``" -Encoding utf8
+          if ($collectorCommand -eq 'finalize') {
+            $evidenceHash = (Get-FileHash -LiteralPath (Join-Path $outputPath 'release-a-acceptance-evidence.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Release A evidence SHA-256: ``$evidenceHash``" -Encoding utf8
+            $companionPath = Join-Path $outputPath 'companion-recovery-drill-source.json'
+            if (Test-Path -LiteralPath $companionPath) {
+              $companionHash = (Get-FileHash -LiteralPath $companionPath -Algorithm SHA256).Hash.ToLowerInvariant()
+              Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Companion recovery source SHA-256: ``$companionHash``" -Encoding utf8
+            }
+          }
+
+      - name: Upload appendable acceptance collector chain
+        if: inputs.operation == 'initialize-acceptance-collector' || inputs.operation == 'collect-continuous-sample'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-acceptance-collector-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/acceptance-collector-output
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload finalized authoritative acceptance sources
+        if: inputs.operation == 'finalize-acceptance-evidence'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-acceptance-evidence-source-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/acceptance-collector-output
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Download reviewed raw acceptance evidence sources
+        if: inputs.operation == 'publish-acceptance-evidence'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-acceptance-evidence-source-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/acceptance-evidence-source
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.acceptance_evidence_source_run_id }}
+
+      - name: Validate and publish exact acceptance evidence sources
+        if: inputs.operation == 'publish-acceptance-evidence'
+        shell: pwsh
+        run: |
+          $sourcePath = Join-Path $env:RUNNER_TEMP 'acceptance-evidence-source'
+          $evidencePath = Join-Path $sourcePath 'release-a-acceptance-evidence.json'
+          $continuousSourcePath = Join-Path $sourcePath 'continuous-production-probe-source.json'
+          $companionSourcePath = Join-Path $sourcePath 'companion-recovery-drill-source.json'
+          $collectorReceiptPath = Join-Path $sourcePath 'acceptance-collector-receipt.json'
+          $actualEvidenceHash = (Get-FileHash -LiteralPath $evidencePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $actualContinuousSourceHash = (Get-FileHash -LiteralPath $continuousSourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $actualCollectorReceiptHash = (Get-FileHash -LiteralPath $collectorReceiptPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if (
+            $actualEvidenceHash -ne $env:REQUESTED_EVIDENCE_SHA256 -or
+            $actualContinuousSourceHash -ne $env:REQUESTED_CONTINUOUS_PROBE_SOURCE_SHA256 -or
+            $actualCollectorReceiptHash -ne $env:REQUESTED_ACCEPTANCE_COLLECTOR_RECEIPT_SHA256
+          ) {
+            throw "acceptance evidence source artifact differs from its reviewed hashes"
+          }
+          npm run verify:release-a-evidence -- $evidencePath
+          if ($LASTEXITCODE -ne 0) {
+            throw "release acceptance evidence verification failed with exit code $LASTEXITCODE"
+          }
+          if ([string]::IsNullOrEmpty($env:REQUESTED_COMPANION_RECOVERY_SOURCE_SHA256)) {
+            if (Test-Path -LiteralPath $companionSourcePath) {
+              throw "companion recovery source exists without a reviewed SHA-256"
+            }
+          } else {
+            $actualCompanionSourceHash = (Get-FileHash -LiteralPath $companionSourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualCompanionSourceHash -ne $env:REQUESTED_COMPANION_RECOVERY_SOURCE_SHA256) {
+              throw "companion recovery source differs from its reviewed SHA-256"
+            }
+          }
+          $expectedNames = @(
+            'acceptance-collector-receipt.json',
+            'continuous-production-probe-source.json',
+            'release-a-acceptance-evidence.json'
+          )
+          if (-not [string]::IsNullOrEmpty($env:REQUESTED_COMPANION_RECOVERY_SOURCE_SHA256)) {
+            $expectedNames += 'companion-recovery-drill-source.json'
+          }
+          $actualNames = @(
+            Get-ChildItem -LiteralPath $sourcePath -File |
+              ForEach-Object { $_.Name } |
+              Sort-Object
+          )
+          $expectedNames = @($expectedNames | Sort-Object)
+          if (
+            $actualNames.Count -ne $expectedNames.Count -or
+            (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $actualNames).Count -ne 0
+          ) {
+            throw "finalized acceptance source artifact file set is not closed"
+          }
+          $outputPath = Join-Path $env:RUNNER_TEMP 'acceptance-evidence-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          Copy-Item -LiteralPath $evidencePath -Destination $outputPath -ErrorAction Stop
+          Copy-Item -LiteralPath $continuousSourcePath -Destination $outputPath -ErrorAction Stop
+          Copy-Item -LiteralPath $collectorReceiptPath -Destination $outputPath -ErrorAction Stop
+          if (Test-Path -LiteralPath $companionSourcePath) {
+            Copy-Item -LiteralPath $companionSourcePath -Destination $outputPath -ErrorAction Stop
+          }
+
+      - name: Upload validated acceptance evidence sources
+        if: inputs.operation == 'publish-acceptance-evidence'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-acceptance-evidence-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/acceptance-evidence-output
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Download reviewed authoritative acceptance requirements
+        if: inputs.operation == 'produce-acceptance-inputs' || inputs.operation == 'accept-standard'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-acceptance-requirements-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/acceptance-requirements-reviewed
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.acceptance_requirements_run_id }}
+
+      - name: Verify reviewed authoritative acceptance requirements
+        id: acceptance_requirements
+        if: inputs.operation == 'produce-acceptance-inputs' || inputs.operation == 'accept-standard'
+        shell: pwsh
+        run: |
+          $reviewedRequirementsPath = Join-Path $env:RUNNER_TEMP 'acceptance-requirements-reviewed/acceptance-requirements.json'
+          $reviewedRequirementsHash = (Get-FileHash -LiteralPath $reviewedRequirementsPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($reviewedRequirementsHash -ne $env:REQUESTED_ACCEPTANCE_REQUIREMENTS_SHA256) {
+            throw "acceptance requirements artifact differs from its reviewed SHA-256"
+          }
+          $requirementsPath = Join-Path $env:RUNNER_TEMP 'acceptance-requirements-current.json'
+          npm run release:lifecycle -- describe-acceptance-requirements `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --output $requirementsPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "authoritative acceptance requirements revalidation failed with exit code $LASTEXITCODE"
+          }
+          $currentRequirementsHash = (Get-FileHash -LiteralPath $requirementsPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($currentRequirementsHash -ne $env:REQUESTED_ACCEPTANCE_REQUIREMENTS_SHA256) {
+            throw "reviewed acceptance requirements no longer match authoritative Release State"
+          }
+          $requirements = Get-Content -LiteralPath $reviewedRequirementsPath -Raw -Encoding utf8 | ConvertFrom-Json
+          $hasPerformanceRun = -not [string]::IsNullOrEmpty($env:REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID)
+          $hasPerformanceHash = -not [string]::IsNullOrEmpty($env:REQUESTED_PERFORMANCE_EVIDENCE_SHA256)
+          if ($requirements.performanceEvidenceKind -eq 'none') {
+            if ($hasPerformanceRun -or $hasPerformanceHash) {
+              throw "performance evidence is forbidden for accepted gate $($requirements.acceptedGate)"
+            }
+          } elseif (
+            $requirements.performanceEvidenceKind -notin @(
+              'own-gate-performance-evidence/v1',
+              'performance-inherited-closure/v1'
+            )
+          ) {
+            throw "authoritative acceptance requirements returned an unsupported performance kind"
+          } elseif (
+            -not $hasPerformanceRun -or
+            -not $hasPerformanceHash -or
+            $env:REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID -eq $env:GITHUB_RUN_ID
+          ) {
+            throw "accepted gate $($requirements.acceptedGate) requires reviewed performance evidence from a prior run"
+          }
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "accepted_gate=$($requirements.acceptedGate)" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "performance_kind=$($requirements.performanceEvidenceKind)" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "performance_gate=$($requirements.performanceGate)" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Acceptance gate: ``$($requirements.acceptedGate)``; performance: ``$($requirements.performanceEvidenceKind)``" -Encoding utf8
+
       - name: Download reviewed acceptance evidence
         if: inputs.operation == 'produce-acceptance-inputs' || inputs.operation == 'accept-standard'
         uses: actions/download-artifact@v4
@@ -615,32 +1963,86 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ inputs.acceptance_evidence_run_id }}
 
+      - name: Download reviewed own-gate performance evidence
+        if: (inputs.operation == 'produce-acceptance-inputs' || inputs.operation == 'accept-standard') && steps.acceptance_requirements.outputs.performance_kind == 'own-gate-performance-evidence/v1'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-performance-own-gate-evidence-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/performance-input
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.performance_evidence_run_id }}
+
+      - name: Download reviewed inherited performance closure
+        if: (inputs.operation == 'produce-acceptance-inputs' || inputs.operation == 'accept-standard') && steps.acceptance_requirements.outputs.performance_kind == 'performance-inherited-closure/v1'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-performance-inherited-closure-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/performance-input
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.performance_evidence_run_id }}
+
       - name: Produce canonical acceptance inputs from reviewed sources
         if: inputs.operation == 'produce-acceptance-inputs'
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUIRED_PERFORMANCE_KIND: ${{ steps.acceptance_requirements.outputs.performance_kind }}
         run: |
           $inputPath = Join-Path $env:RUNNER_TEMP 'acceptance-input'
           $evidencePath = Join-Path $inputPath 'release-a-acceptance-evidence.json'
+          $performanceInputPath = Join-Path $env:RUNNER_TEMP 'performance-input'
+          $performancePath = Join-Path $performanceInputPath 'performance-evidence.json'
           $continuousSourcePath = Join-Path $inputPath 'continuous-production-probe-source.json'
           $companionSourcePath = Join-Path $inputPath 'companion-recovery-drill-source.json'
+          $collectorReceiptPath = Join-Path $inputPath 'acceptance-collector-receipt.json'
           $actualEvidenceHash = (Get-FileHash -LiteralPath $evidencePath -Algorithm SHA256).Hash.ToLowerInvariant()
           $actualContinuousSourceHash = (Get-FileHash -LiteralPath $continuousSourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $actualCollectorReceiptHash = (Get-FileHash -LiteralPath $collectorReceiptPath -Algorithm SHA256).Hash.ToLowerInvariant()
           if (
             $actualEvidenceHash -ne $env:REQUESTED_EVIDENCE_SHA256 -or
-            $actualContinuousSourceHash -ne $env:REQUESTED_CONTINUOUS_PROBE_SOURCE_SHA256
+            $actualContinuousSourceHash -ne $env:REQUESTED_CONTINUOUS_PROBE_SOURCE_SHA256 -or
+            $actualCollectorReceiptHash -ne $env:REQUESTED_ACCEPTANCE_COLLECTOR_RECEIPT_SHA256
           ) {
             throw "acceptance evidence or continuous probe source differs from its reviewed SHA-256"
+          }
+          $performanceFiles = @()
+          $performanceDirectories = @()
+          if (Test-Path -LiteralPath $performanceInputPath) {
+            $performanceFiles = @(Get-ChildItem -LiteralPath $performanceInputPath -File -Recurse)
+            $performanceDirectories = @(Get-ChildItem -LiteralPath $performanceInputPath -Directory -Recurse)
+          }
+          if ($env:REQUIRED_PERFORMANCE_KIND -eq 'none') {
+            if ($performanceFiles.Count -ne 0 -or $performanceDirectories.Count -ne 0) {
+              throw "performance evidence exists for a gate that forbids it"
+            }
+          } else {
+            if (
+              $performanceFiles.Count -ne 1 -or
+              $performanceDirectories.Count -ne 0 -or
+              $performanceFiles[0].FullName -ne [IO.Path]::GetFullPath($performancePath)
+            ) {
+              throw "reviewed performance artifact file set is not closed"
+            }
+            $actualPerformanceHash = (Get-FileHash -LiteralPath $performancePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualPerformanceHash -ne $env:REQUESTED_PERFORMANCE_EVIDENCE_SHA256) {
+              throw "performance evidence differs from its reviewed SHA-256"
+            }
           }
           $outputPath = Join-Path $env:RUNNER_TEMP 'acceptance-inputs-output'
           New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
           $continuousPath = Join-Path $outputPath 'continuous-production-probe.json'
           npm run release:acceptance-input -- continuous-probe `
             --namespace $env:RELEASE_STATE_NAMESPACE `
+            --collector-receipt $collectorReceiptPath `
+            --collector-receipt-sha256 $env:REQUESTED_ACCEPTANCE_COLLECTOR_RECEIPT_SHA256 `
             --release-evidence $evidencePath `
             --release-evidence-sha256 $env:REQUESTED_EVIDENCE_SHA256 `
             --source $continuousSourcePath `
             --source-sha256 $env:REQUESTED_CONTINUOUS_PROBE_SOURCE_SHA256 `
             --output $continuousPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "continuous production probe production failed with exit code $LASTEXITCODE"
+          }
           $continuousHash = (Get-FileHash -LiteralPath $continuousPath -Algorithm SHA256).Hash.ToLowerInvariant()
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Continuous probe SHA-256: ``$continuousHash``" -Encoding utf8
 
@@ -656,14 +2058,68 @@ jobs:
             $companionPath = Join-Path $outputPath 'companion-recovery-drill.json'
             npm run release:acceptance-input -- companion-recovery `
               --namespace $env:RELEASE_STATE_NAMESPACE `
+              --collector-receipt $collectorReceiptPath `
+              --collector-receipt-sha256 $env:REQUESTED_ACCEPTANCE_COLLECTOR_RECEIPT_SHA256 `
               --release-evidence $evidencePath `
               --release-evidence-sha256 $env:REQUESTED_EVIDENCE_SHA256 `
               --source $companionSourcePath `
               --source-sha256 $env:REQUESTED_COMPANION_RECOVERY_SOURCE_SHA256 `
               --output $companionPath
+            if ($LASTEXITCODE -ne 0) {
+              throw "companion recovery evidence production failed with exit code $LASTEXITCODE"
+            }
             $companionHash = (Get-FileHash -LiteralPath $companionPath -Algorithm SHA256).Hash.ToLowerInvariant()
             Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Companion recovery drill SHA-256: ``$companionHash``" -Encoding utf8
           }
+
+          $bundlePath = Join-Path $outputPath 'acceptance-final-bundle.json'
+          $objectSetPath = Join-Path $outputPath 'acceptance-final-objects.json'
+          $preparationPath = Join-Path $outputPath 'acceptance-terminal-preparation.json'
+          $prepareArguments = @(
+            'run',
+            'release:lifecycle',
+            '--',
+            'prepare-acceptance-bundle',
+            '--namespace',
+            $env:RELEASE_STATE_NAMESPACE,
+            '--evidence',
+            $evidencePath,
+            '--evidence-sha256',
+            $env:REQUESTED_EVIDENCE_SHA256,
+            '--continuous-probe',
+            $continuousPath,
+            '--continuous-probe-sha256',
+            $continuousHash,
+            '--terminal-bundle-output',
+            $bundlePath,
+            '--terminal-object-set-output',
+            $objectSetPath
+          )
+          if ($env:REQUIRED_PERFORMANCE_KIND -ne 'none') {
+            $prepareArguments += @(
+              '--performance-evidence',
+              $performancePath,
+              '--performance-evidence-sha256',
+              $env:REQUESTED_PERFORMANCE_EVIDENCE_SHA256
+            )
+          }
+          if (-not [string]::IsNullOrEmpty($env:REQUESTED_COMPANION_RECOVERY_SOURCE_SHA256)) {
+            $prepareArguments += @(
+              '--companion-recovery-drill',
+              $companionPath,
+              '--companion-recovery-drill-sha256',
+              $companionHash
+            )
+          }
+          $prepareArguments += @('--output', $preparationPath)
+          & npm @prepareArguments
+          if ($LASTEXITCODE -ne 0) {
+            throw "prepare-acceptance-bundle lifecycle failed with exit code $LASTEXITCODE"
+          }
+          $bundleHash = (Get-FileHash -LiteralPath $bundlePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $objectSetHash = (Get-FileHash -LiteralPath $objectSetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Acceptance-final bundle SHA-256: ``$bundleHash``" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Acceptance-final object set SHA-256: ``$objectSetHash``" -Encoding utf8
 
       - name: Upload canonical acceptance inputs
         if: inputs.operation == 'produce-acceptance-inputs'
@@ -688,11 +2144,37 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUIRED_PERFORMANCE_KIND: ${{ steps.acceptance_requirements.outputs.performance_kind }}
         run: |
           $evidencePath = Join-Path $env:RUNNER_TEMP 'acceptance-input/release-a-acceptance-evidence.json'
+          $performanceInputPath = Join-Path $env:RUNNER_TEMP 'performance-input'
+          $performancePath = Join-Path $performanceInputPath 'performance-evidence.json'
           $actualEvidenceHash = (Get-FileHash -LiteralPath $evidencePath -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actualEvidenceHash -ne $env:REQUESTED_EVIDENCE_SHA256) {
-            throw "acceptance evidence differs from the reviewed SHA-256"
+            throw "acceptance evidence differs from its reviewed SHA-256"
+          }
+          $performanceFiles = @()
+          $performanceDirectories = @()
+          if (Test-Path -LiteralPath $performanceInputPath) {
+            $performanceFiles = @(Get-ChildItem -LiteralPath $performanceInputPath -File -Recurse)
+            $performanceDirectories = @(Get-ChildItem -LiteralPath $performanceInputPath -Directory -Recurse)
+          }
+          if ($env:REQUIRED_PERFORMANCE_KIND -eq 'none') {
+            if ($performanceFiles.Count -ne 0 -or $performanceDirectories.Count -ne 0) {
+              throw "performance evidence exists for a gate that forbids it"
+            }
+          } else {
+            if (
+              $performanceFiles.Count -ne 1 -or
+              $performanceDirectories.Count -ne 0 -or
+              $performanceFiles[0].FullName -ne [IO.Path]::GetFullPath($performancePath)
+            ) {
+              throw "reviewed performance artifact file set is not closed"
+            }
+            $actualPerformanceHash = (Get-FileHash -LiteralPath $performancePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualPerformanceHash -ne $env:REQUESTED_PERFORMANCE_EVIDENCE_SHA256) {
+              throw "performance evidence differs from its reviewed SHA-256"
+            }
           }
           $continuousPath = Join-Path $env:RUNNER_TEMP 'acceptance-inputs/continuous-production-probe.json'
           $actualContinuousHash = (Get-FileHash -LiteralPath $continuousPath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -700,6 +2182,16 @@ jobs:
             throw "continuous production probe differs from the reviewed SHA-256"
           }
           $companionPath = Join-Path $env:RUNNER_TEMP 'acceptance-inputs/companion-recovery-drill.json'
+          $bundlePath = Join-Path $env:RUNNER_TEMP 'acceptance-inputs/acceptance-final-bundle.json'
+          $objectSetPath = Join-Path $env:RUNNER_TEMP 'acceptance-inputs/acceptance-final-objects.json'
+          $actualBundleHash = (Get-FileHash -LiteralPath $bundlePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $actualObjectSetHash = (Get-FileHash -LiteralPath $objectSetPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if (
+            $actualBundleHash -ne $env:REQUESTED_TERMINAL_BUNDLE_SHA256 -or
+            $actualObjectSetHash -ne $env:REQUESTED_TERMINAL_OBJECT_SET_SHA256
+          ) {
+            throw "acceptance terminal bundle closure differs from its reviewed SHA-256"
+          }
           $outputPath = Join-Path $env:RUNNER_TEMP 'acceptance-output'
           New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
           $acceptanceArguments = @(
@@ -716,8 +2208,24 @@ jobs:
             '--continuous-probe',
             $continuousPath,
             '--continuous-probe-sha256',
-            $env:REQUESTED_CONTINUOUS_PROBE_SHA256
+            $env:REQUESTED_CONTINUOUS_PROBE_SHA256,
+            '--terminal-bundle',
+            $bundlePath,
+            '--terminal-bundle-sha256',
+            $env:REQUESTED_TERMINAL_BUNDLE_SHA256,
+            '--terminal-object-set',
+            $objectSetPath,
+            '--terminal-object-set-sha256',
+            $env:REQUESTED_TERMINAL_OBJECT_SET_SHA256
           )
+          if ($env:REQUIRED_PERFORMANCE_KIND -ne 'none') {
+            $acceptanceArguments += @(
+              '--performance-evidence',
+              $performancePath,
+              '--performance-evidence-sha256',
+              $env:REQUESTED_PERFORMANCE_EVIDENCE_SHA256
+            )
+          }
           if ([string]::IsNullOrEmpty($env:REQUESTED_COMPANION_RECOVERY_DRILL_SHA256)) {
             if (Test-Path -LiteralPath $companionPath) {
               throw "companion recovery drill exists without a reviewed SHA-256"
@@ -749,5 +2257,638 @@ jobs:
         with:
           name: foundation-acceptance-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/acceptance-output
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Download candidate pair for nonpromotable policy QA
+        if: inputs.operation == 'produce-policy-activation-qa-package'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-policy-qa-build-${{ inputs.policy_target_source_sha }}-${{ inputs.artifact_build_requirements_sha256 }}
+          path: ${{ runner.temp }}/policy-qa-candidate-package
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.artifact_run_id }}
+
+      - name: Build immutable nonpromotable policy QA package
+        if: inputs.operation == 'produce-policy-activation-qa-package'
+        shell: pwsh
+        run: |
+          $packagePath = Join-Path $env:RUNNER_TEMP 'policy-qa-candidate-package'
+          $indexPath = Join-Path $packagePath 'release-package-index.json'
+          $index = Get-Content -LiteralPath $indexPath -Raw -Encoding utf8 | ConvertFrom-Json -Depth 100
+          if ($index.sourceSha -ne $env:REQUESTED_POLICY_TARGET_SOURCE_SHA) {
+            throw "candidate package source differs from policy_target_source_sha"
+          }
+          if (
+            [string]$index.buildPurpose -ne 'non-promotable-policy-activation-qa' -or
+            [bool]$index.promotable -ne $false -or
+            [string]$index.targetGate -ne $env:REQUESTED_POLICY_ACTIVATION_GATE -or
+            [string]$index.buildAuthority.sha256 -ne $env:REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256
+          ) {
+            throw "candidate package is not the reviewed nonpromotable Policy QA build"
+          }
+          $standard = @($index.artifacts | Where-Object { $_.releaseRole -eq 'standard' })
+          $companion = @($index.artifacts | Where-Object { $_.releaseRole -eq 'containment' })
+          if ($standard.Count -ne 1 -or $companion.Count -ne 1) {
+            throw "candidate package must contain one standard and one containment artifact"
+          }
+          function Resolve-ReviewedObjectPath($reference, [string]$kind) {
+            $sha = [string]$reference.sha256
+            if (
+              $sha -notmatch '^[0-9a-f]{64}$' -or
+              [string]$reference.uri -ne "artifact://sha256/$sha/$kind"
+            ) {
+              throw "candidate immutable $kind reference is invalid"
+            }
+            $objectPath = Join-Path $packagePath "objects/sha256/$sha.$kind"
+            $actualHash = (Get-FileHash -LiteralPath $objectPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -ne $sha) {
+              throw "candidate immutable $kind bytes differ from their hash"
+            }
+            return $objectPath
+          }
+          $standardManifest = Resolve-ReviewedObjectPath $standard[0].manifest 'artifact-manifest.json'
+          $standardArchive = Resolve-ReviewedObjectPath $standard[0].archive 'artifact.zip'
+          $companionManifest = Resolve-ReviewedObjectPath $companion[0].manifest 'artifact-manifest.json'
+          $companionArchive = Resolve-ReviewedObjectPath $companion[0].archive 'artifact.zip'
+          $outputPath = Join-Path $env:RUNNER_TEMP 'policy-qa-package-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $qaPackagePath = Join-Path $outputPath 'policy-qa-package.json'
+          npm run release:produce-input -- policy-activation-qa-package `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --operation-id $env:REQUESTED_OPERATION_ID `
+            --source-sha $env:REQUESTED_SOURCE_SHA `
+            --target-source-sha $env:REQUESTED_POLICY_TARGET_SOURCE_SHA `
+            --activation-gate $env:REQUESTED_POLICY_ACTIVATION_GATE `
+            --build-requirements-sha256 $env:REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256 `
+            --proposed-policy-sha256 $env:REQUESTED_PROPOSED_RELEASE_POLICY_SHA256 `
+            --standard-manifest $standardManifest `
+            --standard-archive $standardArchive `
+            --companion-manifest $companionManifest `
+            --companion-archive $companionArchive `
+            --output $qaPackagePath
+          if ($LASTEXITCODE -ne 0) {
+            throw "nonpromotable policy QA package build failed with exit code $LASTEXITCODE"
+          }
+          $hash = (Get-FileHash -LiteralPath $qaPackagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Policy QA package SHA-256: ``$hash``" -Encoding utf8
+
+      - name: Upload immutable nonpromotable policy QA package
+        if: inputs.operation == 'produce-policy-activation-qa-package'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-policy-qa-package-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/policy-qa-package-output/policy-qa-package.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Produce authoritative Policy QA execution subject
+        if: inputs.operation == 'produce-policy-activation-qa-execution-subject'
+        shell: pwsh
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'policy-qa-execution-subject-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $subjectPath = Join-Path $outputPath 'policy-qa-execution-subject.json'
+          npm run release:produce-input -- policy-activation-qa-execution-subject `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --operation-id $env:REQUESTED_OPERATION_ID `
+            --source-sha $env:REQUESTED_SOURCE_SHA `
+            --target-source-sha $env:REQUESTED_POLICY_TARGET_SOURCE_SHA `
+            --proposed-policy-sha256 $env:REQUESTED_PROPOSED_RELEASE_POLICY_SHA256 `
+            --active-policy-sha256 $env:REQUESTED_ACTIVE_RELEASE_POLICY_SHA256 `
+            --approval-policy-sha256 $env:REQUESTED_APPROVAL_POLICY_SHA256 `
+            --qa-package-sha256 $env:REQUESTED_POLICY_QA_PACKAGE_SHA256 `
+            --output $subjectPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "Policy QA execution subject production failed with exit code $LASTEXITCODE"
+          }
+          $hash = (Get-FileHash -LiteralPath $subjectPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Policy QA execution subject SHA-256: ``$hash``" -Encoding utf8
+
+      - name: Upload authoritative Policy QA execution subject
+        if: inputs.operation == 'produce-policy-activation-qa-execution-subject'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-policy-qa-execution-subject-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/policy-qa-execution-subject-output/policy-qa-execution-subject.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Download reviewed Policy QA execution subject
+        if: inputs.operation == 'execute-policy-activation-qa'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-policy-qa-execution-subject-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/policy-qa-reviewed-subject
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.policy_qa_execution_subject_run_id }}
+
+      - name: Execute reviewed nonproduction Policy QA and recovery drills
+        if: inputs.operation == 'execute-policy-activation-qa'
+        shell: pwsh
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          $subjectPath = Join-Path $env:RUNNER_TEMP 'policy-qa-reviewed-subject/policy-qa-execution-subject.json'
+          $actualSubjectHash = (Get-FileHash -LiteralPath $subjectPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSubjectHash -ne $env:REQUESTED_POLICY_QA_EXECUTION_SUBJECT_SHA256) {
+            throw "Policy QA execution subject differs from reviewed SHA-256"
+          }
+          $outputPath = Join-Path $env:RUNNER_TEMP 'policy-qa-execution-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $executionPath = Join-Path $outputPath 'policy-qa-execution.json'
+          npm run release:execute-policy-activation-qa -- execute `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --operation-id $env:REQUESTED_OPERATION_ID `
+            --source-sha $env:REQUESTED_SOURCE_SHA `
+            --run-id $env:GITHUB_RUN_ID `
+            --subject $subjectPath `
+            --subject-sha256 $env:REQUESTED_POLICY_QA_EXECUTION_SUBJECT_SHA256 `
+            --output $executionPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "Policy QA execution failed with exit code $LASTEXITCODE"
+          }
+          $hash = (Get-FileHash -LiteralPath $executionPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Policy QA execution SHA-256: ``$hash``" -Encoding utf8
+
+      - name: Upload reviewed Policy QA execution bundle
+        if: always() && inputs.operation == 'execute-policy-activation-qa'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-policy-qa-execution-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/policy-qa-execution-output
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Download reviewed Policy QA execution bundle
+        if: inputs.operation == 'produce-policy-activation-closure'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-policy-qa-execution-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/policy-qa-reviewed-execution
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.policy_qa_execution_run_id }}
+
+      - name: Produce authoritative policy activation closure
+        if: inputs.operation == 'produce-policy-activation-closure'
+        shell: pwsh
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'policy-activation-closure-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $closurePath = Join-Path $outputPath 'policy-activation-closure.json'
+          $executionPath = Join-Path $env:RUNNER_TEMP 'policy-qa-reviewed-execution/policy-qa-execution.json'
+          $actualExecutionHash = (Get-FileHash -LiteralPath $executionPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualExecutionHash -ne $env:REQUESTED_POLICY_QA_EXECUTION_SHA256) {
+            throw "Policy QA execution bundle differs from reviewed SHA-256"
+          }
+          npm run release:produce-input -- policy-activation-closure `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --operation-id $env:REQUESTED_OPERATION_ID `
+            --source-sha $env:REQUESTED_SOURCE_SHA `
+            --qa-execution-sha256 $env:REQUESTED_POLICY_QA_EXECUTION_SHA256 `
+            --output $closurePath
+          if ($LASTEXITCODE -ne 0) {
+            throw "policy activation closure production failed with exit code $LASTEXITCODE"
+          }
+          $hash = (Get-FileHash -LiteralPath $closurePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Policy activation closure SHA-256: ``$hash``" -Encoding utf8
+
+      - name: Upload authoritative policy activation closure
+        if: inputs.operation == 'produce-policy-activation-closure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-policy-activation-closure-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/policy-activation-closure-output/policy-activation-closure.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Produce authoritative generic policy activation subject
+        if: inputs.operation == 'produce-policy-activation-subject'
+        shell: pwsh
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'policy-activation-subject-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $subjectPath = Join-Path $outputPath 'policy-activation-subject.json'
+          npm run release:produce-input -- policy-activation-subject `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --operation-id $env:REQUESTED_OPERATION_ID `
+            --source-sha $env:REQUESTED_SOURCE_SHA `
+            --proposed-policy-sha256 $env:REQUESTED_PROPOSED_RELEASE_POLICY_SHA256 `
+            --active-policy-sha256 $env:REQUESTED_ACTIVE_RELEASE_POLICY_SHA256 `
+            --closure-bundle-sha256 $env:REQUESTED_POLICY_CLOSURE_BUNDLE_SHA256 `
+            --output $subjectPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "policy activation subject production failed with exit code $LASTEXITCODE"
+          }
+          $hash = (Get-FileHash -LiteralPath $subjectPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Policy activation subject SHA-256: ``$hash``" -Encoding utf8
+
+      - name: Upload authoritative generic policy activation subject
+        if: inputs.operation == 'produce-policy-activation-subject'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-policy-activation-subject-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/policy-activation-subject-output
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Download reviewed policy activation subject
+        if: inputs.operation == 'activate-policy' || inputs.operation == 'activate-policy-floor'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-policy-activation-subject-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/policy-activation-subject-input
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.subject_run_id }}
+
+      - name: Activate the reviewed generic policy transition
+        if: inputs.operation == 'activate-policy' || inputs.operation == 'activate-policy-floor'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $subjectPath = Join-Path $env:RUNNER_TEMP 'policy-activation-subject-input/policy-activation-subject.json'
+          $actualSubjectHash = (Get-FileHash -LiteralPath $subjectPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSubjectHash -ne $env:REQUESTED_SUBJECT_SHA256) {
+            throw "policy activation subject differs from the reviewed SHA-256"
+          }
+          $outputPath = Join-Path $env:RUNNER_TEMP 'policy-activation-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $activationCommand = if ($env:REQUESTED_OPERATION -eq 'activate-policy-floor') { 'activate-policy-floor' } else { 'activate-policy' }
+          npm run release:lifecycle -- $activationCommand `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --subject $subjectPath `
+            --subject-sha256 $env:REQUESTED_SUBJECT_SHA256 `
+            --output (Join-Path $outputPath 'policy-activation-result.json')
+          if ($LASTEXITCODE -ne 0) {
+            throw "policy activation failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload policy activation result
+        if: always() && (inputs.operation == 'activate-policy' || inputs.operation == 'activate-policy-floor')
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-policy-activation-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/policy-activation-output
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Verify and plan archive recovery without provider mutation
+        if: inputs.operation == 'plan-archive-recovery'
+        shell: pwsh
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'archive-recovery-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          npm run release:plan-archive-recovery -- `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --action $env:REQUESTED_ARCHIVE_RECOVERY_ACTION `
+            --binding-id $env:REQUESTED_ARCHIVE_RECOVERY_BINDING_ID `
+            --source-sha $env:REQUESTED_ARCHIVE_RECOVERY_SOURCE_SHA `
+            --output (Join-Path $outputPath 'archive-recovery-plan.json')
+          if ($LASTEXITCODE -ne 0) {
+            throw "archive recovery planning failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload verified archive recovery dry-run
+        if: always() && inputs.operation == 'plan-archive-recovery'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-archive-recovery-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/archive-recovery-output
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Produce authoritative archive recovery subject
+        if: inputs.operation == 'produce-archive-recovery-subject'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'archive-recovery-subject-output'
+          $packagePath = Join-Path $env:RUNNER_TEMP 'archive-recovery-package'
+          $observationPath = Join-Path $env:RUNNER_TEMP 'provider-observation.json'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+
+          npm run release:execute-archive-recovery -- materialize `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --action $env:REQUESTED_ARCHIVE_RECOVERY_ACTION `
+            --binding-id $env:REQUESTED_ARCHIVE_RECOVERY_BINDING_ID `
+            --source-sha $env:REQUESTED_ARCHIVE_RECOVERY_SOURCE_SHA `
+            --package $packagePath `
+            --output (Join-Path $outputPath 'materialized-package.json')
+          if ($LASTEXITCODE -ne 0) {
+            throw "archive recovery materialization failed with exit code $LASTEXITCODE"
+          }
+
+          $targetBindingPath = $null
+          $companionBindingPath = $null
+          $roles = @()
+          if ($env:REQUESTED_ARCHIVE_RECOVERY_ACTION -eq 'redeploy-standard') {
+            $roles = @('standard', 'containment')
+          } elseif ($env:REQUESTED_ARCHIVE_RECOVERY_ACTION -eq 'redeploy-containment') {
+            $roles = @('containment')
+          }
+          foreach ($role in $roles) {
+            $rolePath = Join-Path $outputPath "redeploy-$role"
+            New-Item -ItemType Directory -Path $rolePath -ErrorAction Stop | Out-Null
+            $receiptPath = Join-Path $rolePath 'prebuilt-deployment-receipt.json'
+            $bindingPath = Join-Path $rolePath 'deployment-binding.json'
+            $idempotencyKey = "archive-recovery:$($env:GITHUB_RUN_ID):$($env:REQUESTED_ARCHIVE_RECOVERY_SOURCE_SHA):$role"
+            npm run release:deploy-prebuilt -- `
+              --package $packagePath `
+              --role $role `
+              --provider-observation $observationPath `
+              --idempotency-key $idempotencyKey `
+              --receipt $receiptPath
+            if ($LASTEXITCODE -ne 0) {
+              throw "archive recovery deployment for $role failed with exit code $LASTEXITCODE"
+            }
+            npm run release:produce-deployment-binding -- deployment-binding `
+              --namespace $env:RELEASE_STATE_NAMESPACE `
+              --package $packagePath `
+              --role $role `
+              --deployment-receipt $receiptPath `
+              --provider-observation $observationPath `
+              --output $bindingPath
+            if ($LASTEXITCODE -ne 0) {
+              throw "archive recovery binding for $role failed with exit code $LASTEXITCODE"
+            }
+            if ($role -eq 'standard') {
+              $targetBindingPath = $bindingPath
+            } elseif ($env:REQUESTED_ARCHIVE_RECOVERY_ACTION -eq 'redeploy-standard') {
+              $companionBindingPath = $bindingPath
+            } else {
+              $targetBindingPath = $bindingPath
+            }
+          }
+
+          $subjectPath = Join-Path $outputPath 'archive-recovery-subject.json'
+          $subjectArgs = @(
+            'run', 'release:execute-archive-recovery', '--', 'subject',
+            '--namespace', $env:RELEASE_STATE_NAMESPACE,
+            '--action', $env:REQUESTED_ARCHIVE_RECOVERY_ACTION,
+            '--binding-id', $env:REQUESTED_ARCHIVE_RECOVERY_BINDING_ID,
+            '--source-sha', $env:REQUESTED_ARCHIVE_RECOVERY_SOURCE_SHA,
+            '--operation-id', $env:REQUESTED_OPERATION_ID,
+            '--output', $subjectPath
+          )
+          if ($null -ne $targetBindingPath) {
+            $subjectArgs += @('--target-binding', $targetBindingPath)
+          }
+          if ($null -ne $companionBindingPath) {
+            $subjectArgs += @('--companion-binding', $companionBindingPath)
+          }
+          & npm @subjectArgs
+          if ($LASTEXITCODE -ne 0) {
+            throw "archive recovery subject production failed"
+          }
+          $subjectHash = (Get-FileHash -LiteralPath $subjectPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Archive recovery subject SHA-256: ``$subjectHash``" -Encoding utf8
+
+      - name: Upload authoritative archive recovery subject
+        if: inputs.operation == 'produce-archive-recovery-subject'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-archive-recovery-subject-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/archive-recovery-subject-output
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Download reviewed archive recovery subject
+        if: inputs.operation == 'execute-reviewed-archive-recovery'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-archive-recovery-subject-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/archive-recovery-subject-input
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.subject_run_id }}
+
+      - name: Execute reviewed archive recovery
+        if: inputs.operation == 'execute-reviewed-archive-recovery'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          $subjectPath = Join-Path $env:RUNNER_TEMP 'archive-recovery-subject-input/archive-recovery-subject.json'
+          $actualSubjectHash = (Get-FileHash -LiteralPath $subjectPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSubjectHash -ne $env:REQUESTED_SUBJECT_SHA256) {
+            throw "archive recovery subject differs from the reviewed SHA-256"
+          }
+
+          $outputPath = Join-Path $env:RUNNER_TEMP 'archive-recovery-execution-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+
+          $preparedPath = Join-Path $outputPath 'prepared-recovery.json'
+          $receiptPath = Join-Path $outputPath 'prepared-recovery-promotion-receipt.json'
+          $authorityPath = Join-Path $outputPath 'production-assignment-authority.json'
+          $assignmentRecordPath = Join-Path $outputPath 'deployment-assignment-lifecycle.json'
+          $assignmentPath = Join-Path $outputPath 'assignment-validation.json'
+          $probePath = Join-Path $outputPath 'production-assignment-probe.json'
+          $lifecyclePath = Join-Path $outputPath 'recovery-lifecycle.json'
+          npm run release:execute-archive-recovery -- prepare `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --source-sha $env:REQUESTED_SOURCE_SHA `
+            --run-id $env:GITHUB_RUN_ID `
+            --subject $subjectPath `
+            --subject-sha256 $env:REQUESTED_SUBJECT_SHA256 `
+            --output $preparedPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "reviewed archive recovery preparation failed with exit code $LASTEXITCODE"
+          }
+          npm run release:promote-prepared -- `
+            --prepared-result $preparedPath `
+            --receipt $receiptPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "archive recovery promotion failed with exit code $LASTEXITCODE"
+          }
+          npm run provider:validate-production-assignment -- assignment-authority `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --prepared-result $preparedPath `
+            --promotion-receipt $receiptPath `
+            --assignment-authority $authorityPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "archive recovery assignment authority failed with exit code $LASTEXITCODE"
+          }
+          npm run release:lifecycle -- record-assignment `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --prepared-result $preparedPath `
+            --promotion-receipt $receiptPath `
+            --assignment-authority $authorityPath `
+            --output $assignmentRecordPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "archive recovery assignment recording failed with exit code $LASTEXITCODE"
+          }
+          npm run provider:validate-production-assignment -- assignment-validation `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --prepared-result $preparedPath `
+            --promotion-receipt $receiptPath `
+            --assignment-authority $authorityPath `
+            --assignment-validation $assignmentPath `
+            --production-probe $probePath
+          if ($LASTEXITCODE -ne 0) {
+            throw "archive recovery assignment validation failed with exit code $LASTEXITCODE"
+          }
+          npm run release:lifecycle -- record-promotion `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --prepared-result $preparedPath `
+            --promotion-receipt $receiptPath `
+            --assignment-authority $authorityPath `
+            --assignment-validation $assignmentPath `
+            --production-probe $probePath `
+            --output $lifecyclePath
+          if ($LASTEXITCODE -ne 0) {
+            throw "archive recovery promotion recording failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload archive recovery execution and reconcile material
+        if: always() && inputs.operation == 'execute-reviewed-archive-recovery'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-archive-recovery-execution-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/archive-recovery-execution-output
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Produce authoritative administrative transition subject
+        if: inputs.operation == 'produce-state-initialization-subject' || inputs.operation == 'produce-db-contract-activation-subject' || inputs.operation == 'produce-operation-abort-subject'
+        shell: pwsh
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'administrative-subject-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $subjectPath = Join-Path $outputPath 'administrative-subject.json'
+          $common = @(
+            '--namespace', $env:RELEASE_STATE_NAMESPACE,
+            '--operation-id', $env:REQUESTED_OPERATION_ID,
+            '--source-sha', $env:REQUESTED_SOURCE_SHA,
+            '--run-id', $env:GITHUB_RUN_ID,
+            '--output', $subjectPath
+          )
+          if ($env:REQUESTED_OPERATION -eq 'produce-state-initialization-subject') {
+            & npm run release:administrative -- produce-state-initialized @common `
+              --bootstrap-recovery-sha256 $env:REQUESTED_BOOTSTRAP_RECOVERY_SHA256 `
+              --db-contract-sha256 $env:REQUESTED_DB_CONTRACT_SHA256 `
+              --legacy-observation-sha256 $env:REQUESTED_LEGACY_OBSERVATION_SHA256 `
+              --release-policy-sha256 $env:REQUESTED_RELEASE_POLICY_SHA256
+            if ($LASTEXITCODE -ne 0) {
+              throw "state initialization subject production failed with exit code $LASTEXITCODE"
+            }
+          } elseif ($env:REQUESTED_OPERATION -eq 'produce-db-contract-activation-subject') {
+            & npm run release:administrative -- produce-db-contract-activated @common `
+              --db-contract-sha256 $env:REQUESTED_DB_CONTRACT_SHA256
+            if ($LASTEXITCODE -ne 0) {
+              throw "DB contract activation subject production failed with exit code $LASTEXITCODE"
+            }
+          } else {
+            $providerObservationPath = Join-Path $outputPath 'provider-alias-observation.json'
+            npm run release:produce-input -- provider-observation `
+              --namespace $env:RELEASE_STATE_NAMESPACE `
+              --output $providerObservationPath
+            if ($LASTEXITCODE -ne 0) {
+              throw "operation abort provider observation failed"
+            }
+            & npm run release:administrative -- produce-operation-aborted @common `
+              --provider-observation $providerObservationPath
+            if ($LASTEXITCODE -ne 0) {
+              throw "operation abort subject production failed with exit code $LASTEXITCODE"
+            }
+          }
+          $subjectHash = (Get-FileHash -LiteralPath $subjectPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Administrative subject SHA-256: ``$subjectHash``" -Encoding utf8
+
+      - name: Upload state initialization subject
+        if: inputs.operation == 'produce-state-initialization-subject'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-state-initialization-subject-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/administrative-subject-output
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload DB contract activation subject
+        if: inputs.operation == 'produce-db-contract-activation-subject'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-db-contract-activation-subject-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/administrative-subject-output
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload operation abort subject
+        if: inputs.operation == 'produce-operation-abort-subject'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-operation-abort-subject-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/administrative-subject-output
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Download reviewed state initialization subject
+        if: inputs.operation == 'initialize-release-state'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-state-initialization-subject-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/administrative-subject-input
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.subject_run_id }}
+
+      - name: Download reviewed DB contract activation subject
+        if: inputs.operation == 'activate-db-contract'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-db-contract-activation-subject-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/administrative-subject-input
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.subject_run_id }}
+
+      - name: Download reviewed operation abort subject
+        if: inputs.operation == 'abort-pending-operation'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-operation-abort-subject-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/administrative-subject-input
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.subject_run_id }}
+
+      - name: Execute reviewed administrative transition
+        if: inputs.operation == 'initialize-release-state' || inputs.operation == 'activate-db-contract' || inputs.operation == 'abort-pending-operation'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $subjectPath = Join-Path $env:RUNNER_TEMP 'administrative-subject-input/administrative-subject.json'
+          $actualSubjectHash = (Get-FileHash -LiteralPath $subjectPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSubjectHash -ne $env:REQUESTED_SUBJECT_SHA256) {
+            throw "administrative subject differs from the reviewed SHA-256"
+          }
+          $outputPath = Join-Path $env:RUNNER_TEMP 'administrative-execution-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          npm run release:administrative -- execute `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --operation-id $env:REQUESTED_OPERATION_ID `
+            --source-sha $env:REQUESTED_SOURCE_SHA `
+            --run-id $env:GITHUB_RUN_ID `
+            --subject $subjectPath `
+            --subject-sha256 $env:REQUESTED_SUBJECT_SHA256 `
+            --output (Join-Path $outputPath 'administrative-transition-result.json')
+          if ($LASTEXITCODE -ne 0) {
+            throw "administrative transition execution failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload administrative transition result
+        if: always() && (inputs.operation == 'initialize-release-state' || inputs.operation == 'activate-db-contract' || inputs.operation == 'abort-pending-operation')
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-administrative-transition-${{ inputs.source_sha }}-${{ inputs.operation }}
+          path: ${{ runner.temp }}/administrative-execution-output
           if-no-files-found: warn
           retention-days: 30

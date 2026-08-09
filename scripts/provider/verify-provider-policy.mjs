@@ -2,6 +2,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { readJsonStrict, sha256Json } from "../lib/canonical-json.mjs";
+import { resolveProviderEnvironmentContract } from "../lib/csp-delivery.mjs";
 import {
   assertProviderPolicyConfigured,
   assertVercelObservationEvidence,
@@ -59,6 +60,11 @@ assertSortedUniqueStrings(
   "requiredEnvironmentNames",
 );
 assertSortedUniqueStrings(
+  [...policy.cspReportEnvironmentNames].sort(utf8Compare),
+  "cspReportEnvironmentNames",
+  true,
+);
+assertSortedUniqueStrings(
   [...policy.forbiddenEnvironmentNames].sort(utf8Compare),
   "forbiddenEnvironmentNames",
 );
@@ -82,6 +88,9 @@ if (
   policy.rawRequestByteCeilings.persistenceReleaseAMetrics !== 1024
 ) {
   throw new Error("Provider environment or request-ceiling policy is invalid");
+}
+for (const cspMode of ["none", "report-only", "enforced"]) {
+  resolveProviderEnvironmentContract(policy, cspMode);
 }
 
 if (observationIndex !== -1 || process.argv.includes("--require-configured")) {

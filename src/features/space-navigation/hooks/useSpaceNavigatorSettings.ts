@@ -8,6 +8,11 @@ export interface SpaceNavigatorSettings {
   side: SpaceNavigatorSide;
 }
 
+export interface SpaceNavigatorSettingsPersistencePort {
+  loadPreference(key: string): string | null;
+  savePreference(key: string, value: string): void;
+}
+
 export const DEFAULT_SPACE_NAVIGATOR_SETTINGS: SpaceNavigatorSettings = {
   railVisible: true,
   footerButtonVisible: true,
@@ -19,11 +24,11 @@ const STORAGE_KEY = "spaceNavigatorSettings";
 const isSide = (value: unknown): value is SpaceNavigatorSide =>
   value === "left" || value === "right";
 
-const readSettings = (): SpaceNavigatorSettings => {
-  if (typeof window === "undefined") return DEFAULT_SPACE_NAVIGATOR_SETTINGS;
-
+const readSettings = (
+  persistence: SpaceNavigatorSettingsPersistencePort,
+): SpaceNavigatorSettings => {
   try {
-    const saved = window.localStorage.getItem(STORAGE_KEY);
+    const saved = persistence.loadPreference(STORAGE_KEY);
     if (!saved) return DEFAULT_SPACE_NAVIGATOR_SETTINGS;
 
     const parsed = JSON.parse(saved) as Partial<SpaceNavigatorSettings>;
@@ -45,17 +50,20 @@ const readSettings = (): SpaceNavigatorSettings => {
   }
 };
 
-export function useSpaceNavigatorSettings() {
-  const [settings, setSettings] =
-    useState<SpaceNavigatorSettings>(readSettings);
+export function useSpaceNavigatorSettings(
+  persistence: SpaceNavigatorSettingsPersistencePort,
+) {
+  const [settings, setSettings] = useState<SpaceNavigatorSettings>(() =>
+    readSettings(persistence),
+  );
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+      persistence.savePreference(STORAGE_KEY, JSON.stringify(settings));
     } catch {
       // Storage can be unavailable in private browsing or a locked-down webview.
     }
-  }, [settings]);
+  }, [persistence, settings]);
 
   const updateSettings = useCallback(
     (patch: Partial<SpaceNavigatorSettings>) => {

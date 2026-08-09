@@ -7,6 +7,7 @@ import {
   sha256Bytes,
   sha256Json,
 } from "./lib/canonical-json.mjs";
+import { readStaticApplicationStylesheetContract } from "./lib/application-stylesheet-contract.mjs";
 
 const projectRoot = process.cwd();
 const distDirectory = path.join(projectRoot, "dist");
@@ -183,6 +184,9 @@ if (
     "Release A PWA verification failed: app build identity is missing from index.html.",
   );
 }
+await readStaticApplicationStylesheetContract(distDirectory, {
+  staticDirectory: ".",
+});
 
 const vercelConfig = await readJson(path.join(projectRoot, "vercel.json"));
 const serviceWorkerHeader = vercelConfig.headers?.find(

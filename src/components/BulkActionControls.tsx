@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { BulkSortDirection } from "../App";
+import type { BulkSortDirection } from "../features/app-shell/types";
 import SortAscendingIcon from "./icons/SortAscendingIcon";
 import SortDescendingIcon from "./icons/SortDescendingIcon";
 import XIcon from "./icons/XIcon";

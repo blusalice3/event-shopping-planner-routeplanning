@@ -32,6 +32,7 @@
       "properties": {
         "contractUri": {
           "type": "string",
+          "format": "uri",
           "minLength": 1
         },
         "fingerprint": {
@@ -148,6 +149,12 @@
           "format": "uri",
           "pattern": "^https://"
         },
+        "artifactArchive": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "artifactArchiveAvailability": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
         "packageIndex": {
           "$ref": "#/$defs/immutableObjectRef"
         },
@@ -170,6 +177,10 @@
           "$ref": "#/$defs/dbCompatibilityBinding"
         }
       },
+      "dependentRequired": {
+        "artifactArchive": ["artifactArchiveAvailability"],
+        "artifactArchiveAvailability": ["artifactArchive"]
+      },
       "required": [
         "bindingId",
         "sourceSha",
@@ -180,6 +191,8 @@
         "providerProjectId",
         "providerDeploymentId",
         "deploymentUrl",
+        "artifactArchive",
+        "artifactArchiveAvailability",
         "packageIndex",
         "artifactManifest",
         "providerEvidence",
@@ -278,6 +291,30 @@
         "preparedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "reconciliationAuthority": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reconciliationKind": {
+              "enum": [
+                "provider-target-assigned/v1",
+                "provider-previous-assigned/v1",
+                "provider-emergency-assigned/v1"
+              ]
+            },
+            "providerObservation": {
+              "$ref": "#/$defs/immutableObjectRef"
+            },
+            "stateReconciled": {
+              "$ref": "#/$defs/immutableObjectRef"
+            }
+          },
+          "required": [
+            "reconciliationKind",
+            "providerObservation",
+            "stateReconciled"
+          ]
         }
       },
       "required": [
@@ -333,9 +370,802 @@
         "minimumObservationEndsAt"
       ]
     },
+    "legacyProductionObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observationUri": {
+          "type": "string",
+          "pattern": "^release-state://[a-z0-9][a-z0-9-]{2,62}/evidence/[0-9a-f]{64}$"
+        },
+        "observationSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": ["observationUri", "observationSha256"]
+    },
+    "containmentIncident": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": ["legacy-bootstrap", "source-hardened"]
+        },
+        "binding": {
+          "$ref": "#/$defs/deploymentBinding"
+        },
+        "activatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "recoveryDeadline": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["kind", "binding", "activatedAt", "recoveryDeadline"]
+    },
+    "standardRecovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "containmentBinding": {
+          "$ref": "#/$defs/deploymentBinding"
+        },
+        "targetStandard": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/deploymentBinding"
+            }
+          ]
+        },
+        "recoveryDeadline": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["containmentBinding", "targetStandard", "recoveryDeadline"]
+    },
+    "rollbackInventoryEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/deploymentBinding"
+        },
+        "acceptedEvent": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "acceptedGate": {
+          "$ref": "#/$defs/phaseGate"
+        },
+        "acceptedStandardFloors": {
+          "$ref": "#/$defs/floorMap"
+        },
+        "evaluatedPolicy": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "eligibleActions": {
+          "type": "array",
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["package-redeploy", "rollback"]
+          }
+        },
+        "eligibility": {
+          "enum": ["eligible", "ineligible"]
+        },
+        "reasonCodes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          }
+        }
+      },
+      "required": [
+        "binding",
+        "acceptedEvent",
+        "acceptedGate",
+        "acceptedStandardFloors",
+        "evaluatedPolicy",
+        "eligibleActions",
+        "eligibility",
+        "reasonCodes"
+      ]
+    },
+    "rollbackInventory": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/rollbackInventoryEntry"
+      }
+    },
+    "policyCompatibilityEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "predecessorPolicy": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "eligibleBindingIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "allowedActions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["containment", "rollback"]
+          }
+        },
+        "minimumSafetyFloors": {
+          "$ref": "#/$defs/floorMap"
+        },
+        "requiredDbCompatibility": {
+          "$ref": "#/$defs/dbCompatibilityBinding"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "predecessorPolicy",
+        "eligibleBindingIds",
+        "allowedActions",
+        "minimumSafetyFloors",
+        "requiredDbCompatibility",
+        "expiresAt",
+        "owner"
+      ]
+    },
+    "floorMap": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[A-Za-z][A-Za-z0-9]*$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "phaseGate": {
+      "enum": [
+        "P0-RELEASE",
+        "P1-PWA",
+        "P2A-LOCAL",
+        "P2B-REPORT",
+        "P3-XLSX",
+        "P4-CSP",
+        "P5-DUAL",
+        "P5-LIST",
+        "P6-APP",
+        "P7-IDB",
+        "P8-CLEAN"
+      ]
+    },
+    "stateInitializedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "acceptedGate": {
+          "type": "null"
+        },
+        "legacyObservedProduction": {
+          "$ref": "#/$defs/legacyProductionObservation"
+        },
+        "bootstrapRecovery": {
+          "$ref": "#/$defs/deploymentBinding"
+        },
+        "minimumSafetyFloors": {
+          "$ref": "#/$defs/floorMap"
+        },
+        "currentDbCompatibility": {
+          "$ref": "#/$defs/dbCompatibilityBinding"
+        },
+        "activeReleasePolicy": {
+          "$ref": "#/$defs/immutableObjectRef"
+        }
+      },
+      "required": [
+        "acceptedGate",
+        "legacyObservedProduction",
+        "bootstrapRecovery",
+        "minimumSafetyFloors",
+        "currentDbCompatibility",
+        "activeReleasePolicy"
+      ]
+    },
+    "policyActivatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "activationGate": {
+          "enum": [
+            "P1-PWA",
+            "P2A-LOCAL",
+            "P2B-REPORT",
+            "P3-XLSX",
+            "P4-CSP",
+            "P5-DUAL",
+            "P5-LIST",
+            "P7-IDB",
+            "P8-CLEAN"
+          ]
+        },
+        "previousReleasePolicy": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "proposedReleasePolicy": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "activeReleasePolicy": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "behaviorDimensionChange": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "dimension": {
+                  "enum": [
+                    "pwaLifecycle",
+                    "cssDelivery",
+                    "cspMode",
+                    "xlsxExecution",
+                    "listEngine",
+                    "listDefault",
+                    "persistenceArchitecture"
+                  ]
+                },
+                "from": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "to": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": ["dimension", "from", "to"]
+            }
+          ]
+        },
+        "minimumSafetyFloorChange": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "styleSrcAttr": {
+                  "const": "none"
+                }
+              },
+              "required": ["styleSrcAttr"]
+            }
+          ]
+        },
+        "minimumSafetyFloors": {
+          "$ref": "#/$defs/floorMap"
+        },
+        "activePolicyCompatibility": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/policyCompatibilityEntry"
+          }
+        },
+        "closureBundle": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "closureEvidenceRefs": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/immutableObjectRef"
+          }
+        },
+        "rollbackInventory": {
+          "$ref": "#/$defs/rollbackInventory"
+        }
+      },
+      "required": [
+        "activationGate",
+        "previousReleasePolicy",
+        "proposedReleasePolicy",
+        "activeReleasePolicy",
+        "behaviorDimensionChange",
+        "minimumSafetyFloorChange",
+        "minimumSafetyFloors",
+        "activePolicyCompatibility",
+        "closureBundle",
+        "closureEvidenceRefs",
+        "rollbackInventory"
+      ]
+    },
+    "dbContractActivatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "previousDbCompatibility": {
+          "$ref": "#/$defs/dbCompatibilityBinding"
+        },
+        "currentDbCompatibility": {
+          "$ref": "#/$defs/dbCompatibilityBinding"
+        },
+        "rollbackInventory": {
+          "$ref": "#/$defs/rollbackInventory"
+        }
+      },
+      "required": [
+        "previousDbCompatibility",
+        "currentDbCompatibility",
+        "rollbackInventory"
+      ]
+    },
+    "promotionPreparedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pendingOperation": {
+          "$ref": "#/$defs/pendingOperation"
+        }
+      },
+      "required": ["pendingOperation"]
+    },
+    "deploymentAssignedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "assignmentReceipt": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "promotionReceipt": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "targetBinding": {
+          "$ref": "#/$defs/deploymentBinding"
+        }
+      },
+      "required": ["assignmentReceipt", "promotionReceipt", "targetBinding"]
+    },
+    "assignmentValidatedPayload": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "assignmentReceipt": {
+              "$ref": "#/$defs/immutableObjectRef"
+            },
+            "assignmentValidation": {
+              "$ref": "#/$defs/immutableObjectRef"
+            },
+            "productionProbe": {
+              "$ref": "#/$defs/immutableObjectRef"
+            },
+            "targetBinding": {
+              "$ref": "#/$defs/deploymentBinding"
+            }
+          },
+          "required": [
+            "assignmentReceipt",
+            "assignmentValidation",
+            "productionProbe",
+            "targetBinding"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reconciliationKind": {
+              "enum": [
+                "provider-target-assigned/v1",
+                "provider-previous-assigned/v1",
+                "provider-emergency-assigned/v1"
+              ]
+            },
+            "providerObservation": {
+              "$ref": "#/$defs/immutableObjectRef"
+            },
+            "stateReconciled": {
+              "$ref": "#/$defs/immutableObjectRef"
+            },
+            "targetBinding": {
+              "$ref": "#/$defs/deploymentBinding"
+            }
+          },
+          "required": [
+            "reconciliationKind",
+            "providerObservation",
+            "stateReconciled",
+            "targetBinding"
+          ]
+        }
+      ]
+    },
+    "observationStartedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pendingAcceptance": {
+          "$ref": "#/$defs/pendingAcceptance"
+        }
+      },
+      "required": ["pendingAcceptance"]
+    },
+    "releaseAcceptedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "acceptedGate": {
+          "$ref": "#/$defs/phaseGate"
+        },
+        "releaseRole": {
+          "const": "standard"
+        },
+        "observedThrough": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "acceptedStandardFloors": {
+          "$ref": "#/$defs/floorMap"
+        },
+        "rollbackInventory": {
+          "$ref": "#/$defs/rollbackInventory"
+        },
+        "clearBootstrapRecovery": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "acceptedGate",
+        "releaseRole",
+        "observedThrough",
+        "acceptedStandardFloors",
+        "rollbackInventory",
+        "clearBootstrapRecovery"
+      ]
+    },
+    "operationAbortedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    },
+    "containmentActivationPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/deploymentBinding"
+        },
+        "activatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "recoveryDeadline": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "targetStandard": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/deploymentBinding"
+            }
+          ]
+        }
+      },
+      "required": ["binding", "activatedAt", "recoveryDeadline"]
+    },
+    "rollbackActivatedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/deploymentBinding"
+        },
+        "companionBinding": {
+          "$ref": "#/$defs/deploymentBinding"
+        },
+        "originAcceptedEvent": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "originAcceptedGate": {
+          "$ref": "#/$defs/phaseGate"
+        },
+        "originAcceptedStandardFloors": {
+          "$ref": "#/$defs/floorMap"
+        }
+      },
+      "required": [
+        "binding",
+        "companionBinding",
+        "originAcceptedEvent",
+        "originAcceptedGate",
+        "originAcceptedStandardFloors"
+      ]
+    },
+    "packageRedeployActivatedPayload": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "releaseRole": {
+              "const": "standard"
+            },
+            "standardBinding": {
+              "$ref": "#/$defs/deploymentBinding"
+            },
+            "companionBinding": {
+              "$ref": "#/$defs/deploymentBinding"
+            },
+            "rollbackInventory": {
+              "$ref": "#/$defs/rollbackInventory"
+            },
+            "originAcceptedEvent": {
+              "$ref": "#/$defs/immutableObjectRef"
+            },
+            "originAcceptedGate": {
+              "$ref": "#/$defs/phaseGate"
+            },
+            "originAcceptedStandardFloors": {
+              "$ref": "#/$defs/floorMap"
+            }
+          },
+          "required": [
+            "releaseRole",
+            "standardBinding",
+            "companionBinding",
+            "rollbackInventory",
+            "originAcceptedEvent",
+            "originAcceptedGate",
+            "originAcceptedStandardFloors"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "releaseRole": {
+              "const": "containment"
+            },
+            "binding": {
+              "$ref": "#/$defs/deploymentBinding"
+            },
+            "activatedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "recoveryDeadline": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "targetStandard": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/deploymentBinding"
+                }
+              ]
+            }
+          },
+          "required": [
+            "releaseRole",
+            "binding",
+            "activatedAt",
+            "recoveryDeadline"
+          ]
+        }
+      ]
+    },
+    "stateReconciledPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reconciliationKind": {
+          "enum": [
+            "provider-target-assigned/v1",
+            "provider-previous-assigned/v1",
+            "provider-emergency-assigned/v1"
+          ]
+        },
+        "observedBinding": {
+          "$ref": "#/$defs/deploymentBinding"
+        },
+        "providerObservation": {
+          "$ref": "#/$defs/immutableObjectRef"
+        }
+      },
+      "required": [
+        "reconciliationKind",
+        "observedBinding",
+        "providerObservation"
+      ]
+    },
     "releaseEventEnvelope": {
       "type": "object",
       "additionalProperties": false,
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "eventType": {
+                  "const": "state-initialized"
+                },
+                "payload": {
+                  "$ref": "#/$defs/stateInitializedPayload"
+                }
+              }
+            },
+            {
+              "properties": {
+                "eventType": {
+                  "const": "policy-activated"
+                },
+                "payload": {
+                  "$ref": "#/$defs/policyActivatedPayload"
+                }
+              }
+            },
+            {
+              "properties": {
+                "eventType": {
+                  "const": "db-contract-activated"
+                },
+                "payload": {
+                  "$ref": "#/$defs/dbContractActivatedPayload"
+                }
+              }
+            },
+            {
+              "properties": {
+                "eventType": {
+                  "const": "promotion-prepared"
+                },
+                "payload": {
+                  "$ref": "#/$defs/promotionPreparedPayload"
+                }
+              }
+            },
+            {
+              "properties": {
+                "eventType": {
+                  "const": "deployment-assigned"
+                },
+                "payload": {
+                  "$ref": "#/$defs/deploymentAssignedPayload"
+                }
+              }
+            },
+            {
+              "properties": {
+                "eventType": {
+                  "const": "assignment-validated"
+                },
+                "payload": {
+                  "$ref": "#/$defs/assignmentValidatedPayload"
+                }
+              }
+            },
+            {
+              "properties": {
+                "eventType": {
+                  "const": "observation-started"
+                },
+                "payload": {
+                  "$ref": "#/$defs/observationStartedPayload"
+                }
+              }
+            },
+            {
+              "properties": {
+                "eventType": {
+                  "const": "release-accepted"
+                },
+                "payload": {
+                  "$ref": "#/$defs/releaseAcceptedPayload"
+                }
+              }
+            },
+            {
+              "properties": {
+                "eventType": {
+                  "const": "operation-aborted"
+                },
+                "payload": {
+                  "$ref": "#/$defs/operationAbortedPayload"
+                }
+              }
+            },
+            {
+              "properties": {
+                "eventType": {
+                  "const": "temporary-containment-activated"
+                },
+                "payload": {
+                  "$ref": "#/$defs/containmentActivationPayload"
+                }
+              }
+            },
+            {
+              "properties": {
+                "eventType": {
+                  "const": "containment-activated"
+                },
+                "payload": {
+                  "$ref": "#/$defs/containmentActivationPayload"
+                }
+              }
+            },
+            {
+              "properties": {
+                "eventType": {
+                  "const": "rollback-activated"
+                },
+                "payload": {
+                  "$ref": "#/$defs/rollbackActivatedPayload"
+                }
+              }
+            },
+            {
+              "properties": {
+                "eventType": {
+                  "const": "package-redeploy-activated"
+                },
+                "payload": {
+                  "$ref": "#/$defs/packageRedeployActivatedPayload"
+                }
+              }
+            },
+            {
+              "properties": {
+                "eventType": {
+                  "const": "state-reconciled"
+                },
+                "payload": {
+                  "$ref": "#/$defs/stateReconciledPayload"
+                }
+              }
+            }
+          ]
+        }
+      ],
       "properties": {
         "schemaVersion": {
           "const": 1
@@ -433,7 +1263,14 @@
           "$ref": "#/$defs/sha256"
         },
         "legacyObservedProduction": {
-          "type": ["object", "null"]
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/legacyProductionObservation"
+            }
+          ]
         },
         "activeProduction": {
           "oneOf": [
@@ -452,6 +1289,26 @@
             },
             {
               "$ref": "#/$defs/deploymentBinding"
+            }
+          ]
+        },
+        "acceptedStandardEvent": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/immutableObjectRef"
+            }
+          ]
+        },
+        "acceptedGate": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/phaseGate"
             }
           ]
         },
@@ -496,31 +1353,47 @@
           ]
         },
         "containmentIncident": {
-          "type": ["object", "null"]
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/containmentIncident"
+            }
+          ]
         },
         "standardRecovery": {
-          "type": ["object", "null"]
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/standardRecovery"
+            }
+          ]
         },
         "rollbackInventory": {
-          "type": "array"
+          "$ref": "#/$defs/rollbackInventory"
         },
         "minimumSafetyFloors": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
+          "$ref": "#/$defs/floorMap"
         },
         "acceptedStandardFloors": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
+          "$ref": "#/$defs/floorMap"
         },
         "currentDbCompatibility": {
           "$ref": "#/$defs/dbCompatibilityBinding"
         },
         "activeReleasePolicy": {
           "$ref": "#/$defs/immutableObjectRef"
+        },
+        "activePolicyCompatibility": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/policyCompatibilityEntry"
+          }
         }
       },
       "required": [
@@ -529,6 +1402,8 @@
         "legacyObservedProduction",
         "activeProduction",
         "acceptedStandard",
+        "acceptedStandardEvent",
+        "acceptedGate",
         "bootstrapRecovery",
         "containmentCompanion",
         "pendingOperation",
@@ -539,7 +1414,8 @@
         "minimumSafetyFloors",
         "acceptedStandardFloors",
         "currentDbCompatibility",
-        "activeReleasePolicy"
+        "activeReleasePolicy",
+        "activePolicyCompatibility"
       ]
     }
   }

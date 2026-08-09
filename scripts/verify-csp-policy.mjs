@@ -8,6 +8,10 @@ import {
   normalizeEffectiveDirective,
 } from "../api/csp-report.mjs";
 import { readJsonStrict } from "./lib/canonical-json.mjs";
+import {
+  renderCspHeaders,
+  renderVercelProjectConfig,
+} from "./lib/csp-delivery.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -202,9 +206,18 @@ for (const [directive, forbiddenValues] of Object.entries(
   }
 }
 
-const expectedCspHeader = Object.entries(policy.directives)
-  .map(([directive, values]) => `${directive} ${values.join(" ")}`)
-  .join("; ");
+const expectedProviderConfig = renderVercelProjectConfig({
+  config: vercelConfig,
+  cspMode: "enforced",
+  cspPolicy: policy,
+});
+if (JSON.stringify(expectedProviderConfig) !== JSON.stringify(vercelConfig)) {
+  fail("vercel.json is not the rendered enforced CSP target");
+}
+const expectedHeaders = renderCspHeaders({
+  cspMode: "enforced",
+  cspPolicy: policy,
+});
 const globalHeaderRule = vercelConfig.headers?.find(
   (rule) => rule.source === "/(.*)",
 );
@@ -226,7 +239,8 @@ for (const header of globalHeaderRule.headers) {
 }
 
 if (
-  responseHeaders.get("content-security-policy") !== expectedCspHeader ||
+  responseHeaders.get("content-security-policy") !==
+    expectedHeaders["Content-Security-Policy"] ||
   responseHeaders.has("content-security-policy-report-only")
 ) {
   fail("the enforced provider CSP differs from config/csp-policy.json");
@@ -274,6 +288,16 @@ const forbiddenRuntimeStylePatterns = [
   {
     label: "style attribute mutation",
     pattern: /\b(?:setAttribute|removeAttribute)\s*\(\s*["']style["']/u,
+  },
+  {
+    label: "CSSOM rule mutation",
+    pattern:
+      /\b(?:insertRule|deleteRule|replaceSync)\s*\(|\bCSSStyleDeclaration\b/u,
+  },
+  {
+    label: "runtime stylesheet creation",
+    pattern:
+      /\bnew\s+CSSStyleSheet\s*\(|\bcreateElement\s*\(\s*["']style["']\s*\)|\badoptedStyleSheets\b/u,
   },
 ];
 for (const sourcePath of productionSources.sort()) {

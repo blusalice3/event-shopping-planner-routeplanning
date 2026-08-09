@@ -242,9 +242,6 @@ export const runProtectedReleaseCli = async (
         githubToken: requireEnvironment(env, "GITHUB_TOKEN"),
       });
     } else {
-      const providerPolicy = await loadJson(
-        path.join(root, "config", "provider-policy.json"),
-      );
       await recordProviderObservation({
         store,
         observationBytes: inputBytes,
@@ -252,7 +249,6 @@ export const runProtectedReleaseCli = async (
       const decision = await decideReconcile({
         store,
         observationBytes: inputBytes,
-        providerPolicy,
       });
       result =
         decision.status === "ready"

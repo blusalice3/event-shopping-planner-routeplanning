@@ -17,6 +17,10 @@ const GIT_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const SCENARIO_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const STATISTICS_METHOD = "median-average-p95-nearest-rank-v1";
 const SAMPLE_COUNT = 30;
+const PERFORMANCE_FAULT_REFS = Object.freeze({
+  "xlsx-worker-cancel": "scripts/performance/fault-workers/cancel.worker.js",
+  "xlsx-worker-timeout": "scripts/performance/fault-workers/timeout.worker.js",
+});
 
 const REQUIRED_GATES = Object.freeze({
   "P0-TOOLCHAIN": {
@@ -301,6 +305,28 @@ const validateFixtureContract = (fixture, scenario, xlsxLimits, errors) => {
     errors.push(`${prefix}: fixture requiredTelemetry must be non-empty`);
   }
 
+  const expectedFaultRef = PERFORMANCE_FAULT_REFS[scenario.id];
+  if (expectedFaultRef) {
+    const fault = fixture.faultInjection;
+    if (
+      !isRecord(fault) ||
+      !sameStringSet(Object.keys(fault), [
+        "method",
+        "replacementRef",
+        "replacementSha256",
+        "beaconPath",
+      ]) ||
+      fault.method !== "playwright-exact-worker-response-substitution-v1" ||
+      fault.replacementRef !== expectedFaultRef ||
+      !SHA256_PATTERN.test(fault.replacementSha256 ?? "") ||
+      fault.beaconPath !== "/__foundation-performance-worker-beacon"
+    ) {
+      errors.push(`${prefix}: faultInjection binding is invalid`);
+    }
+  } else if (Object.hasOwn(fixture, "faultInjection")) {
+    errors.push(`${prefix}: faultInjection is forbidden for this scenario`);
+  }
+
   if (scenario.id === "xlsx-worker-reject-input-over-limit") {
     const compressedBytes = fixture.dataset?.compressedBytes;
     const configuredLimit =
@@ -312,6 +338,38 @@ const validateFixtureContract = (fixture, scenario, xlsxLimits, errors) => {
     ) {
       errors.push(
         `${prefix}: fixture must test exactly one byte above maxCompressedBytes`,
+      );
+    }
+  }
+  if (scenario.id === "xlsx-worker-import-valid") {
+    const assertions = new Set(fixture.requiredAssertions ?? []);
+    if (
+      fixture.dataset?.generator !== "valid-event-workbook-v1" ||
+      fixture.dataset?.rowCount !== 50_000 ||
+      fixture.operation?.minimumDeferredItemCount !== 10_000 ||
+      fixture.operation?.expectedPostCommitView !== "event-list"
+    ) {
+      errors.push(
+        `${prefix}: canonical 50k import must defer to the event list at the tracked boundary`,
+      );
+    }
+    for (const assertion of [
+      "atomic-domain-commit",
+      "single-import-completion-dialog",
+      "large-restore-deferred-to-event-list",
+    ]) {
+      if (!assertions.has(assertion)) {
+        errors.push(`${prefix}: missing large import assertion ${assertion}`);
+      }
+    }
+  }
+  if (scenario.id === "xlsx-worker-export-roundtrip") {
+    if (
+      fixture.dataset?.generator !== "event-export-idb-stage-v1" ||
+      fixture.dataset?.itemCount !== 50_000
+    ) {
+      errors.push(
+        `${prefix}: canonical export must bind the 50k IDB staging recipe`,
       );
     }
   }
@@ -341,12 +399,28 @@ const validateFixtureContract = (fixture, scenario, xlsxLimits, errors) => {
     const assertions = new Set(fixture.requiredAssertions ?? []);
     for (const assertion of [
       "cancel-message-observed",
+      "worker-terminated",
       "late-result-ignored",
       "zero-domain-commits",
       "zero-download-side-effects",
     ]) {
       if (!assertions.has(assertion)) {
         errors.push(`${prefix}: missing cancel assertion ${assertion}`);
+      }
+    }
+  }
+  if (scenario.id === "xlsx-worker-timeout") {
+    const assertions = new Set(fixture.requiredAssertions ?? []);
+    for (const assertion of [
+      "cancel-message-observed",
+      "worker-terminated",
+      "late-result-ignored",
+      "single-timeout-error-dialog",
+      "zero-domain-commits",
+      "zero-download-side-effects",
+    ]) {
+      if (!assertions.has(assertion)) {
+        errors.push(`${prefix}: missing timeout assertion ${assertion}`);
       }
     }
   }
@@ -359,11 +433,19 @@ const validateFixtureContract = (fixture, scenario, xlsxLimits, errors) => {
       "multiple-columns",
       "unsupported-zoom",
       "modal-active",
-      "recovery-active",
     ]) {
       if (cases.get(fallbackCase)?.expectedRenderer !== "full") {
         errors.push(`${prefix}: ${fallbackCase} must select the full renderer`);
       }
+    }
+    const recoveryCase = cases.get("recovery-active");
+    if (
+      recoveryCase?.expectedRenderer !== "disabled" ||
+      recoveryCase?.expectedSurface !== "recovery-screen"
+    ) {
+      errors.push(
+        `${prefix}: recovery-active must disable the list graph and expose the recovery screen`,
+      );
     }
     if (cases.get("eligible-single-column")?.expectedRenderer !== "virtual") {
       errors.push(
@@ -511,6 +593,60 @@ export const verifyPerformancePolicy = async ({
       );
     }
   }
+  try {
+    const ownGateEvidenceSchema = await readJsonAt(
+      root,
+      "config/own-gate-performance-evidence.schema.json",
+    );
+    if (
+      ownGateEvidenceSchema.$id !==
+        "https://event-shopping-planner.invalid/schemas/own-gate-performance-evidence-v1.json" ||
+      ownGateEvidenceSchema.additionalProperties !== false ||
+      !sameStringSet(ownGateEvidenceSchema.required, [
+        "schemaVersion",
+        "evidence",
+        "evidenceSha256",
+        "producerReceipt",
+      ]) ||
+      ownGateEvidenceSchema.properties?.evidence?.$ref !==
+        "https://event-shopping-planner.invalid/schemas/performance-evidence-v1.json#/properties/evidence" ||
+      ownGateEvidenceSchema.properties?.producerReceipt?.$ref !==
+        "#/$defs/producerReceipt" ||
+      ownGateEvidenceSchema.$defs?.producerReceipt?.additionalProperties !==
+        false ||
+      ownGateEvidenceSchema.$defs?.producerReceiptBody?.additionalProperties !==
+        false
+    ) {
+      errors.push("own-gate performance evidence schema is not closed");
+    }
+  } catch (error) {
+    errors.push(
+      `own-gate performance evidence schema is unreadable: ${error.message}`,
+    );
+  }
+  try {
+    const closureSchema = await readJsonAt(
+      root,
+      "config/performance-inherited-closure.schema.json",
+    );
+    if (
+      closureSchema.$id !==
+        "https://event-shopping-planner.invalid/schemas/performance-inherited-closure-v1.json" ||
+      closureSchema.additionalProperties !== false ||
+      closureSchema.properties?.closure?.additionalProperties !== false ||
+      closureSchema.properties?.closure?.properties?.scenarios?.minItems !==
+        17 ||
+      closureSchema.properties?.closure?.properties?.scenarios?.maxItems !== 17
+    ) {
+      errors.push(
+        "performance inherited closure schema is not closed or canonical",
+      );
+    }
+  } catch (error) {
+    errors.push(
+      `performance inherited closure schema is unreadable: ${error.message}`,
+    );
+  }
 
   const scenarioMap = uniqueMap(
     uiScenarios.scenarios,
@@ -607,6 +743,17 @@ export const verifyPerformancePolicy = async ({
         const fixture = parseJsonBytes(bytes);
         fixtureMap.set(id, fixture);
         validateFixtureContract(fixture, scenario, xlsxLimits, errors);
+        const faultRef = PERFORMANCE_FAULT_REFS[id];
+        if (faultRef && isRecord(fixture)) {
+          const faultBytes = await readFile(path.join(root, faultRef));
+          if (
+            sha256(faultBytes) !== fixture.faultInjection?.replacementSha256
+          ) {
+            errors.push(
+              `${id}: fault Worker raw-byte hash does not match fixture`,
+            );
+          }
+        }
       }
     } catch (error) {
       errors.push(`${id}: fixture is unreadable: ${error.message}`);
@@ -718,6 +865,109 @@ const validateExactKeys = (value, keys, label, errors) => {
     return false;
   }
   return true;
+};
+
+const validateExecutionBinding = (binding, label, errors, scenarioId) => {
+  if (
+    !validateExactKeys(
+      binding,
+      ["adapterContract", "fixturePayload", "faultInjection", "setup"],
+      label,
+      errors,
+    ) ||
+    !validateExactKeys(
+      binding.fixturePayload,
+      ["generator", "seed", "cardinality", "payloadSha256", "semanticSha256"],
+      `${label}.fixturePayload`,
+      errors,
+    )
+  ) {
+    return;
+  }
+  const payload = binding.fixturePayload;
+  if (
+    binding.adapterContract !== "public-artifact-surface-v1" ||
+    typeof payload.generator !== "string" ||
+    payload.generator.length === 0 ||
+    !(
+      payload.seed === null ||
+      (Number.isSafeInteger(payload.seed) && payload.seed >= 0)
+    ) ||
+    !(
+      payload.cardinality === null ||
+      (Number.isSafeInteger(payload.cardinality) && payload.cardinality >= 0)
+    ) ||
+    !SHA256_PATTERN.test(payload.payloadSha256 ?? "") ||
+    !SHA256_PATTERN.test(payload.semanticSha256 ?? "")
+  ) {
+    errors.push(`${label}.fixturePayload is invalid`);
+  }
+  const expectsSetup = scenarioId === "xlsx-worker-export-roundtrip";
+  if (binding.setup === null) {
+    if (expectsSetup) {
+      errors.push(`${label}.setup is required for the export round trip`);
+    }
+  } else if (
+    !expectsSetup ||
+    !validateExactKeys(
+      binding.setup,
+      [
+        "method",
+        "timing",
+        "readback",
+        "databaseName",
+        "databaseVersion",
+        "storeName",
+        "controlStoreName",
+        "key",
+        "transactionStores",
+        "payloadSha256",
+        "semanticSha256",
+        "itemCount",
+        "revision",
+      ],
+      `${label}.setup`,
+      errors,
+    ) ||
+    binding.setup.method !==
+      "indexeddb-schema-exact-single-transaction-stage-v1" ||
+    binding.setup.timing !== "excluded-from-measurement-v1" ||
+    binding.setup.readback !== "separate-readonly-transaction-v1" ||
+    binding.setup.databaseName !== "EventShoppingPlannerDB" ||
+    !Number.isSafeInteger(binding.setup.databaseVersion) ||
+    binding.setup.databaseVersion < 5 ||
+    binding.setup.databaseVersion > 7 ||
+    binding.setup.storeName !== "eventLists" ||
+    binding.setup.controlStoreName !== "syncQueue" ||
+    binding.setup.key !== "data" ||
+    JSON.stringify(binding.setup.transactionStores) !==
+      JSON.stringify(["eventLists", "syncQueue"]) ||
+    binding.setup.payloadSha256 !== payload.payloadSha256 ||
+    binding.setup.semanticSha256 !== payload.semanticSha256 ||
+    binding.setup.itemCount !== payload.cardinality ||
+    binding.setup.revision !== `performance-stage:${payload.payloadSha256}`
+  ) {
+    errors.push(`${label}.setup is invalid`);
+  }
+  if (binding.faultInjection === null) return;
+  if (
+    !validateExactKeys(
+      binding.faultInjection,
+      ["method", "originalWorkerSha256", "replacementWorkerSha256"],
+      `${label}.faultInjection`,
+      errors,
+    )
+  ) {
+    return;
+  }
+  if (
+    binding.faultInjection.method !==
+      "playwright-exact-worker-response-substitution-v1" ||
+    !SHA256_PATTERN.test(binding.faultInjection.originalWorkerSha256 ?? "") ||
+    !SHA256_PATTERN.test(binding.faultInjection.replacementWorkerSha256 ?? "")
+  ) {
+    errors.push(`${label}.faultInjection is invalid`);
+  }
 };
 
 const validateSamplesAndStatistics = (
@@ -924,8 +1174,9 @@ export const verifyPerformanceEvidence = ({ context, gate, envelope }) => {
         "environment.machineProfile",
         errors,
       ) ||
-      JSON.stringify(environment.machineProfile) !==
-        JSON.stringify(expectedMachine)
+      !canonicalize(environment.machineProfile).equals(
+        canonicalize(expectedMachine),
+      )
     ) {
       errors.push("evidence machine profile does not match policy");
     }
@@ -936,8 +1187,9 @@ export const verifyPerformanceEvidence = ({ context, gate, envelope }) => {
         "environment.browser",
         errors,
       ) ||
-      JSON.stringify(environment.browser) !==
-        JSON.stringify(context.budgets.browser)
+      !canonicalize(environment.browser).equals(
+        canonicalize(context.budgets.browser),
+      )
     ) {
       errors.push("evidence browser does not match policy");
     }
@@ -977,6 +1229,7 @@ export const verifyPerformanceEvidence = ({ context, gate, envelope }) => {
           "statistics",
           "supplementaryMetrics",
           "outcomeAssertions",
+          "executionBinding",
         ],
         `evidence scenario ${id}`,
         errors,
@@ -1031,6 +1284,12 @@ export const verifyPerformanceEvidence = ({ context, gate, envelope }) => {
     }
 
     const fixture = context.fixtureMap.get(id);
+    validateExecutionBinding(
+      scenarioEvidence.executionBinding,
+      `${id}.executionBinding`,
+      errors,
+      id,
+    );
     const requiredAssertions = fixture?.requiredAssertions ?? [
       "scenario-completed",
     ];
@@ -1125,6 +1384,19 @@ export const verifyPerformanceGate = async ({
   }
   if (!isRecord(evidence)) {
     errors.push(`${gate}: a performance evidence envelope is required`);
+  } else if (gate === "P8-CLEAN") {
+    const [{ verifyPerformanceInheritedClosure }, releasePolicy] =
+      await Promise.all([
+        import("./lib/performance-inherited-closure.mjs"),
+        readJsonAt(root, "config/release-variants.json"),
+      ]);
+    errors.push(
+      ...verifyPerformanceInheritedClosure({
+        context,
+        releasePolicy,
+        envelope: evidence,
+      }).errors,
+    );
   } else {
     errors.push(
       ...verifyPerformanceEvidence({ context, gate, envelope: evidence })

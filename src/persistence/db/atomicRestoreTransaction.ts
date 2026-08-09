@@ -20,7 +20,6 @@ import { ensureStoreExists, openDatabase as openDB } from "./openDatabase";
 import { openCoordinatedTransaction } from "./transactionCoordinator";
 import {
   assertCurrentCheckpointMatchesExpected,
-  assertCurrentMapMatchesExpected,
   assertCurrentSnapshotMatchesExpected,
   cleanupRuntimeCandidateSnapshots,
   createNextPersistenceCheckpoint,
@@ -30,17 +29,20 @@ import {
   partitionRuntimeCandidateSnapshots,
   prepareMetadataForPayload,
   readPersistenceSnapshotWithRetry,
-  readRawMapSnapshotWithRetry,
   readRuntimeCandidateSnapshots,
-  validateMapSnapshot,
   validatePersistenceSnapshot,
   type ObservedRevisionRoot,
   type RuntimeCandidateSnapshot,
   type StoredPersistenceMetadata,
 } from "../internal/persistenceCore";
-import { buildMapDataPuts } from "../repositories/mapRepository";
+import {
+  assertCurrentMapMatchesExpected,
+  buildMapDataPuts,
+  readRawMapSnapshotWithRetry,
+  validateMapSnapshot,
+} from "../repositories/mapRepository";
 
-const APP_DATA_RESTORE_STORE_NAMES = [
+export const APPLICATION_SNAPSHOT_STORE_NAMES = [
   STORES.EVENT_LISTS,
   STORES.EVENT_METADATA,
   STORES.EXECUTE_MODE_ITEMS,
@@ -65,7 +67,7 @@ async function observeAppDataRestoreState(): Promise<AppDataRestoreObservation> 
   const runtimeCandidates: RuntimeCandidateSnapshot<unknown>[] = [];
 
   await Promise.all(
-    APP_DATA_RESTORE_STORE_NAMES.map(async (storeName) => {
+    APPLICATION_SNAPSHOT_STORE_NAMES.map(async (storeName) => {
       if (storeName === STORES.MAP_DATA) {
         const validation = await validateMapSnapshot(
           await readRawMapSnapshotWithRetry(),
@@ -147,7 +149,9 @@ async function observeAppDataRestoreState(): Promise<AppDataRestoreObservation> 
   return { roots, checkpoints, runtimeCandidates };
 }
 
-export async function restoreAppDataAtomically(data: AppData): Promise<void> {
+export async function commitApplicationSnapshotAtomically(
+  data: AppData,
+): Promise<void> {
   const stableMapData = structuredClone(
     normalizeMapDataForPersistence(data.mapData as MapDataStore),
   );
@@ -155,7 +159,7 @@ export async function restoreAppDataAtomically(data: AppData): Promise<void> {
   stableData.mapData = stableMapData;
   const observation = await observeAppDataRestoreState();
   const database = await openDB();
-  APP_DATA_RESTORE_STORE_NAMES.forEach((storeName) => {
+  APPLICATION_SNAPSHOT_STORE_NAMES.forEach((storeName) => {
     ensureStoreExists(database, storeName);
   });
   ensureStoreExists(database, STORES.SYNC_QUEUE);
@@ -175,7 +179,7 @@ export async function restoreAppDataAtomically(data: AppData): Promise<void> {
   const preparedMetadata = new Map<StoreName, StoredPersistenceMetadata>();
   const preparedCheckpoints = new Map<StoreName, PersistenceCheckpoint>();
   await Promise.all(
-    APP_DATA_RESTORE_STORE_NAMES.map(async (storeName) => {
+    APPLICATION_SNAPSHOT_STORE_NAMES.map(async (storeName) => {
       const observed = observation.roots.get(storeName);
       if (!observed) {
         throw new Error(`Missing restore observation for ${storeName}.`);
@@ -209,7 +213,7 @@ export async function restoreAppDataAtomically(data: AppData): Promise<void> {
     try {
       transaction = openCoordinatedTransaction(
         database,
-        [...APP_DATA_RESTORE_STORE_NAMES, STORES.SYNC_QUEUE],
+        [...APPLICATION_SNAPSHOT_STORE_NAMES, STORES.SYNC_QUEUE],
         "readwrite",
       );
     } catch (error) {
@@ -222,7 +226,7 @@ export async function restoreAppDataAtomically(data: AppData): Promise<void> {
     const currentMetadata = new Map<StoreName, unknown>();
     const currentCheckpoints = new Map<StoreName, unknown>();
     let currentMapEntries: Record<string, unknown> | null = null;
-    let remainingReads = APP_DATA_RESTORE_STORE_NAMES.length * 3;
+    let remainingReads = APPLICATION_SNAPSHOT_STORE_NAMES.length * 3;
     let writesQueued = false;
 
     const trackRequest = (request: IDBRequest): void => {
@@ -266,7 +270,7 @@ export async function restoreAppDataAtomically(data: AppData): Promise<void> {
 
       try {
         const controlStore = transaction.objectStore(STORES.SYNC_QUEUE);
-        APP_DATA_RESTORE_STORE_NAMES.forEach((storeName) => {
+        APPLICATION_SNAPSHOT_STORE_NAMES.forEach((storeName) => {
           const observed = observation.roots.get(storeName);
           const metadata = preparedMetadata.get(storeName);
           const checkpoint = preparedCheckpoints.get(storeName);
@@ -331,7 +335,7 @@ export async function restoreAppDataAtomically(data: AppData): Promise<void> {
 
     try {
       const controlStore = transaction.objectStore(STORES.SYNC_QUEUE);
-      APP_DATA_RESTORE_STORE_NAMES.forEach((storeName) => {
+      APPLICATION_SNAPSHOT_STORE_NAMES.forEach((storeName) => {
         const metadataRequest = controlStore.get(
           createPersistenceMetadataKey(storeName, DATA_KEY),
         );
@@ -411,3 +415,6 @@ export async function restoreAppDataAtomically(data: AppData): Promise<void> {
   });
   cleanupRuntimeCandidateSnapshots(observation.runtimeCandidates);
 }
+
+/** Compatibility entry point for backup restore callers. */
+export const restoreAppDataAtomically = commitApplicationSnapshotAtomically;

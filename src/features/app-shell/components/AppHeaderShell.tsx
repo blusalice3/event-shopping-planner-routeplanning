@@ -32,9 +32,7 @@ import type {
   BlockSortDirection,
   BulkSortDirection,
   LayoutMode,
-  MapTabMenuPosition,
   SmartInsertMode,
-  SortState,
 } from "../types";
 
 const APP_ZOOM_OPTIONS = [15, 30, 50, 75, 100, 125, 150] as const;
@@ -158,249 +156,322 @@ export const DisplaySettingsResetButton: React.FC<
   );
 };
 
-type AppHeaderShellProps = {
-  activeEventDate: string;
-  activeEventName: string | null;
-  activeTab: ActiveTab;
-  blockSortDirection: BlockSortDirection | null;
-  currentHalls: HallDefinition[];
-  currentMapData: DayMapData | null;
-  currentMapTabName: string | null;
-  currentMapTabRotationState: DayMapRotationState;
-  currentMode: ViewMode;
-  currentSearchIndex: number;
-  DEFAULT_OUTLINE_STYLE: NumberCellOutlineStyle;
-  DEFAULT_PURCHASE_STATUS_CONTROL_MODE: PurchaseStatusControlMode;
-  DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY: boolean;
-  DEFAULT_UI_VISIBILITY: UIVisibilitySettings;
-  disablePriceUndefinedCheck: boolean;
-  disableLimitedPurchaseQuantityCheck: boolean;
-  skipLimitedPurchaseForSingleQuantity: boolean;
-  postEventDistributionCheckEnabled: boolean;
-  eventDates: string[];
-  getHallExecuteCount: (hallId: string) => number;
-  getHallTotalItemCount: (hallId: string) => number;
-  getMapTabForDate: (eventDate: string) => string | null;
-  globalHallOrderHalls: HallDefinition[];
-  globalHallOrderMapTabName: string | null;
-  handleBlockSortToggle: () => void;
-  handleBlockSortToggleCandidate: () => void;
-  handleBulkSort: (direction: BulkSortDirection) => void;
-  handleClearRangeSelection: () => void;
-  handleClearSelection: () => void;
-  handleMapTabRotationAngleChange: (angle: number) => void;
-  handleMoveToExecuteColumn: (itemIds: string[]) => void;
-  handleRemoveFromExecuteColumn: (itemIds: string[]) => void;
-  handleSearchNext: () => void;
-  handleSetViewMode: (mode: ViewMode, scrollToItemId?: string) => void;
-  handleSortToggle: () => void;
-  handleZoomChange: (newZoom: number) => void;
-  hasCandidateSelection: boolean;
-  hasExecuteSelection: boolean;
-  candidateMovePlan: MovePlan;
-  executeMovePlan: MovePlan;
-  hasUndefinedPriorityItems: boolean;
-  isMapTab: boolean;
-  items: ShoppingItem[];
-  itemToEdit: ShoppingItem | null;
-  layoutMode: LayoutMode;
-  mainContentVisible: boolean;
-  mapHallSelectorOpen: boolean;
-  mapIsRouteVisible: boolean;
-  mapSelectedHallId: string;
-  mapSmartInsertEnabled: boolean;
-  mapSmartInsertMode: SmartInsertMode;
-  mapTabMenuOpen: string | null;
-  mapTabMenuPosition: MapTabMenuPosition;
-  mapToggleButtonRef: React.MutableRefObject<HTMLButtonElement | null>;
-  mapToggleLongPressFiredRef: React.MutableRefObject<boolean>;
-  mapToggleLongPressRef: React.MutableRefObject<number | null>;
-  mapToggleMenuRef: React.MutableRefObject<HTMLDivElement | null>;
-  mapViewActive: boolean;
-  numberCellOutlineStyle: NumberCellOutlineStyle;
-  openVisitListPanel: (mapTab: string) => void;
-  onCloseUiSettingsPanel: () => void;
-  onToggleUiSettingsPanel: () => void;
-  purchaseStatusControlMode: PurchaseStatusControlMode;
-  searchKeyword: string;
-  selectedItemIds: Set<string>;
-  executeSpaceGroupingEnabled: boolean;
-  onShowEventList: () => void;
-  onShowImport: (eventName: string | null) => void;
-  onToggleEventSurface: () => void;
-  setBlockDefinitionMode: React.Dispatch<React.SetStateAction<boolean>>;
-  setExecuteCollapsedSpaces: React.Dispatch<React.SetStateAction<Set<string>>>;
-  setExecuteSpaceGroupingEnabled: React.Dispatch<React.SetStateAction<boolean>>;
-  setGlobalHallOrderPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setHallDefinitionMode: React.Dispatch<React.SetStateAction<boolean>>;
-  setItemToEdit: React.Dispatch<React.SetStateAction<ShoppingItem | null>>;
-  setLayoutMode: React.Dispatch<React.SetStateAction<LayoutMode>>;
-  setMapHallSelectorOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setMapIsHallOrderOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setMapIsRouteVisible: React.Dispatch<React.SetStateAction<boolean>>;
-  setMapSelectedHallId: React.Dispatch<React.SetStateAction<string>>;
-  setMapSmartInsertEnabled: React.Dispatch<React.SetStateAction<boolean>>;
-  setMapSmartInsertMode: React.Dispatch<React.SetStateAction<SmartInsertMode>>;
-  setMapTabMenuOpen: React.Dispatch<React.SetStateAction<string | null>>;
-  setMapTabMenuPosition: React.Dispatch<
-    React.SetStateAction<MapTabMenuPosition>
-  >;
-  setDisablePriceUndefinedCheck: React.Dispatch<React.SetStateAction<boolean>>;
-  setDisableLimitedPurchaseQuantityCheck: React.Dispatch<
-    React.SetStateAction<boolean>
-  >;
-  setSkipLimitedPurchaseForSingleQuantity: React.Dispatch<
-    React.SetStateAction<boolean>
-  >;
-  setPostEventDistributionCheckEnabled: React.Dispatch<
-    React.SetStateAction<boolean>
-  >;
-  setNumberCellOutlineStyle: React.Dispatch<
-    React.SetStateAction<NumberCellOutlineStyle>
-  >;
-  setPurchaseStatusControlMode: React.Dispatch<
-    React.SetStateAction<PurchaseStatusControlMode>
-  >;
-  setSearchKeyword: React.Dispatch<React.SetStateAction<string>>;
-  setSelectedBlockFilters: React.Dispatch<React.SetStateAction<Set<string>>>;
-  setSimpleHallDefinitionMode: React.Dispatch<React.SetStateAction<boolean>>;
-  setThemeMode: React.Dispatch<React.SetStateAction<ThemeMode>>;
-  setUiVisibilitySettings: React.Dispatch<
-    React.SetStateAction<UIVisibilitySettings>
-  >;
-  showHeaderBar: boolean;
-  showMoveButtons: boolean;
-  showSmartInsertToast: (message: string, type?: "success" | "error") => void;
-  showTabBar: boolean;
-  smartInsertLongPressRef: React.MutableRefObject<ReturnType<
-    typeof setTimeout
-  > | null>;
-  smartInsertLongPressTriggeredRef: React.MutableRefObject<boolean>;
-  sortLabels: Record<SortState, string>;
-  sortDisplayLabel: string;
-  sortState: SortState;
-  TabButton: React.FC<TabButtonProps>;
-  themeMode: ThemeMode;
-  uiSettingsPanelOpen: boolean;
-  uiVisibilitySettings: UIVisibilitySettings;
-  updateUIVisibilityConfig: (
-    key: UIVisibilityModeKey,
-    field: "header" | "tabBar",
-    value: boolean,
-  ) => void;
-  visibleSearchMatches: string[];
-  zoomLevel: number;
+export type AppHeaderShellModel = {
+  readonly navigation: {
+    readonly activeEventDate: string;
+    readonly activeEventName: string | null;
+    readonly activeTab: ActiveTab;
+    readonly currentMode: ViewMode;
+    readonly eventDates: string[];
+    readonly isMapTab: boolean;
+  };
+  readonly map: {
+    readonly currentHalls: HallDefinition[];
+    readonly currentMapData: DayMapData | null;
+    readonly currentMapTabName: string | null;
+    readonly currentMapTabRotationState: DayMapRotationState;
+    readonly globalHallOrderHalls: HallDefinition[];
+    readonly globalHallOrderMapTabName: string | null;
+    readonly hasUndefinedPriorityItems: boolean;
+    readonly mapHallSelectorOpen: boolean;
+    readonly mapIsRouteVisible: boolean;
+    readonly mapSelectedHallId: string;
+    readonly mapSmartInsertEnabled: boolean;
+    readonly mapSmartInsertMode: SmartInsertMode;
+    readonly mapTabMenuOpen: string | null;
+    readonly mapToggleButtonRef: React.MutableRefObject<HTMLButtonElement | null>;
+    readonly mapToggleLongPressFiredRef: React.MutableRefObject<boolean>;
+    readonly mapToggleLongPressRef: React.MutableRefObject<number | null>;
+    readonly mapToggleMenuRef: React.MutableRefObject<HTMLDivElement | null>;
+    readonly mapViewActive: boolean;
+    readonly smartInsertLongPressRef: React.MutableRefObject<ReturnType<
+      typeof setTimeout
+    > | null>;
+    readonly smartInsertLongPressTriggeredRef: React.MutableRefObject<boolean>;
+  };
+  readonly list: {
+    readonly blockSortDirection: BlockSortDirection | null;
+    readonly candidateMovePlan: MovePlan;
+    readonly currentSearchIndex: number;
+    readonly executeMovePlan: MovePlan;
+    readonly executeSpaceGroupingEnabled: boolean;
+    readonly hasCandidateSelection: boolean;
+    readonly hasExecuteSelection: boolean;
+    readonly items: ShoppingItem[];
+    readonly searchKeyword: string;
+    readonly selectedItemIds: Set<string>;
+    readonly showMoveButtons: boolean;
+    readonly sortDisplayLabel: string;
+    readonly visibleSearchMatches: string[];
+  };
+  readonly preferences: {
+    readonly DEFAULT_OUTLINE_STYLE: NumberCellOutlineStyle;
+    readonly DEFAULT_PURCHASE_STATUS_CONTROL_MODE: PurchaseStatusControlMode;
+    readonly DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY: boolean;
+    readonly DEFAULT_UI_VISIBILITY: UIVisibilitySettings;
+    readonly disableLimitedPurchaseQuantityCheck: boolean;
+    readonly disablePriceUndefinedCheck: boolean;
+    readonly numberCellOutlineStyle: NumberCellOutlineStyle;
+    readonly postEventDistributionCheckEnabled: boolean;
+    readonly purchaseStatusControlMode: PurchaseStatusControlMode;
+    readonly skipLimitedPurchaseForSingleQuantity: boolean;
+    readonly themeMode: ThemeMode;
+    readonly uiVisibilitySettings: UIVisibilitySettings;
+    readonly zoomLevel: number;
+  };
+  readonly ui: {
+    readonly layoutMode: LayoutMode;
+    readonly mainContentVisible: boolean;
+    readonly showHeaderBar: boolean;
+    readonly showTabBar: boolean;
+    readonly TabButton: React.FC<TabButtonProps>;
+    readonly uiSettingsPanelOpen: boolean;
+  };
 };
 
-const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
+export type AppHeaderShellActions = {
+  readonly navigation: {
+    readonly getMapTabForDate: (eventDate: string) => string | null;
+    readonly handleSetViewMode: (
+      mode: ViewMode,
+      scrollToItemId?: string,
+    ) => void;
+    readonly onShowEventList: () => void;
+    readonly onShowImport: (eventName: string | null) => void;
+    readonly onToggleEventSurface: () => void;
+  };
+  readonly map: {
+    readonly getHallExecuteCount: (hallId: string) => number;
+    readonly getHallTotalItemCount: (hallId: string) => number;
+    readonly handleMapTabRotationAngleChange: (angle: number) => void;
+    readonly openVisitListPanel: (mapTab: string) => void;
+    readonly setBlockDefinitionMode: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setGlobalHallOrderPanelOpen: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setHallDefinitionMode: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setMapHallSelectorOpen: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setMapIsHallOrderOpen: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setMapIsRouteVisible: (visible: boolean) => void;
+    readonly setMapSelectedHallId: React.Dispatch<React.SetStateAction<string>>;
+    readonly setMapSmartInsertEnabled: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setMapSmartInsertMode: React.Dispatch<
+      React.SetStateAction<SmartInsertMode>
+    >;
+    readonly setMapTabMenuOpen: React.Dispatch<
+      React.SetStateAction<string | null>
+    >;
+    readonly setSimpleHallDefinitionMode: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly showSmartInsertToast: (
+      message: string,
+      type?: "success" | "error",
+    ) => void;
+  };
+  readonly list: {
+    readonly handleBlockSortToggle: () => void;
+    readonly handleBlockSortToggleCandidate: () => void;
+    readonly handleBulkSort: (direction: BulkSortDirection) => void;
+    readonly handleClearRangeSelection: () => void;
+    readonly handleClearSelection: () => void;
+    readonly handleMoveToExecuteColumn: (itemIds: string[]) => void;
+    readonly handleRemoveFromExecuteColumn: (itemIds: string[]) => void;
+    readonly handleSearchNext: () => void;
+    readonly handleSortToggle: () => void;
+    readonly setExecuteCollapsedSpaces: React.Dispatch<
+      React.SetStateAction<Set<string>>
+    >;
+    readonly setExecuteSpaceGroupingEnabled: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setItemToEdit: React.Dispatch<
+      React.SetStateAction<ShoppingItem | null>
+    >;
+    readonly setSearchKeyword: React.Dispatch<React.SetStateAction<string>>;
+    readonly setSelectedBlockFilters: React.Dispatch<
+      React.SetStateAction<Set<string>>
+    >;
+  };
+  readonly preferences: {
+    readonly handleZoomChange: (newZoom: number) => void;
+    readonly setDisableLimitedPurchaseQuantityCheck: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setDisablePriceUndefinedCheck: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setNumberCellOutlineStyle: React.Dispatch<
+      React.SetStateAction<NumberCellOutlineStyle>
+    >;
+    readonly setPostEventDistributionCheckEnabled: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setPurchaseStatusControlMode: React.Dispatch<
+      React.SetStateAction<PurchaseStatusControlMode>
+    >;
+    readonly setSkipLimitedPurchaseForSingleQuantity: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setThemeMode: React.Dispatch<React.SetStateAction<ThemeMode>>;
+    readonly setUiVisibilitySettings: React.Dispatch<
+      React.SetStateAction<UIVisibilitySettings>
+    >;
+    readonly updateUIVisibilityConfig: (
+      key: UIVisibilityModeKey,
+      field: "header" | "tabBar",
+      value: boolean,
+    ) => void;
+  };
+  readonly ui: {
+    readonly onCloseUiSettingsPanel: () => void;
+    readonly onToggleUiSettingsPanel: () => void;
+    readonly setLayoutMode: React.Dispatch<React.SetStateAction<LayoutMode>>;
+  };
+};
+
+export type AppHeaderShellProps = {
+  readonly model: AppHeaderShellModel;
+  readonly actions: AppHeaderShellActions;
+};
+
+const AppHeaderShell: React.FC<AppHeaderShellProps> = ({ model, actions }) => {
   const {
-    activeEventDate,
-    activeEventName,
-    activeTab,
-    blockSortDirection,
-    currentHalls,
-    currentMapData,
-    currentMapTabName,
-    currentMapTabRotationState,
-    currentMode,
-    currentSearchIndex,
-    DEFAULT_OUTLINE_STYLE,
-    DEFAULT_PURCHASE_STATUS_CONTROL_MODE,
-    DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY,
-    DEFAULT_UI_VISIBILITY,
-    disablePriceUndefinedCheck,
-    disableLimitedPurchaseQuantityCheck,
-    skipLimitedPurchaseForSingleQuantity,
-    postEventDistributionCheckEnabled,
-    eventDates,
-    getHallExecuteCount,
-    getHallTotalItemCount,
-    getMapTabForDate,
-    globalHallOrderHalls,
-    globalHallOrderMapTabName,
-    handleBlockSortToggle,
-    handleBlockSortToggleCandidate,
-    handleBulkSort,
-    handleClearRangeSelection,
-    handleClearSelection,
-    handleMapTabRotationAngleChange,
-    handleMoveToExecuteColumn,
-    handleRemoveFromExecuteColumn,
-    handleSearchNext,
-    handleSetViewMode,
-    handleSortToggle,
-    handleZoomChange,
-    hasCandidateSelection,
-    hasExecuteSelection,
-    candidateMovePlan,
-    executeMovePlan,
-    hasUndefinedPriorityItems,
-    isMapTab,
-    items,
-    layoutMode,
-    mainContentVisible,
-    mapHallSelectorOpen,
-    mapIsRouteVisible,
-    mapSelectedHallId,
-    mapSmartInsertEnabled,
-    mapSmartInsertMode,
-    mapTabMenuOpen,
-    mapToggleButtonRef,
-    mapToggleLongPressFiredRef,
-    mapToggleLongPressRef,
-    mapToggleMenuRef,
-    mapViewActive,
-    numberCellOutlineStyle,
-    openVisitListPanel,
-    onCloseUiSettingsPanel,
-    onToggleUiSettingsPanel,
-    purchaseStatusControlMode,
-    searchKeyword,
-    selectedItemIds,
-    executeSpaceGroupingEnabled,
-    onShowEventList,
-    onShowImport,
-    onToggleEventSurface,
-    setBlockDefinitionMode,
-    setExecuteCollapsedSpaces,
-    setExecuteSpaceGroupingEnabled,
-    setGlobalHallOrderPanelOpen,
-    setHallDefinitionMode,
-    setItemToEdit,
-    setLayoutMode,
-    setMapHallSelectorOpen,
-    setMapIsHallOrderOpen,
-    setMapIsRouteVisible,
-    setMapSelectedHallId,
-    setMapSmartInsertEnabled,
-    setMapSmartInsertMode,
-    setMapTabMenuOpen,
-    setDisablePriceUndefinedCheck,
-    setDisableLimitedPurchaseQuantityCheck,
-    setSkipLimitedPurchaseForSingleQuantity,
-    setPostEventDistributionCheckEnabled,
-    setNumberCellOutlineStyle,
-    setPurchaseStatusControlMode,
-    setSearchKeyword,
-    setSelectedBlockFilters,
-    setSimpleHallDefinitionMode,
-    setThemeMode,
-    setUiVisibilitySettings,
-    showHeaderBar,
-    showMoveButtons,
-    showSmartInsertToast,
-    showTabBar,
-    smartInsertLongPressRef,
-    smartInsertLongPressTriggeredRef,
-    sortDisplayLabel,
-    TabButton,
-    themeMode,
-    uiSettingsPanelOpen,
-    uiVisibilitySettings,
-    updateUIVisibilityConfig,
-    visibleSearchMatches,
-    zoomLevel,
-  } = props;
+    navigation: {
+      activeEventDate,
+      activeEventName,
+      activeTab,
+      currentMode,
+      eventDates,
+      isMapTab,
+    },
+    map: {
+      currentHalls,
+      currentMapData,
+      currentMapTabName,
+      currentMapTabRotationState,
+      globalHallOrderHalls,
+      globalHallOrderMapTabName,
+      hasUndefinedPriorityItems,
+      mapHallSelectorOpen,
+      mapIsRouteVisible,
+      mapSelectedHallId,
+      mapSmartInsertEnabled,
+      mapSmartInsertMode,
+      mapTabMenuOpen,
+      mapToggleButtonRef,
+      mapToggleLongPressFiredRef,
+      mapToggleLongPressRef,
+      mapToggleMenuRef,
+      mapViewActive,
+      smartInsertLongPressRef,
+      smartInsertLongPressTriggeredRef,
+    },
+    list: {
+      blockSortDirection,
+      candidateMovePlan,
+      currentSearchIndex,
+      executeMovePlan,
+      executeSpaceGroupingEnabled,
+      hasCandidateSelection,
+      hasExecuteSelection,
+      items,
+      searchKeyword,
+      selectedItemIds,
+      showMoveButtons,
+      sortDisplayLabel,
+      visibleSearchMatches,
+    },
+    preferences: {
+      DEFAULT_OUTLINE_STYLE,
+      DEFAULT_PURCHASE_STATUS_CONTROL_MODE,
+      DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY,
+      DEFAULT_UI_VISIBILITY,
+      disableLimitedPurchaseQuantityCheck,
+      disablePriceUndefinedCheck,
+      numberCellOutlineStyle,
+      postEventDistributionCheckEnabled,
+      purchaseStatusControlMode,
+      skipLimitedPurchaseForSingleQuantity,
+      themeMode,
+      uiVisibilitySettings,
+      zoomLevel,
+    },
+    ui: {
+      layoutMode,
+      mainContentVisible,
+      showHeaderBar,
+      showTabBar,
+      TabButton,
+      uiSettingsPanelOpen,
+    },
+  } = model;
+  const {
+    navigation: {
+      getMapTabForDate,
+      handleSetViewMode,
+      onShowEventList,
+      onShowImport,
+      onToggleEventSurface,
+    },
+    map: {
+      getHallExecuteCount,
+      getHallTotalItemCount,
+      handleMapTabRotationAngleChange,
+      openVisitListPanel,
+      setBlockDefinitionMode,
+      setGlobalHallOrderPanelOpen,
+      setHallDefinitionMode,
+      setMapHallSelectorOpen,
+      setMapIsHallOrderOpen,
+      setMapIsRouteVisible,
+      setMapSelectedHallId,
+      setMapSmartInsertEnabled,
+      setMapSmartInsertMode,
+      setMapTabMenuOpen,
+      setSimpleHallDefinitionMode,
+      showSmartInsertToast,
+    },
+    list: {
+      handleBlockSortToggle,
+      handleBlockSortToggleCandidate,
+      handleBulkSort,
+      handleClearRangeSelection,
+      handleClearSelection,
+      handleMoveToExecuteColumn,
+      handleRemoveFromExecuteColumn,
+      handleSearchNext,
+      handleSortToggle,
+      setExecuteCollapsedSpaces,
+      setExecuteSpaceGroupingEnabled,
+      setItemToEdit,
+      setSearchKeyword,
+      setSelectedBlockFilters,
+    },
+    preferences: {
+      handleZoomChange,
+      setDisableLimitedPurchaseQuantityCheck,
+      setDisablePriceUndefinedCheck,
+      setNumberCellOutlineStyle,
+      setPostEventDistributionCheckEnabled,
+      setPurchaseStatusControlMode,
+      setSkipLimitedPurchaseForSingleQuantity,
+      setThemeMode,
+      setUiVisibilitySettings,
+      updateUIVisibilityConfig,
+    },
+    ui: { onCloseUiSettingsPanel, onToggleUiSettingsPanel, setLayoutMode },
+  } = actions;
 
   React.useEffect(() => {
     if (!uiSettingsPanelOpen) return;

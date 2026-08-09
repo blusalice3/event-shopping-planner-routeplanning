@@ -185,7 +185,6 @@ describe("WorkerXlsxExecutionPort protocol", () => {
       name: "AbortError",
     });
     controller.abort();
-    await rejection;
     expect(worker.sent[1].message).toEqual({
       type: "XLSX_CANCEL_REQUEST",
       protocolVersion: 1,
@@ -197,8 +196,19 @@ describe("WorkerXlsxExecutionPort protocol", () => {
       protocolVersion: 1,
       requestId: REQUEST_ID,
       kind: "map-import",
-      result: { kind: "map-import", value: { late: true } },
+      result: {
+        kind: "map-import",
+        value: { data: null, skippedSheets: [], error: null },
+      },
     });
+    worker.emitMessage({
+      type: "XLSX_ERROR",
+      protocolVersion: 1,
+      requestId: REQUEST_ID,
+      kind: "map-import",
+      errorCode: "ABORTED",
+    });
+    await rejection;
   });
 
   it("rejects every pending operation when the Worker crashes", async () => {
@@ -248,12 +258,34 @@ describe("WorkerXlsxExecutionPort protocol", () => {
       code: "TIMEOUT",
     });
     await vi.advanceTimersByTimeAsync(25);
-    await rejection;
     expect(worker.sent[1].message).toEqual({
       type: "XLSX_CANCEL_REQUEST",
       protocolVersion: 1,
       requestId: REQUEST_ID,
     });
+    worker.emitMessage({
+      type: "XLSX_IMPORT_RESULT",
+      protocolVersion: 1,
+      requestId: REQUEST_ID,
+      kind: "event-import",
+      result: {
+        kind: "event-import",
+        value: {
+          success: true,
+          eventName: "late",
+          items: [],
+          errors: [],
+        },
+      },
+    });
+    worker.emitMessage({
+      type: "XLSX_ERROR",
+      protocolVersion: 1,
+      requestId: REQUEST_ID,
+      kind: "event-import",
+      errorCode: "ABORTED",
+    });
+    await rejection;
   });
 
   it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])(

@@ -11,8 +11,14 @@ import {
   RELEASE_DIMENSION_KEYS,
   projectContainmentDimensions,
 } from "../lib/release-policy.mjs";
+import {
+  ACCEPTANCE_PERFORMANCE_REQUIREMENTS,
+  assertReviewedPerformanceArtifactForAcceptedGate,
+  projectOwnGatePerformanceEnvelope,
+} from "../lib/performance-evidence-identity.mjs";
 import { assertVercelObservationEvidence } from "../provider/collect-vercel-observation.mjs";
 import { validateReleaseAEvidence } from "../verify-release-a-evidence.mjs";
+import { verifyPerformanceGate } from "../verify-performance-policy.mjs";
 import { validatePreparedPromotionResult } from "../provider/preparedPromotion.mjs";
 import { validateProductionAssignmentAuthority } from "../provider/productionAssignmentValidation.mjs";
 import { providerConfigurationHash } from "../provider/providerConfiguration.mjs";
@@ -24,12 +30,23 @@ import {
   validateCompanionRecoveryDrill,
   validateContinuousProductionProbe,
 } from "./acceptanceEvidenceInputs.mjs";
+import {
+  assertAcceptanceFinalBundleBinding,
+  buildReleaseEvidenceObjectSet,
+  loadAcceptanceFinalBundle,
+} from "./acceptanceTerminalBundle.mjs";
 import { readCurrentReleaseState } from "./currentReleaseState.mjs";
 import { fetchGitHubProtectedEnvironmentApprovals } from "./githubApprovalReceipt.mjs";
 import {
   requestGitHubOidcToken,
   verifyGitHubOidcTokenFromIssuer,
 } from "./githubOidc.mjs";
+import { findBindingPolicyCompatibility } from "./policyCompatibility.mjs";
+import { assertOwnGatePerformanceProducerReceiptAuthority } from "./ownGatePerformanceEvidence.mjs";
+import {
+  PROVIDER_ALIAS_OBSERVATION_KIND,
+  PROVIDER_ALIAS_OBSERVATION_MEDIA_TYPE,
+} from "./reconcileDecision.mjs";
 import {
   createReleaseEvent,
   hashReleaseEvent,
@@ -38,6 +55,7 @@ import {
 import {
   NAMESPACE_PATTERN,
   SHA256_PATTERN,
+  assertArtifactArchiveAvailable,
   assertEvidenceObjectAvailable,
   assertExactKeys,
   collectBindingEvidenceReferences,
@@ -59,6 +77,7 @@ const ACCEPTANCE_ROLES = [
   "operationsReviewer",
 ];
 const MINIMUM_OBSERVATION_MILLISECONDS = 24 * 60 * 60 * 1000;
+const SOURCE_HARDENED_RECOVERY_MILLISECONDS = 24 * 60 * 60 * 1000;
 const MAX_PRODUCTION_PROBE_RECEIPT_BYTES = 4 * 1024 * 1024;
 const MAX_PRODUCTION_PROBE_RECEIPTS = 4096;
 const PRODUCTION_API_PATHS = [
@@ -170,6 +189,7 @@ const PRODUCTION_PROBE_RESULT_KEYS = [
   "status",
 ];
 const ACCEPTANCE_SUBJECT_KEYS = [
+  "acceptedGate",
   "acceptedStandardFloors",
   "assignmentValidationEvidence",
   "clearBootstrapRecovery",
@@ -181,6 +201,7 @@ const ACCEPTANCE_SUBJECT_KEYS = [
   "observationStartedEvent",
   "observedThrough",
   "operationId",
+  "performanceEvidence",
   "releaseAEvidence",
   "rollbackInventory",
   "schemaVersion",
@@ -348,6 +369,66 @@ const eventReference = (namespace, record) => ({
   sha256: record.eventHash,
 });
 
+export const resolveAcceptedStandardAuthority = ({ current, binding }) => {
+  if (!isRecord(current?.snapshot) || !isRecord(binding)) {
+    throw new Error("Accepted standard authority input is invalid");
+  }
+  const candidateReferences = [];
+  if (
+    sameCanonicalValue(current.snapshot.acceptedStandard, binding) &&
+    current.snapshot.acceptedStandardEvent !== null
+  ) {
+    candidateReferences.push(current.snapshot.acceptedStandardEvent);
+  }
+  for (const entry of current.snapshot.rollbackInventory) {
+    if (sameCanonicalValue(entry.binding, binding)) {
+      candidateReferences.push(entry.acceptedEvent);
+    }
+  }
+  const distinctReferences = [
+    ...new Map(
+      candidateReferences.map((reference) => [reference.uri, reference]),
+    ).values(),
+  ];
+  if (distinctReferences.length !== 1) {
+    throw new Error("Accepted standard event authority is absent or ambiguous");
+  }
+  const acceptedEvent = distinctReferences[0];
+  let replayed = null;
+  let match = null;
+  for (const record of current.records) {
+    replayed = reduceReleaseState(replayed, record.event);
+    const reference = eventReference(record.event.namespace, record);
+    if (sameCanonicalValue(reference, acceptedEvent)) {
+      if (
+        record.event.eventType !== "release-accepted" ||
+        !sameCanonicalValue(replayed.acceptedStandard, binding) ||
+        !sameCanonicalValue(replayed.acceptedStandardEvent, reference) ||
+        !sameCanonicalValue(
+          replayed.acceptedStandardFloors,
+          record.event.payload.acceptedStandardFloors,
+        ) ||
+        replayed.acceptedGate !== record.event.payload.acceptedGate
+      ) {
+        throw new Error(
+          "Accepted standard event does not authorize the selected binding",
+        );
+      }
+      match = {
+        acceptedEvent: structuredClone(reference),
+        acceptedGate: record.event.payload.acceptedGate,
+        acceptedStandardFloors: structuredClone(
+          record.event.payload.acceptedStandardFloors,
+        ),
+      };
+    }
+  }
+  if (match === null) {
+    throw new Error("Accepted standard event could not be read back");
+  }
+  return match;
+};
+
 const putImmutableEvidence = async ({
   store,
   namespace,
@@ -513,7 +594,61 @@ export const appendReadyReconciliation = async (
     plan.evidenceRefs,
     store.namespace,
   );
+  const storedObservation = await assertEvidenceObjectAvailable({
+    store,
+    reference: plan.payload.providerObservation,
+    namespace: store.namespace,
+    label: "Reconcile provider observation",
+  });
+  const providerObservation = parseCanonicalJsonBytes(
+    storedObservation.bytes,
+    "Reconcile provider observation",
+  );
+  assertExactKeys(
+    providerObservation,
+    [
+      "assignments",
+      "namespace",
+      "observationKind",
+      "observedBinding",
+      "providerProjectId",
+      "providerReceiptReferences",
+      "schemaVersion",
+    ],
+    "Reconcile provider observation",
+  );
+  if (
+    storedObservation.mediaType !== PROVIDER_ALIAS_OBSERVATION_MEDIA_TYPE ||
+    providerObservation.schemaVersion !== 1 ||
+    providerObservation.observationKind !== PROVIDER_ALIAS_OBSERVATION_KIND ||
+    providerObservation.namespace !== store.namespace ||
+    providerObservation.providerProjectId !==
+      plan.payload.observedBinding.providerProjectId ||
+    !sameCanonicalValue(
+      providerObservation.observedBinding,
+      plan.payload.observedBinding,
+    ) ||
+    !Array.isArray(providerObservation.assignments) ||
+    providerObservation.assignments.length === 0 ||
+    providerObservation.assignments.some(
+      (assignment) =>
+        !isRecord(assignment) ||
+        assignment.assignedDeploymentId !==
+          plan.payload.observedBinding.providerDeploymentId,
+    ) ||
+    !Array.isArray(providerObservation.providerReceiptReferences) ||
+    providerObservation.providerReceiptReferences.length === 0 ||
+    providerObservation.providerReceiptReferences.some(
+      (reference) =>
+        !evidenceRefs.some((candidate) =>
+          sameCanonicalValue(candidate, reference),
+        ),
+    )
+  ) {
+    throw new Error("Reconcile provider observation authority is invalid");
+  }
   const existing = findAppendRecord(current, appendId);
+  let reconciled;
   if (existing) {
     if (
       plan.expectedState.sequence !== existing.event.sequence - 1 ||
@@ -530,40 +665,162 @@ export const appendReadyReconciliation = async (
       payload: plan.payload,
       evidenceRefs,
     });
+    reconciled = { current, record: existing, replayed: true };
+  } else {
+    if (
+      current.head.sequence !== plan.expectedState.sequence ||
+      current.head.eventHash !== plan.expectedState.eventHash
+    ) {
+      throw new Error("Reconcile event plan does not bind the replayed head");
+    }
+    reconciled = await appendLifecycleEvent({
+      store,
+      current,
+      eventType: "state-reconciled",
+      operationId: plan.operationId,
+      appendId,
+      payload: plan.payload,
+      evidenceRefs,
+      readState,
+    });
+  }
+  const reconciledReference = eventReference(
+    store.namespace,
+    reconciled.record,
+  );
+  let reconciliationSnapshot = null;
+  for (const record of reconciled.current.records) {
+    reconciliationSnapshot = reduceReleaseState(
+      reconciliationSnapshot,
+      record.event,
+    );
+    if (record.eventHash === reconciled.record.eventHash) break;
+  }
+  if (
+    reconciliationSnapshot === null ||
+    reconciliationSnapshot.eventHash !== reconciled.record.eventHash
+  ) {
+    throw new Error("Reconcile authority event could not be replayed");
+  }
+  if (decision.terminalPlan === null) {
     return {
       ...decision,
       appended: true,
-      replayed: true,
-      event: existing.event,
-      eventHash: existing.eventHash,
-      eventUri: eventReference(store.namespace, existing).uri,
-      head: current.head,
+      replayed: reconciled.replayed,
+      event: reconciled.record.event,
+      eventHash: reconciled.record.eventHash,
+      eventUri: reconciledReference.uri,
+      head: reconciled.current.head,
     };
   }
+
+  const terminalPlan = decision.terminalPlan;
+  assertExactKeys(
+    terminalPlan,
+    ["approvalRefs", "eventType", "payload", "targetBinding"],
+    "Reconcile terminal plan",
+  );
   if (
-    current.head.sequence !== plan.expectedState.sequence ||
-    current.head.eventHash !== plan.expectedState.eventHash
+    ![
+      "containment-activated",
+      "package-redeploy-activated",
+      "rollback-activated",
+      "temporary-containment-activated",
+    ].includes(terminalPlan.eventType) ||
+    !sameCanonicalValue(
+      terminalPlan.targetBinding,
+      reconciliationSnapshot.pendingOperation?.targetBinding,
+    ) ||
+    !sameCanonicalValue(
+      terminalPlan.approvalRefs,
+      reconciliationSnapshot.pendingOperation?.approvalRefs,
+    )
   ) {
-    throw new Error("Reconcile event plan does not bind the replayed head");
+    throw new Error("Reconcile terminal plan differs from replayed authority");
   }
-  const appended = await appendLifecycleEvent({
+  if (terminalPlan.targetBinding.publicIdentityKind !== "legacy-bootstrap-v1") {
+    await assertArtifactArchiveAvailable({
+      store,
+      namespace: store.namespace,
+      binding: terminalPlan.targetBinding,
+      label: "Reconcile terminal target",
+    });
+  }
+  const companionBinding =
+    terminalPlan.payload.companionBinding ??
+    reconciliationSnapshot.pendingOperation.companionBinding;
+  if (companionBinding !== null) {
+    await assertArtifactArchiveAvailable({
+      store,
+      namespace: store.namespace,
+      binding: companionBinding,
+      label: "Reconcile terminal companion",
+    });
+  }
+
+  const validated = await appendLifecycleEvent({
     store,
-    current,
-    eventType: "state-reconciled",
+    current: reconciled.current,
+    eventType: "assignment-validated",
     operationId: plan.operationId,
-    appendId,
-    payload: plan.payload,
-    evidenceRefs,
+    appendId: deriveLifecycleAppendId({
+      kind: `reconcile-assignment-validated/${plan.payload.reconciliationKind}`,
+      namespace: store.namespace,
+      operationId: plan.operationId,
+      evidenceSha256: decision.observationSha256,
+    }),
+    payload: {
+      reconciliationKind: plan.payload.reconciliationKind,
+      providerObservation: plan.payload.providerObservation,
+      stateReconciled: reconciledReference,
+      targetBinding: terminalPlan.targetBinding,
+    },
+    evidenceRefs: sortAndDedupeReferences(
+      [...evidenceRefs, reconciledReference],
+      store.namespace,
+    ),
+    readState,
+  });
+  const acceptedOriginEvidence = Object.hasOwn(
+    terminalPlan.payload,
+    "originAcceptedEvent",
+  )
+    ? [terminalPlan.payload.originAcceptedEvent]
+    : [];
+  const terminal = await appendLifecycleEvent({
+    store,
+    current: validated.current,
+    eventType: terminalPlan.eventType,
+    operationId: plan.operationId,
+    appendId: deriveLifecycleAppendId({
+      kind: `reconcile-${terminalPlan.eventType}/${plan.payload.reconciliationKind}`,
+      namespace: store.namespace,
+      operationId: plan.operationId,
+      evidenceSha256: decision.observationSha256,
+    }),
+    payload: terminalPlan.payload,
+    evidenceRefs: sortAndDedupeReferences(
+      [
+        ...evidenceRefs,
+        ...acceptedOriginEvidence,
+        eventReference(store.namespace, validated.record),
+      ],
+      store.namespace,
+    ),
+    approvalRefs: terminalPlan.approvalRefs,
     readState,
   });
   return {
     ...decision,
     appended: true,
-    replayed: appended.replayed,
-    event: appended.record.event,
-    eventHash: appended.record.eventHash,
-    eventUri: eventReference(store.namespace, appended.record).uri,
-    head: appended.current.head,
+    replayed: reconciled.replayed && validated.replayed && terminal.replayed,
+    event: reconciled.record.event,
+    eventHash: reconciled.record.eventHash,
+    eventUri: reconciledReference.uri,
+    terminalEvent: terminal.record.event,
+    terminalEventHash: terminal.record.eventHash,
+    terminalEventUri: eventReference(store.namespace, terminal.record).uri,
+    head: terminal.current.head,
   };
 };
 
@@ -819,19 +1076,27 @@ const validatePromotionReceipt = ({
     throw new Error("Promotion receipt prepared event differs");
   }
   assertExactKeys(receipt.target, TARGET_KEYS, "Promotion target");
-  assertExactKeys(receipt.companion, COMPANION_KEYS, "Promotion companion");
+  if (companion === null) {
+    if (receipt.companion !== null) {
+      throw new Error("Containment promotion receipt claimed a companion");
+    }
+  } else {
+    assertExactKeys(receipt.companion, COMPANION_KEYS, "Promotion companion");
+  }
   if (
     receipt.target.bindingId !== target.bindingId ||
-    receipt.target.releaseRole !== "standard" ||
+    receipt.target.releaseRole !== target.releaseRole ||
     receipt.target.providerDeploymentId !== target.providerDeploymentId ||
     receipt.target.deploymentUrl !== target.deploymentUrl ||
     receipt.target.providerDeploymentEvidenceSha256 !==
       target.providerEvidence.sha256 ||
-    receipt.companion.bindingId !== companion.bindingId ||
-    receipt.companion.releaseRole !== "containment" ||
-    receipt.companion.providerDeploymentId !== companion.providerDeploymentId ||
-    receipt.companion.providerDeploymentEvidenceSha256 !==
-      companion.providerEvidence.sha256
+    (companion !== null &&
+      (receipt.companion.bindingId !== companion.bindingId ||
+        receipt.companion.releaseRole !== "containment" ||
+        receipt.companion.providerDeploymentId !==
+          companion.providerDeploymentId ||
+        receipt.companion.providerDeploymentEvidenceSha256 !==
+          companion.providerEvidence.sha256))
   ) {
     throw new Error("Promotion receipt target pair differs from pending state");
   }
@@ -1820,6 +2085,180 @@ export const recordPreparedPromotionLifecycle = async (
   });
   current = assignmentValidated.current;
 
+  if (operation.kind !== "promote-standard") {
+    const terminalKinds = {
+      "rollback-standard": "rollback-activated",
+      "activate-containment": "containment-activated",
+      "redeploy-standard": "package-redeploy-activated",
+      "redeploy-containment": "package-redeploy-activated",
+    };
+    const terminalEventType = terminalKinds[operation.kind];
+    if (terminalEventType === undefined) {
+      throw new Error("Prepared recovery operation kind is unsupported");
+    }
+    await assertArtifactArchiveAvailable({
+      store,
+      namespace: store.namespace,
+      binding: operation.targetBinding,
+      label: "Recovery terminal target",
+    });
+    if (operation.companionBinding !== null) {
+      await assertArtifactArchiveAvailable({
+        store,
+        namespace: store.namespace,
+        binding: operation.companionBinding,
+        label: "Recovery terminal companion",
+      });
+    }
+    const activatedAt = new Date(
+      readClock(clock, "Recovery terminal commit"),
+    ).toISOString();
+    const recoveryDeadline = new Date(
+      Date.parse(activatedAt) + SOURCE_HARDENED_RECOVERY_MILLISECONDS,
+    ).toISOString();
+    let terminalPayload;
+    let terminalAcceptedAuthority = null;
+    if (operation.kind === "rollback-standard") {
+      terminalAcceptedAuthority = resolveAcceptedStandardAuthority({
+        current,
+        binding: operation.targetBinding,
+      });
+      terminalPayload = {
+        binding: operation.targetBinding,
+        companionBinding: operation.companionBinding,
+        originAcceptedEvent: terminalAcceptedAuthority.acceptedEvent,
+        originAcceptedGate: terminalAcceptedAuthority.acceptedGate,
+        originAcceptedStandardFloors:
+          terminalAcceptedAuthority.acceptedStandardFloors,
+      };
+    } else if (operation.kind === "activate-containment") {
+      terminalPayload = {
+        binding: operation.targetBinding,
+        activatedAt,
+        recoveryDeadline,
+        targetStandard: current.snapshot.acceptedStandard,
+      };
+    } else if (operation.kind === "redeploy-containment") {
+      terminalPayload = {
+        releaseRole: "containment",
+        binding: operation.targetBinding,
+        activatedAt,
+        recoveryDeadline,
+        targetStandard: current.snapshot.acceptedStandard,
+      };
+    } else {
+      terminalAcceptedAuthority = resolveAcceptedStandardAuthority({
+        current,
+        binding: operation.originBinding,
+      });
+      const inventory = current.snapshot.rollbackInventory.map((entry) =>
+        sameCanonicalValue(entry.binding, operation.originBinding)
+          ? {
+              ...structuredClone(entry),
+              binding: operation.targetBinding,
+              acceptedEvent: terminalAcceptedAuthority.acceptedEvent,
+              acceptedGate: terminalAcceptedAuthority.acceptedGate,
+              acceptedStandardFloors:
+                terminalAcceptedAuthority.acceptedStandardFloors,
+            }
+          : structuredClone(entry),
+      );
+      if (
+        !inventory.some(
+          (entry) =>
+            entry.binding.bindingId === operation.targetBinding.bindingId,
+        )
+      ) {
+        if (
+          current.snapshot.acceptedStandard?.bindingId !==
+            operation.originBinding.bindingId ||
+          current.snapshot.acceptedStandardEvent === null
+        ) {
+          throw new Error(
+            "Standard redeploy origin has no accepted inventory authority",
+          );
+        }
+        inventory.push({
+          binding: operation.targetBinding,
+          acceptedEvent: terminalAcceptedAuthority.acceptedEvent,
+          acceptedGate: terminalAcceptedAuthority.acceptedGate,
+          acceptedStandardFloors:
+            terminalAcceptedAuthority.acceptedStandardFloors,
+          evaluatedPolicy: current.snapshot.activeReleasePolicy,
+          eligibleActions: ["package-redeploy", "rollback"],
+          eligibility: "eligible",
+          reasonCodes: [],
+        });
+      }
+      inventory.sort((left, right) =>
+        compareUtf8(left.binding.bindingId, right.binding.bindingId),
+      );
+      terminalPayload = {
+        releaseRole: "standard",
+        standardBinding: operation.targetBinding,
+        companionBinding: operation.companionBinding,
+        rollbackInventory: inventory,
+        originAcceptedEvent: terminalAcceptedAuthority.acceptedEvent,
+        originAcceptedGate: terminalAcceptedAuthority.acceptedGate,
+        originAcceptedStandardFloors:
+          terminalAcceptedAuthority.acceptedStandardFloors,
+      };
+    }
+    const terminal = await appendLifecycleEvent({
+      store,
+      current,
+      eventType: terminalEventType,
+      operationId,
+      appendId: deriveLifecycleAppendId({
+        kind: terminalEventType,
+        namespace: store.namespace,
+        operationId,
+        evidenceSha256: references.assignmentValidation.sha256,
+      }),
+      payload: terminalPayload,
+      evidenceRefs: sortAndDedupeReferences(
+        [
+          ...sharedEvidence,
+          eventReference(store.namespace, assignmentValidated.record),
+          ...(terminalAcceptedAuthority === null
+            ? []
+            : [terminalAcceptedAuthority.acceptedEvent]),
+        ],
+        store.namespace,
+      ),
+      approvalRefs: operation.approvalRefs,
+      readState,
+    });
+    if (
+      terminal.current.snapshot.pendingOperation !== null ||
+      !sameCanonicalValue(
+        terminal.current.snapshot.activeProduction,
+        operation.targetBinding,
+      )
+    ) {
+      throw new Error("Recovery terminal commit did not activate its target");
+    }
+    return {
+      schemaVersion: 1,
+      resultKind: "recovery-lifecycle-recorded/v1",
+      operationKind: operation.kind,
+      operationId,
+      targetBindingId: operation.targetBinding.bindingId,
+      references,
+      events: {
+        deploymentAssigned: eventReference(store.namespace, assigned.record),
+        assignmentValidated: eventReference(
+          store.namespace,
+          assignmentValidated.record,
+        ),
+        terminal: eventReference(store.namespace, terminal.record),
+      },
+      replayed:
+        assigned.replayed && assignmentValidated.replayed && terminal.replayed,
+      head: terminal.current.head,
+    };
+  }
+
   const observationNotBefore = new Date(
     assertTimestamp(
       assignmentValidated.record.committedAt,
@@ -2061,6 +2500,12 @@ const validateAcceptanceBindingEvidence = async ({
   releasePolicy,
   label,
 }) => {
+  await assertArtifactArchiveAvailable({
+    store,
+    namespace,
+    binding,
+    label,
+  });
   const manifest = await readCanonicalEvidenceObject({
     store,
     namespace,
@@ -2124,73 +2569,182 @@ const standardFloorsFromDimensions = (dimensions) =>
     ACCEPTED_STANDARD_FLOOR_KEYS.map((key) => [key, dimensions[key]]),
   );
 
-const releasePolicyPhaseFloors = (releasePolicy) => {
-  const phaseFloors = [];
+const releasePolicyPhaseStates = (releasePolicy) => {
+  const phaseStates = [];
   let dimensions = structuredClone(releasePolicy.initialStandard);
-  const addPhase = () => {
-    const floors = standardFloorsFromDimensions(dimensions);
-    if (
-      phaseFloors.length === 0 ||
-      !sameCanonicalValue(phaseFloors.at(-1), floors)
-    ) {
-      phaseFloors.push(floors);
-    }
-  };
-  addPhase();
   if (!Array.isArray(releasePolicy.phaseSequence)) {
     throw new Error("Active release policy phase sequence is invalid");
   }
   for (const phase of releasePolicy.phaseSequence) {
-    if (phase?.change === null) continue;
-    if (!isRecord(phase?.change)) {
+    if (phase?.change !== null && !isRecord(phase?.change)) {
       throw new Error("Active release policy phase change is invalid");
     }
-    dimensions = { ...dimensions, ...phase.change };
-    addPhase();
+    if (phase.change !== null) {
+      dimensions = { ...dimensions, ...phase.change };
+    }
+    phaseStates.push({
+      gate: phase.gate,
+      floors: standardFloorsFromDimensions(dimensions),
+    });
   }
-  return phaseFloors;
+  return phaseStates;
 };
 
-const assertAcceptedFloorProgression = ({
+export const deriveAcceptedGateForCandidate = ({
   snapshot,
   releasePolicy,
   candidateFloors,
 }) => {
-  const phaseFloors = releasePolicyPhaseFloors(releasePolicy);
-  const candidateIndex = phaseFloors.findIndex((floors) =>
-    sameCanonicalValue(floors, candidateFloors),
-  );
-  if (candidateIndex < 0) {
-    throw new Error("Candidate standard dimensions are outside policy phases");
-  }
+  const phaseStates = releasePolicyPhaseStates(releasePolicy);
   const currentFloors = snapshot.acceptedStandardFloors;
   const hasCurrentFloors = Object.keys(currentFloors).length > 0;
   if (!hasCurrentFloors) {
-    if (snapshot.acceptedStandard !== null || candidateIndex !== 0) {
+    if (snapshot.acceptedStandard !== null || snapshot.acceptedGate !== null) {
       throw new Error(
-        "Initial accepted standard must use policy initial floors",
+        "Initial accepted standard state has contradictory gate or floors",
       );
     }
-    return;
+  } else {
+    assertExactKeys(
+      currentFloors,
+      ACCEPTED_STANDARD_FLOOR_KEYS,
+      "Current accepted standard floors",
+    );
+    if (snapshot.acceptedStandard === null || snapshot.acceptedGate === null) {
+      throw new Error(
+        "Accepted floors exist without an accepted gate and standard",
+      );
+    }
   }
-  assertExactKeys(
-    currentFloors,
-    ACCEPTED_STANDARD_FLOOR_KEYS,
-    "Current accepted standard floors",
-  );
-  if (snapshot.acceptedStandard === null) {
-    throw new Error("Accepted floors exist without an accepted standard");
-  }
-  const currentIndex = phaseFloors.findIndex((floors) =>
-    sameCanonicalValue(floors, currentFloors),
-  );
+  const currentIndex =
+    snapshot.acceptedGate === null
+      ? -1
+      : phaseStates.findIndex(({ gate }) => gate === snapshot.acceptedGate);
   if (
-    currentIndex < 0 ||
-    candidateIndex < currentIndex ||
-    candidateIndex > currentIndex + 1
+    (snapshot.acceptedGate !== null && currentIndex < 0) ||
+    (currentIndex >= 0 &&
+      !sameCanonicalValue(phaseStates[currentIndex].floors, currentFloors))
   ) {
-    throw new Error("Candidate standard regresses or skips accepted floors");
+    throw new Error(
+      "Current accepted gate and floors differ from policy phases",
+    );
   }
+  const candidate = phaseStates[currentIndex + 1];
+  if (
+    currentIndex < -1 ||
+    candidate === undefined ||
+    !sameCanonicalValue(candidate.floors, candidateFloors)
+  ) {
+    throw new Error(
+      "Candidate standard does not advance exactly one phase gate",
+    );
+  }
+  return candidate.gate;
+};
+
+const acceptancePerformanceRequirement = (acceptedGate) => {
+  if (!Object.hasOwn(ACCEPTANCE_PERFORMANCE_REQUIREMENTS, acceptedGate)) {
+    throw new Error(`Accepted gate ${acceptedGate} lacks a performance policy`);
+  }
+  const requirement = ACCEPTANCE_PERFORMANCE_REQUIREMENTS[acceptedGate];
+  return {
+    performanceEvidenceKind:
+      requirement === null
+        ? "none"
+        : requirement === "performance-inherited-closure/v1"
+          ? requirement
+          : "own-gate-performance-evidence/v1",
+    performanceGate:
+      requirement === "performance-inherited-closure/v1"
+        ? "P8-CLEAN"
+        : requirement,
+  };
+};
+
+const buildPendingAcceptanceRequirements = ({
+  namespace,
+  pendingAcceptance,
+  expectedState,
+  acceptedGate,
+}) => ({
+  schemaVersion: 1,
+  requirementKind: "standard-acceptance-requirements/v1",
+  namespace,
+  operationId: pendingAcceptance.operationId,
+  sourceSha: pendingAcceptance.standardBinding.sourceSha,
+  expectedArtifactSha256:
+    pendingAcceptance.standardBinding.artifactArchive.sha256,
+  expectedState: structuredClone(expectedState),
+  acceptedGate,
+  ...acceptancePerformanceRequirement(acceptedGate),
+});
+
+const assertAcceptancePerformanceArtifact = async ({
+  acceptedGate,
+  bytes,
+  expectedSha256,
+  expectedSourceSha,
+  expectedArtifactSha256 = null,
+  requirements = null,
+  acceptanceRunId = null,
+  validatePerformanceGate,
+  label,
+}) => {
+  const artifact = assertReviewedPerformanceArtifactForAcceptedGate({
+    acceptedGate,
+    bytes,
+    expectedSha256,
+    label,
+  });
+  if (artifact.value === null) return artifact;
+  const requirement = acceptancePerformanceRequirement(acceptedGate);
+  const artifactSourceSha =
+    artifact.artifactKind === "performance-inherited-closure/v1"
+      ? artifact.value.closure?.p8Source?.gitCommitSha
+      : artifact.value.evidence?.source?.gitCommitSha;
+  if (artifactSourceSha !== expectedSourceSha) {
+    throw new Error(`${label} source differs from the pending standard`);
+  }
+  if (
+    artifact.artifactKind === "own-gate-performance-evidence/v1" &&
+    (artifact.value.evidence?.source?.artifactSha256 !==
+      expectedArtifactSha256 ||
+      requirements === null)
+  ) {
+    throw new Error(
+      `${label} artifact archive differs from the pending standard`,
+    );
+  }
+  if (artifact.artifactKind === "own-gate-performance-evidence/v1") {
+    assertOwnGatePerformanceProducerReceiptAuthority({
+      artifactValue: artifact.value,
+      requirements,
+      expectedNamespace: requirements.namespace,
+      expectedSourceSha,
+      acceptanceRunId,
+    });
+  }
+  const verification = await validatePerformanceGate({
+    gate: requirement.performanceGate,
+    evidence:
+      artifact.artifactKind === "own-gate-performance-evidence/v1"
+        ? projectOwnGatePerformanceEnvelope(artifact.value)
+        : artifact.value,
+  });
+  if (
+    !isRecord(verification) ||
+    !Array.isArray(verification.errors) ||
+    verification.errors.length > 0
+  ) {
+    throw new Error(
+      `${label} failed the authoritative gate verifier: ${
+        Array.isArray(verification?.errors)
+          ? verification.errors.join("; ")
+          : "invalid verifier result"
+      }`,
+    );
+  }
+  return artifact;
 };
 
 const deriveAcceptanceReleaseState = async ({
@@ -2254,7 +2808,7 @@ const deriveAcceptanceReleaseState = async ({
   const acceptedStandardFloors = standardFloorsFromDimensions(
     standardEvidence.manifest.dimensions,
   );
-  assertAcceptedFloorProgression({
+  const acceptedGate = deriveAcceptedGateForCandidate({
     snapshot: current.snapshot,
     releasePolicy,
     candidateFloors: acceptedStandardFloors,
@@ -2281,7 +2835,9 @@ const deriveAcceptanceReleaseState = async ({
     );
   }
   return {
+    acceptedGate,
     acceptedStandardFloors,
+    ...acceptancePerformanceRequirement(acceptedGate),
     clearBootstrapRecovery: requiresRecoveryDrill,
     releasePolicy,
     evidenceRefs: sortAndDedupeReferences(
@@ -2294,21 +2850,72 @@ const deriveAcceptanceReleaseState = async ({
   };
 };
 
+export const resolvePendingAcceptanceRequirements = async (
+  { store },
+  { readState = readCurrentReleaseState } = {},
+) => {
+  assertStore(store);
+  const current = await readState({ store });
+  const pending = current.snapshot.pendingAcceptance;
+  if (
+    pending === null ||
+    pending.standardBinding.releaseRole !== "standard" ||
+    current.snapshot.pendingOperation?.operationId !== pending.operationId ||
+    !sameCanonicalValue(
+      pending.standardBinding.releasePolicy,
+      current.snapshot.activeReleasePolicy,
+    )
+  ) {
+    throw new Error("No authoritative standard acceptance is pending");
+  }
+  const releasePolicy = await readCanonicalEvidenceObject({
+    store,
+    namespace: store.namespace,
+    reference: current.snapshot.activeReleasePolicy,
+    label: "Active release policy",
+  });
+  const standardEvidence = await validateAcceptanceBindingEvidence({
+    store,
+    namespace: store.namespace,
+    binding: pending.standardBinding,
+    releasePolicy,
+    label: "Pending standard",
+  });
+  const acceptedStandardFloors = standardFloorsFromDimensions(
+    standardEvidence.manifest.dimensions,
+  );
+  const acceptedGate = deriveAcceptedGateForCandidate({
+    snapshot: current.snapshot,
+    releasePolicy,
+    candidateFloors: acceptedStandardFloors,
+  });
+  return buildPendingAcceptanceRequirements({
+    namespace: store.namespace,
+    pendingAcceptance: pending,
+    expectedState: current.head,
+    acceptedGate,
+  });
+};
+
 const bindingMatchesPolicyAndDatabase = (snapshot, binding) => ({
   database:
     binding.requiredDbCompatibility.contractUri ===
       snapshot.currentDbCompatibility.contractUri &&
     binding.requiredDbCompatibility.fingerprint ===
       snapshot.currentDbCompatibility.fingerprint,
-  policy: sameCanonicalValue(
-    binding.releasePolicy,
-    snapshot.activeReleasePolicy,
-  ),
+  policy:
+    findBindingPolicyCompatibility({
+      snapshot,
+      binding,
+      action: "rollback",
+    }) !== null,
 });
 
-const deriveRollbackInventory = ({
+export const deriveRollbackInventory = async ({
+  store,
   current,
   releasePolicy,
+  minimumAcceptedGate,
   minimumAcceptedFloors,
 }) => {
   const acceptedEvents = new Map();
@@ -2321,13 +2928,16 @@ const deriveRollbackInventory = ({
     ) {
       acceptedEvents.set(replayed.acceptedStandard.bindingId, {
         reference: eventReference(record.event.namespace, record),
+        gate: record.event.payload.acceptedGate,
         floors: structuredClone(record.event.payload.acceptedStandardFloors),
       });
     }
   }
-  const phaseFloors = releasePolicyPhaseFloors(releasePolicy);
-  const minimumFloorIndex = phaseFloors.findIndex((floors) =>
-    sameCanonicalValue(floors, minimumAcceptedFloors),
+  const phaseStates = releasePolicyPhaseStates(releasePolicy);
+  const minimumFloorIndex = phaseStates.findIndex(
+    ({ gate, floors }) =>
+      gate === minimumAcceptedGate &&
+      sameCanonicalValue(floors, minimumAcceptedFloors),
   );
   if (minimumFloorIndex < 0) {
     throw new Error("Accepted rollback floor is outside the active policy");
@@ -2345,6 +2955,8 @@ const deriveRollbackInventory = ({
       candidates.set(previous.bindingId, {
         binding: structuredClone(previous),
         acceptedEvent: accepted.reference,
+        acceptedGate: accepted.gate,
+        acceptedStandardFloors: structuredClone(accepted.floors),
         evaluatedPolicy: structuredClone(current.snapshot.activeReleasePolicy),
         eligibleActions: [],
         eligibility: "ineligible",
@@ -2361,6 +2973,16 @@ const deriveRollbackInventory = ({
     const reasons = [];
     if (!matches.database) reasons.push("db-compatibility-mismatch");
     if (!matches.policy) reasons.push("release-policy-mismatch");
+    try {
+      await assertArtifactArchiveAvailable({
+        store,
+        namespace: store.namespace,
+        binding: entry.binding,
+        label: `Rollback inventory binding ${entry.binding.bindingId}`,
+      });
+    } catch {
+      reasons.push("artifact-archive-unavailable");
+    }
     const accepted =
       acceptedEvents.get(entry.binding.bindingId) ??
       (() => {
@@ -2372,6 +2994,7 @@ const deriveRollbackInventory = ({
         return record
           ? {
               reference: structuredClone(entry.acceptedEvent),
+              gate: record.event.payload.acceptedGate,
               floors: structuredClone(
                 record.event.payload.acceptedStandardFloors,
               ),
@@ -2386,8 +3009,9 @@ const deriveRollbackInventory = ({
       ACCEPTED_STANDARD_FLOOR_KEYS,
       "Rollback inventory accepted floors",
     );
-    const acceptedFloorIndex = phaseFloors.findIndex((floors) =>
-      sameCanonicalValue(floors, accepted.floors),
+    const acceptedFloorIndex = phaseStates.findIndex(
+      ({ gate, floors }) =>
+        gate === accepted.gate && sameCanonicalValue(floors, accepted.floors),
     );
     if (acceptedFloorIndex < minimumFloorIndex) {
       reasons.push("accepted-standard-floor-regression");
@@ -2402,6 +3026,8 @@ const deriveRollbackInventory = ({
     inventory.push({
       binding: structuredClone(entry.binding),
       acceptedEvent: structuredClone(accepted.reference),
+      acceptedGate: accepted.gate,
+      acceptedStandardFloors: structuredClone(accepted.floors),
       evaluatedPolicy: structuredClone(current.snapshot.activeReleasePolicy),
       eligibleActions,
       eligibility: eligibleActions.length > 0 ? "eligible" : "ineligible",
@@ -2515,10 +3141,14 @@ const replayExistingAcceptance = async ({
   evidenceBytes,
   evidence,
   evidenceSha256,
+  performanceEvidenceBytes,
+  performanceEvidenceReference,
   continuousProbeBytes,
   continuousProbeReference,
   companionRecoveryDrillBytes,
   companionRecoveryDrillReference,
+  validatePerformanceEvidence,
+  acceptanceRunId,
 }) => {
   const namespace = store.namespace;
   const event = existing.record.event;
@@ -2572,6 +3202,7 @@ const replayExistingAcceptance = async ({
     "Stored standard acceptance subject",
   );
   const expectedPayload = {
+    acceptedGate: subject.acceptedGate,
     releaseRole: "standard",
     observedThrough: subject.observedThrough,
     rollbackInventory: subject.rollbackInventory,
@@ -2585,6 +3216,10 @@ const replayExistingAcceptance = async ({
     subject.operationId !== event.operationId ||
     subject.releaseAEvidence.uri !== evidenceReference.uri ||
     subject.releaseAEvidence.sha256 !== evidenceReference.sha256 ||
+    !sameCanonicalValue(
+      subject.performanceEvidence,
+      performanceEvidenceReference,
+    ) ||
     !sameCanonicalValue(
       subject.continuousProductionProbe,
       continuousProbeReference,
@@ -2603,6 +3238,26 @@ const replayExistingAcceptance = async ({
   ) {
     throw new Error("Existing acceptance subject or payload differs");
   }
+  const retryRequirements = buildPendingAcceptanceRequirements({
+    namespace,
+    pendingAcceptance: {
+      operationId: event.operationId,
+      standardBinding: subject.standardBinding,
+    },
+    expectedState: subject.expectedState,
+    acceptedGate: subject.acceptedGate,
+  });
+  await assertAcceptancePerformanceArtifact({
+    acceptedGate: subject.acceptedGate,
+    bytes: performanceEvidenceBytes,
+    expectedSha256: performanceEvidenceReference?.sha256 ?? null,
+    expectedSourceSha: subject.standardBinding.sourceSha,
+    expectedArtifactSha256: subject.standardBinding.artifactArchive.sha256,
+    requirements: retryRequirements,
+    acceptanceRunId,
+    validatePerformanceGate: validatePerformanceEvidence,
+    label: "Acceptance retry performance evidence",
+  });
   assertRequiredApprovalSet(event.approvalRefs, ACCEPTANCE_ROLES);
   for (const approval of event.approvalRefs) {
     if (
@@ -2615,6 +3270,9 @@ const replayExistingAcceptance = async ({
   const expectedEvidenceRefs = sortAndDedupeReferences(
     [
       evidenceReference,
+      ...(subject.performanceEvidence === null
+        ? []
+        : [subject.performanceEvidence]),
       subject.continuousProductionProbe,
       ...(subject.companionRecoveryDrill === null
         ? []
@@ -2622,6 +3280,12 @@ const replayExistingAcceptance = async ({
       subjectReference,
       subject.assignmentValidationEvidence,
       subject.observationStartedEvent,
+      {
+        uri:
+          `release-state://${namespace}/evidence/` +
+          subject.standardBinding.requiredDbCompatibility.fingerprint,
+        sha256: subject.standardBinding.requiredDbCompatibility.fingerprint,
+      },
       ...collectBindingEvidenceReferences(subject.standardBinding),
       ...collectBindingEvidenceReferences(subject.companionBinding),
       ...event.approvalRefs.flatMap((approval) => [
@@ -2644,6 +3308,18 @@ const replayExistingAcceptance = async ({
     !storedEvidence.bytes.equals(evidenceBytes)
   ) {
     throw new Error("Stored acceptance evidence differs on retry");
+  }
+  if (performanceEvidenceReference !== null) {
+    const storedPerformanceEvidence = await store.readEvidence({
+      sha256: performanceEvidenceReference.sha256,
+    });
+    if (
+      !storedPerformanceEvidence ||
+      !Buffer.isBuffer(storedPerformanceEvidence.bytes) ||
+      !storedPerformanceEvidence.bytes.equals(performanceEvidenceBytes)
+    ) {
+      throw new Error("Stored performance evidence differs on retry");
+    }
   }
   const storedContinuousProbe = await store.readEvidence({
     sha256: continuousProbeReference.sha256,
@@ -2673,6 +3349,7 @@ const replayExistingAcceptance = async ({
     operationId: event.operationId,
     sourceSha: subject.standardBinding.sourceSha,
     evidence: evidenceReference,
+    performanceEvidence: performanceEvidenceReference,
     continuousProductionProbe: continuousProbeReference,
     companionRecoveryDrill: companionRecoveryDrillReference,
     subject: subjectReference,
@@ -2684,20 +3361,24 @@ const replayExistingAcceptance = async ({
   };
 };
 
-export const acceptPendingStandardRelease = async (
+const executePendingStandardAcceptance = async (
   options,
   {
     readState = readCurrentReleaseState,
     validateEvidence = validateReleaseAEvidence,
+    validatePerformanceEvidence = verifyPerformanceGate,
     collectApprovals = collectAndStoreAcceptanceApprovals,
     clock = Date.now,
   } = {},
+  mode = "accept",
 ) => {
   assertNoCallerAuthority(options);
   const {
     store,
     evidenceBytes,
     expectedEvidenceSha256,
+    performanceEvidenceBytes = null,
+    expectedPerformanceEvidenceSha256 = null,
     continuousProbeBytes,
     expectedContinuousProbeSha256,
     companionRecoveryDrillBytes = null,
@@ -2708,8 +3389,16 @@ export const acceptPendingStandardRelease = async (
     oidcRequestToken,
     githubToken,
     fetchImpl = fetch,
+    dbCompatibilityContractBytes = null,
+    terminalBundleBytes = null,
+    expectedTerminalBundleSha256 = null,
+    terminalObjectSetBytes = null,
+    expectedTerminalObjectSetSha256 = null,
   } = options;
   assertStore(store);
+  if (!["accept", "prepare"].includes(mode)) {
+    throw new Error("Standard acceptance execution mode is invalid");
+  }
   const nowMilliseconds = readClock(clock, "Standard acceptance");
   const canonicalEvidence = parseCanonicalJsonBytes(
     evidenceBytes,
@@ -2757,6 +3446,17 @@ export const acceptPendingStandardRelease = async (
       "Companion recovery drill evidence",
     );
   }
+  const terminalBundle =
+    mode === "accept"
+      ? loadAcceptanceFinalBundle({
+          bundleBytes: terminalBundleBytes,
+          expectedBundleSha256: expectedTerminalBundleSha256,
+          objectSetBytes: terminalObjectSetBytes,
+          expectedObjectSetSha256: expectedTerminalObjectSetSha256,
+          namespace: store.namespace,
+          approvalPolicy,
+        })
+      : null;
   const continuousProbeReference = {
     uri: `release-state://${store.namespace}/evidence/` + continuousProbeSha256,
     sha256: continuousProbeSha256,
@@ -2779,6 +3479,39 @@ export const acceptPendingStandardRelease = async (
       evidenceSha256,
     });
     if (existing) {
+      const retryPerformanceArtifact =
+        assertReviewedPerformanceArtifactForAcceptedGate({
+          acceptedGate: existing.record.event.payload.acceptedGate,
+          bytes: performanceEvidenceBytes,
+          expectedSha256: expectedPerformanceEvidenceSha256,
+          label: "Acceptance retry performance evidence",
+        });
+      const performanceEvidenceReference =
+        retryPerformanceArtifact.value === null
+          ? null
+          : {
+              uri:
+                `release-state://${store.namespace}/evidence/` +
+                expectedPerformanceEvidenceSha256,
+              sha256: expectedPerformanceEvidenceSha256,
+            };
+      if (
+        terminalBundle === null ||
+        !sameCanonicalValue(
+          terminalBundle.releaseStateEvent,
+          existing.record.event,
+        ) ||
+        terminalBundle.bundle.sourceSha !==
+          canonicalEvidence.release.commitSha ||
+        !sameCanonicalValue(
+          terminalBundle.bundle.performanceEvidence,
+          performanceEvidenceReference,
+        )
+      ) {
+        throw new Error(
+          "Acceptance retry terminal bundle differs from the committed event",
+        );
+      }
       return replayExistingAcceptance({
         store,
         current,
@@ -2786,10 +3519,14 @@ export const acceptPendingStandardRelease = async (
         evidenceBytes,
         evidence: canonicalEvidence,
         evidenceSha256,
+        performanceEvidenceBytes,
+        performanceEvidenceReference,
         continuousProbeBytes,
         continuousProbeReference,
         companionRecoveryDrillBytes,
         companionRecoveryDrillReference,
+        validatePerformanceEvidence,
+        acceptanceRunId: expectedRunId,
       });
     }
   }
@@ -2830,7 +3567,9 @@ export const acceptPendingStandardRelease = async (
     reference: pending.standardBinding.providerPolicy,
     label: "Acceptance provider policy",
   });
-  const continuousProbe = validateContinuousProductionProbe({
+  const continuousProbe = await validateContinuousProductionProbe({
+    store,
+    current,
     bytes: continuousProbeBytes,
     expectedSha256: expectedContinuousProbeSha256,
     namespace: store.namespace,
@@ -2838,21 +3577,58 @@ export const acceptPendingStandardRelease = async (
     releaseAEvidence: validated.evidence,
     releaseAEvidenceSha256: evidenceSha256,
     providerPolicy: activeProviderPolicy,
+    approvalPolicy,
     nowMilliseconds,
   });
   const companionRecoveryDrill = hasRecoveryDrill
-    ? validateCompanionRecoveryDrill({
+    ? await validateCompanionRecoveryDrill({
+        store,
+        current,
         bytes: companionRecoveryDrillBytes,
         expectedSha256: expectedCompanionRecoveryDrillSha256,
         namespace: store.namespace,
         pendingAcceptance: pending,
         releaseAEvidence: validated.evidence,
         releaseAEvidenceSha256: evidenceSha256,
+        providerPolicy: activeProviderPolicy,
+        approvalPolicy,
         nowMilliseconds,
         futureClockSkewSeconds:
           activeProviderPolicy.observationPolicy.maxFutureClockSkewSeconds,
       })
     : null;
+  const derivedReleaseState = await deriveAcceptanceReleaseState({
+    store,
+    current,
+    pendingAcceptance: pending,
+    companionRecoveryDrill,
+  });
+  const performanceRequirements = buildPendingAcceptanceRequirements({
+    namespace: store.namespace,
+    pendingAcceptance: pending,
+    expectedState: current.head,
+    acceptedGate: derivedReleaseState.acceptedGate,
+  });
+  const performanceArtifact = await assertAcceptancePerformanceArtifact({
+    acceptedGate: derivedReleaseState.acceptedGate,
+    bytes: performanceEvidenceBytes,
+    expectedSha256: expectedPerformanceEvidenceSha256,
+    expectedSourceSha: pending.standardBinding.sourceSha,
+    expectedArtifactSha256: pending.standardBinding.artifactArchive.sha256,
+    requirements: performanceRequirements,
+    acceptanceRunId: expectedRunId,
+    validatePerformanceGate: validatePerformanceEvidence,
+    label: "Acceptance performance evidence",
+  });
+  const performanceEvidenceReference =
+    performanceArtifact.value === null
+      ? null
+      : {
+          uri:
+            `release-state://${store.namespace}/evidence/` +
+            expectedPerformanceEvidenceSha256,
+          sha256: expectedPerformanceEvidenceSha256,
+        };
   const evidenceReference = await putImmutableEvidence({
     store,
     namespace: store.namespace,
@@ -2861,6 +3637,25 @@ export const acceptPendingStandardRelease = async (
       "application/vnd.event-shopping-planner.release-a-evidence+json;version=1",
     label: "Release A acceptance evidence",
   });
+  const storedPerformanceEvidenceReference =
+    performanceEvidenceReference === null
+      ? null
+      : await putImmutableEvidence({
+          store,
+          namespace: store.namespace,
+          bytes: performanceEvidenceBytes,
+          mediaType:
+            "application/vnd.event-shopping-planner.performance-evidence+json;version=1",
+          label: "Acceptance performance evidence",
+        });
+  if (
+    !sameCanonicalValue(
+      storedPerformanceEvidenceReference,
+      performanceEvidenceReference,
+    )
+  ) {
+    throw new Error("Performance evidence reference changed");
+  }
   const storedContinuousProbeReference = await putImmutableEvidence({
     store,
     namespace: store.namespace,
@@ -2896,16 +3691,41 @@ export const acceptPendingStandardRelease = async (
   ) {
     throw new Error("Companion recovery drill reference changed");
   }
-  const derivedReleaseState = await deriveAcceptanceReleaseState({
+  let dbCompatibilityContractReference;
+  if (mode === "prepare") {
+    const dbCompatibilityContract = parseCanonicalJsonBytes(
+      dbCompatibilityContractBytes,
+      "DB compatibility contract",
+    );
+    if (
+      dbCompatibilityContract.contractUri !==
+        pending.standardBinding.requiredDbCompatibility.contractUri ||
+      sha256Json(dbCompatibilityContract) !==
+        pending.standardBinding.requiredDbCompatibility.fingerprint
+    ) {
+      throw new Error(
+        "DB compatibility contract differs from the pending standard binding",
+      );
+    }
+    dbCompatibilityContractReference = await putImmutableEvidence({
+      store,
+      namespace: store.namespace,
+      bytes: dbCompatibilityContractBytes,
+      mediaType:
+        "application/vnd.event-shopping-planner.db-compatibility-contract+json;version=1",
+      label: "DB compatibility contract",
+    });
+  } else {
+    dbCompatibilityContractReference = structuredClone(
+      terminalBundle.bundle.dbCompatibilityContract,
+    );
+  }
+  const acceptedStandardFloors = derivedReleaseState.acceptedStandardFloors;
+  const rollbackInventory = await deriveRollbackInventory({
     store,
     current,
-    pendingAcceptance: pending,
-    companionRecoveryDrill,
-  });
-  const acceptedStandardFloors = derivedReleaseState.acceptedStandardFloors;
-  const rollbackInventory = deriveRollbackInventory({
-    current,
     releasePolicy: derivedReleaseState.releasePolicy,
+    minimumAcceptedGate: derivedReleaseState.acceptedGate,
     minimumAcceptedFloors: acceptedStandardFloors,
   });
   const subject = {
@@ -2921,10 +3741,12 @@ export const acceptPendingStandardRelease = async (
     ),
     observationStartedEvent: structuredClone(pending.observationStartedEvent),
     releaseAEvidence: evidenceReference,
+    performanceEvidence: storedPerformanceEvidenceReference,
     continuousProductionProbe: storedContinuousProbeReference,
     companionRecoveryDrill: storedCompanionRecoveryDrillReference,
     observedThrough: validated.observedThrough,
     rollbackInventory,
+    acceptedGate: derivedReleaseState.acceptedGate,
     acceptedStandardFloors,
     clearBootstrapRecovery: derivedReleaseState.clearBootstrapRecovery,
   };
@@ -2937,23 +3759,29 @@ export const acceptPendingStandardRelease = async (
       "application/vnd.event-shopping-planner.standard-acceptance-subject+json;version=1",
     label: "Standard acceptance subject",
   });
-  const approvalSet = await collectApprovals({
-    store,
-    namespace: store.namespace,
-    policy: approvalPolicy,
-    operationId: pending.operationId,
-    subjectSha256: subjectReference.sha256,
-    expectedSourceSha: pending.standardBinding.sourceSha,
-    expectedRunId,
-    observedThrough: validated.observedThrough,
-    oidcRequestUrl,
-    oidcRequestToken,
-    githubToken,
-    fetchImpl,
-    nowMilliseconds,
-  });
+  const approvalSet =
+    mode === "prepare"
+      ? await collectApprovals({
+          store,
+          namespace: store.namespace,
+          policy: approvalPolicy,
+          operationId: pending.operationId,
+          subjectSha256: subjectReference.sha256,
+          expectedSourceSha: pending.standardBinding.sourceSha,
+          expectedRunId,
+          observedThrough: validated.observedThrough,
+          oidcRequestUrl,
+          oidcRequestToken,
+          githubToken,
+          fetchImpl,
+          nowMilliseconds,
+        })
+      : {
+          approvalRefs: structuredClone(terminalBundle.approvalObjects),
+        };
   assertRequiredApprovalSet(approvalSet.approvalRefs, ACCEPTANCE_ROLES);
   if (
+    mode === "prepare" &&
     assertTimestamp(
       approvalSet.verifiedAt,
       "Acceptance approval verification time",
@@ -2991,7 +3819,31 @@ export const acceptPendingStandardRelease = async (
   if (commitValidation.observedThrough !== validated.observedThrough) {
     throw new Error("Acceptance evidence changed before commit");
   }
-  const commitContinuousProbe = validateContinuousProductionProbe({
+  const commitDerivedReleaseState = await deriveAcceptanceReleaseState({
+    store,
+    current,
+    pendingAcceptance: pending,
+    companionRecoveryDrill,
+  });
+  if (!sameCanonicalValue(commitDerivedReleaseState, derivedReleaseState)) {
+    throw new Error(
+      "Acceptance binding or artifact archive changed before commit",
+    );
+  }
+  await assertAcceptancePerformanceArtifact({
+    acceptedGate: derivedReleaseState.acceptedGate,
+    bytes: performanceEvidenceBytes,
+    expectedSha256: expectedPerformanceEvidenceSha256,
+    expectedSourceSha: pending.standardBinding.sourceSha,
+    expectedArtifactSha256: pending.standardBinding.artifactArchive.sha256,
+    requirements: performanceRequirements,
+    acceptanceRunId: expectedRunId,
+    validatePerformanceGate: validatePerformanceEvidence,
+    label: "Acceptance performance evidence at commit",
+  });
+  const commitContinuousProbe = await validateContinuousProductionProbe({
+    store,
+    current,
     bytes: continuousProbeBytes,
     expectedSha256: expectedContinuousProbeSha256,
     namespace: store.namespace,
@@ -2999,19 +3851,24 @@ export const acceptPendingStandardRelease = async (
     releaseAEvidence: commitValidation.evidence,
     releaseAEvidenceSha256: evidenceSha256,
     providerPolicy: activeProviderPolicy,
+    approvalPolicy,
     nowMilliseconds: commitNowMilliseconds,
   });
   if (!sameCanonicalValue(commitContinuousProbe, continuousProbe)) {
     throw new Error("Continuous production probe changed before commit");
   }
   if (companionRecoveryDrill !== null) {
-    const commitRecoveryDrill = validateCompanionRecoveryDrill({
+    const commitRecoveryDrill = await validateCompanionRecoveryDrill({
+      store,
+      current,
       bytes: companionRecoveryDrillBytes,
       expectedSha256: expectedCompanionRecoveryDrillSha256,
       namespace: store.namespace,
       pendingAcceptance: pending,
       releaseAEvidence: commitValidation.evidence,
       releaseAEvidenceSha256: evidenceSha256,
+      providerPolicy: activeProviderPolicy,
+      approvalPolicy,
       nowMilliseconds: commitNowMilliseconds,
       futureClockSkewSeconds:
         activeProviderPolicy.observationPolicy.maxFutureClockSkewSeconds,
@@ -3020,30 +3877,38 @@ export const acceptPendingStandardRelease = async (
       throw new Error("Companion recovery drill changed before commit");
     }
   }
-  const oidcExpiresAt = assertTimestamp(
-    approvalSet.oidcExpiresAt,
-    "Acceptance OIDC expiration",
-  );
-  if (
-    commitNowMilliseconds >
-    oidcExpiresAt + approvalPolicy.oidcClockSkewSeconds * 1000
-  ) {
-    throw new Error("Acceptance OIDC authority expired before commit");
+  if (mode === "prepare") {
+    const oidcExpiresAt = assertTimestamp(
+      approvalSet.oidcExpiresAt,
+      "Acceptance OIDC expiration",
+    );
+    if (
+      commitNowMilliseconds >
+      oidcExpiresAt + approvalPolicy.oidcClockSkewSeconds * 1000
+    ) {
+      throw new Error("Acceptance OIDC authority expired before commit");
+    }
   }
   const payload = {
+    acceptedGate: derivedReleaseState.acceptedGate,
     releaseRole: "standard",
     observedThrough: validated.observedThrough,
     rollbackInventory,
     acceptedStandardFloors,
     clearBootstrapRecovery: derivedReleaseState.clearBootstrapRecovery,
   };
-  const approvalEvidence = approvalSet.approvalRefs.map(({ uri, sha256 }) => ({
-    uri,
-    sha256,
-  }));
+  const approvalEvidence = approvalSet.approvalRefs.flatMap(
+    ({ uri, sha256, issuerReceiptUri, issuerReceiptSha256 }) => [
+      { uri, sha256 },
+      { uri: issuerReceiptUri, sha256: issuerReceiptSha256 },
+    ],
+  );
   const evidenceRefs = sortAndDedupeReferences(
     [
       evidenceReference,
+      ...(storedPerformanceEvidenceReference === null
+        ? []
+        : [storedPerformanceEvidenceReference]),
       storedContinuousProbeReference,
       ...(storedCompanionRecoveryDrillReference === null
         ? []
@@ -3051,7 +3916,7 @@ export const acceptPendingStandardRelease = async (
       subjectReference,
       pending.assignmentValidationEvidence,
       pending.observationStartedEvent,
-      approvalSet.issuerReceiptReference,
+      dbCompatibilityContractReference,
       ...derivedReleaseState.evidenceRefs,
       ...approvalEvidence,
     ],
@@ -3062,6 +3927,136 @@ export const acceptPendingStandardRelease = async (
     namespace: store.namespace,
     operationId: pending.operationId,
     evidenceSha256,
+  });
+  const candidateEvent = createReleaseEvent({
+    namespace: store.namespace,
+    sequence: current.snapshot.sequence + 1,
+    eventType: "release-accepted",
+    operationId: pending.operationId,
+    appendId,
+    previousEventHash: current.snapshot.eventHash,
+    payload,
+    evidenceRefs,
+    approvalRefs: approvalSet.approvalRefs,
+  });
+  reduceReleaseState(current.snapshot, candidateEvent);
+  if (mode === "prepare") {
+    const approvalObjectReferences = [];
+    for (const approval of approvalSet.approvalRefs) {
+      approvalObjectReferences.push(
+        await putImmutableEvidence({
+          store,
+          namespace: store.namespace,
+          bytes: canonicalJsonBytes(approval),
+          mediaType:
+            "application/vnd.event-shopping-planner.release-approval-reference+json;version=1",
+          label: "Acceptance approval reference",
+        }),
+      );
+    }
+    const candidateEventEvidenceReference = await putImmutableEvidence({
+      store,
+      namespace: store.namespace,
+      bytes: canonicalJsonBytes(candidateEvent),
+      mediaType:
+        "application/vnd.event-shopping-planner.release-state-event+json;version=1",
+      label: "Acceptance candidate Release State event",
+    });
+    const candidateEventReference = {
+      uri:
+        `release-state://${store.namespace}/events/${candidateEvent.sequence}/` +
+        candidateEventEvidenceReference.sha256,
+      sha256: candidateEventEvidenceReference.sha256,
+    };
+    const assignmentValidation = await readCanonicalEvidenceObject({
+      store,
+      namespace: store.namespace,
+      reference: pending.assignmentValidationEvidence,
+      label: "Acceptance assignment validation",
+    });
+    const assignmentReceiptReference = {
+      uri: assignmentValidation.assignmentReceiptUri,
+      sha256: assignmentValidation.assignmentReceiptSha256,
+    };
+    assertReference(
+      assignmentReceiptReference,
+      store.namespace,
+      "Acceptance assignment receipt",
+    );
+    const bundle = {
+      schemaVersion: 1,
+      kind: "release-evidence-bundle/v1",
+      stage: "acceptance-final",
+      sourceSha: pending.standardBinding.sourceSha,
+      releaseRole: "standard",
+      v1Evidence: evidenceReference,
+      performanceEvidence: storedPerformanceEvidenceReference,
+      packageIndex: structuredClone(pending.standardBinding.packageIndex),
+      artifactManifest: structuredClone(
+        pending.standardBinding.artifactManifest,
+      ),
+      providerDeploymentEvidence: structuredClone(
+        pending.standardBinding.providerEvidence,
+      ),
+      providerAssignmentEvidence: structuredClone(
+        pending.assignmentValidationEvidence,
+      ),
+      dbCompatibilityContract: dbCompatibilityContractReference,
+      releasePolicy: structuredClone(pending.standardBinding.releasePolicy),
+      providerPolicy: structuredClone(pending.standardBinding.providerPolicy),
+      releaseStateEvent: candidateEventReference,
+      approvals: approvalObjectReferences,
+    };
+    const bundleBytes = canonicalJsonBytes(bundle);
+    const objectSet = await buildReleaseEvidenceObjectSet({
+      store,
+      references: [
+        bundle.v1Evidence,
+        ...(bundle.performanceEvidence === null
+          ? []
+          : [bundle.performanceEvidence]),
+        bundle.packageIndex,
+        bundle.artifactManifest,
+        bundle.providerDeploymentEvidence,
+        bundle.providerAssignmentEvidence,
+        bundle.dbCompatibilityContract,
+        bundle.releasePolicy,
+        bundle.providerPolicy,
+        bundle.releaseStateEvent,
+        ...bundle.approvals,
+        ...candidateEvent.evidenceRefs,
+        assignmentReceiptReference,
+      ],
+    });
+    return {
+      schemaVersion: 1,
+      resultKind: "standard-acceptance-terminal-bundle-prepared/v1",
+      operationId: pending.operationId,
+      sourceSha: pending.standardBinding.sourceSha,
+      bundle,
+      bundleBytes,
+      bundleSha256: sha256Bytes(bundleBytes),
+      objectSet: objectSet.objectSet,
+      objectSetBytes: objectSet.objectSetBytes,
+      objectSetSha256: objectSet.objectSetSha256,
+      subject: subjectReference,
+      approvals: approvalSet.approvalRefs,
+      proposedEvent: candidateEventReference,
+      observedThrough: validated.observedThrough,
+      head: current.head,
+    };
+  }
+  assertAcceptanceFinalBundleBinding({
+    loaded: terminalBundle,
+    expectedEvent: candidateEvent,
+    expectedSubject: subject,
+    subjectReference,
+    evidenceReference,
+    performanceEvidenceReference: storedPerformanceEvidenceReference,
+    continuousProbeReference: storedContinuousProbeReference,
+    companionRecoveryDrillReference: storedCompanionRecoveryDrillReference,
+    standardBinding: pending.standardBinding,
+    assignmentValidationEvidence: pending.assignmentValidationEvidence,
   });
   const accepted = await appendLifecycleEvent({
     store,
@@ -3104,3 +4099,9 @@ export const acceptPendingStandardRelease = async (
     head: accepted.current.head,
   };
 };
+
+export const preparePendingStandardAcceptanceBundle = (options, dependencies) =>
+  executePendingStandardAcceptance(options, dependencies, "prepare");
+
+export const acceptPendingStandardRelease = (options, dependencies) =>
+  executePendingStandardAcceptance(options, dependencies, "accept");

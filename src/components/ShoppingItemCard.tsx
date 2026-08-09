@@ -41,7 +41,6 @@ import {
   getPlannedQuantity,
   shouldSkipLimitedPurchaseForTransition,
 } from "../utils/purchaseQuantity";
-import "./ShoppingItemCard.css";
 
 // 外部リンクアイコン
 const ExternalLinkIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (

@@ -13,34 +13,41 @@ Release State event である。
 
 ## 現在の production blocker
 
-この repository に保存されている policy は production activation を許可しない。
+この repository に保存されている policy は production activation を許可しない。blocker の正本は
+`node scripts/verify-foundation-policy.mjs --json` の `blockerCodes` であり、現在は 28 件である。
 
 - `config/provider-policy.json` の provider/team/project/domain/WAF/log-retention が未設定
 - `config/db-compatibility-contract.json` の remote observation と migration 適用が未完了
 - `config/release-state-store.json` の host/database/executor/CA/backup owner が未設定
 - `config/approval-policy.json` の三つの reviewer team が未設定
 - `config/foundation-baseline.json` の `bootstrapBaselineSourceSha` と raw-dist manifest hash が未設定
+- `config/metrics-retention-policy.json` の backup owner、remote cron、last-success observation が未設定
+- startup burst API の production WAF/rate 値と provider log retention が未観測
 
 fixture の artifact verifier が通っても production eligible を意味しない。
-`--require-production-bindings` を付けた verifier と builder が上記を fail-closed で拒否する
-状態が正しい。
+`verify-foundation-policy.mjs --require-production-ready` と production binding を要求する builder が
+上記を fail-closed で拒否する状態が正しい。blocker 件数や code を手作業で別管理しない。
 
 ## 不変条件
 
 1. build は full 40 桁 `sourceSha` の clean checkout だけで行う。
 2. Node/npm/Vercel CLI と top-level dependency は `config/toolchain-versions.json` に exact pin
    する。
-3. `.vercel/output/**` を生成できるのは local pinned Vercel CLI の
-   `vercel build --prod` だけである。手書き、patch、後処理を禁止する。
-4. standard と containment は同じ source、lockfile、toolchain、public build environment、
+3. production eligible な `.vercel/output/**` を生成できるのは local pinned Vercel CLI の
+   `vercel build --prod` だけである。policy activation QA は同じ pin の非 production build を使い、
+   `buildPurpose=non-promotable-policy-activation-qa`、`promotable=false` とする。どちらも手書き、
+   patch、後処理を禁止する。
+4. build dimension は caller が指定せず、current Release State と immutable policy object から導出した
+   review 済み `artifact-build-requirements.json` の exact bytes に従う。
+5. standard と containment は同じ source、lockfile、toolchain、public build environment、
    provider policy/configuration、release policy、DB contract から別々に build する。
-5. manifest の `outputFiles` と ZIP 展開後の path/hash/size set は exact 一致させる。
-6. test 済み ZIP を再 build せず `vercel deploy --prebuilt --prod --skip-domain` へ渡す。
-7. immutable deployment URL の probe が終わるまで production domain を変更しない。
-8. alias 変更と Release State append は分散 transaction ではない。途中失敗は必ず
+6. manifest の `outputFiles` と ZIP 展開後の path/hash/size set は exact 一致させる。
+7. test 済み ZIP を再 build せず `vercel deploy --prebuilt --prod --skip-domain` へ渡す。
+8. immutable deployment URL の probe が終わるまで production domain を変更しない。
+9. alias 変更と Release State append は分散 transaction ではない。途中失敗は必ず
    reconcile する。
-9. containment と legacy bootstrap を `release-accepted` にしない。
-10. secret value、raw user data、free-form event/item text を artifact/evidence/log に含めない。
+10. containment と legacy bootstrap を `release-accepted` にしない。
+11. secret value、raw user data、free-form event/item text を artifact/evidence/log に含めない。
 
 ## 事前確認
 
@@ -100,21 +107,37 @@ production build を成功させるために policy check を迂回してはな�
 
 ## Source-hardened pair の build
 
-package 出力先は checkout 外の新規 directory にする。既存 directory への上書きを禁止する。
+build は二つの protected run に分ける。
+
+1. `produce-artifact-build-requirements` が current Release State を全 replay し、active policy、次の
+   target gate、source、provider/DB/toolchain/CSP authority と expected standard/containment dimensions を
+   canonical `artifact-build-requirements.json` にする。これを
+   `foundation-artifact-build-requirements-<sourceSha>` として upload する。
+2. 人が requirements bytes の SHA-256 を review する。
+3. `build-and-verify` は distinct prior run ID と reviewed SHA-256 で exact artifact を downloadし、
+   current Release State から同じ requirements を再導出する。head/policy/source/hash が変化した場合、
+   同一 run、caller supplied dimension、proposed policy からの production build を拒否する。
+
+package 出力先は checkout 外の新規 directory にする。既存 directory への上書きを禁止する。protected
+workflow と同じ authority で read-only reproduction を行う場合も、reviewed requirements file と hash を
+両方渡す。
 
 ```powershell
 $sourceSha = (git rev-parse HEAD).Trim()
 $packageRoot = "D:\foundation-release-packages\$sourceSha"
 $providerObservation = "D:\foundation-release-input\provider-observation.json"
+$buildRequirements = "D:\foundation-release-input\artifact-build-requirements.json"
+$buildRequirementsSha256 = (Get-FileHash -LiteralPath $buildRequirements -Algorithm SHA256).Hash.ToLowerInvariant()
 
 node scripts/build-release-artifact.mjs `
   --output $packageRoot `
-  --provider-observation $providerObservation
+  --provider-observation $providerObservation `
+  --build-requirements $buildRequirements `
+  --build-requirements-sha256 $buildRequirementsSha256
 ```
 
-任意 phase の standard dimension を build する場合は、review 済み canonical JSON を
-`--standard-dimensions` で渡す。builder は policy の exact dimension set と containment
-projection を検証する。
+`--standard-dimensions` は禁止されている。P6/P8 のように dimension delta がない gate も
+requirements の `targetGate` で識別し、caller の推測で補わない。
 
 builder は role ごとに次を行う。
 
@@ -128,6 +151,30 @@ builder は role ごとに次を行う。
 8. content-addressed object と package index を出力先へ atomic rename する。
 
 途中失敗した package は publish/deploy しない。
+
+### Policy activation QA build と drill
+
+通常の policy gate (`P1-PWA`、`P2A-LOCAL`、`P2B-REPORT`、`P3-XLSX`、`P4-CSP`、
+`P5-DUAL`、`P5-LIST`、`P7-IDB`) は production build と分離した次の chain を使う。
+
+1. `produce-policy-activation-qa-build-requirements` が exact predecessor/proposed/active policy と gate、
+   target source を束縛し、人が別 run で bytes/hash を review する。
+2. `build-policy-activation-qa` が reviewed requirements を再導出して、非 production Vercel build から
+   nonpromotable standard/containment pair を作る。
+3. `produce-policy-activation-qa-package` が manifest/ZIP/build authority を immutable store へ保存し、
+   production package index と互換でない専用 QA package を作る。
+4. `produce-policy-activation-qa-execution-subject` が QA package、policy、provider/CSP/toolchain authority を
+   exact 8 reference set に閉じ、人が subject SHA-256 を review する。
+5. `execute-policy-activation-qa` が operation 固有の `.vercel.app` alias にだけ preview deploy し、全 public
+   routeを検証する。QA standard、accepted rollback、QA containment、QA standard restore の順で drillし、
+   owned production domain とその subdomain には一度も接触しない。途中失敗も final restore と immutable
+   failure journal を要求する。
+6. `produce-policy-activation-closure` は reviewed QA execution bundle 一件だけを入力にし、そこから subject、
+   policy、package、deployment/probe/drill refsを導出して current state と再照合する。caller supplied auxiliary
+   SHA や missing/extra evidence を拒否する。
+
+`P8-CLEAN` は floor-only activation であり、QA build/drillへ入れない。P8 acceptance後に同じ accepted
+artifact bytesへ minimum safety floor を単調に適用する。
 
 ## Legacy bootstrap package
 
@@ -262,12 +309,20 @@ evidence store に保存し、保存後の再読取まで一致した場合だ�
 
 `.github/workflows/release.yml` の operation と固定アーティファクトを次の順で使う。
 
-1. `build-and-verify` が standard/containment pair を作り、
-   `foundation-release-<sourceSha>` を保存する。
+1. `produce-artifact-build-requirements` の prior run artifact/hash を人が reviewし、
+   `build-and-verify` が current state から同じ authority を再導出して standard/containment pair を作る。
+   package は `foundation-release-<sourceSha>-<requirementsSha256>` として保存する。
 2. role ごとに `deploy-prebuilt` を実行し、二つの immutable
    `foundation-deployment-<sourceSha>-<role>` を作る。
-3. QA/provenance evidence bytes を immutable store に保存し、UTF-8 順に整列した reference
-   だけを持つ canonical `pre-promotion-evidence-set.json` を
+3. QA/provenance evidence bytes を immutable store に保存し、review 済み
+   `collect-prepromotion-evidence-source` のprior runから
+   `foundation-prepromotion-evidence-source-<sourceSha>` を取得する。sourceは`qa`、`reproducibility`、
+   `resource`、`route`、`security`のexact 5 categoryと、review済みrequirements、standard/containment
+   binding、fresh provider observationを束縛する。requirements、standard binding、containment bindingは
+   相互にdistinctなprior runのGitHub Run API raw/canonical receiptで`completed/success`、run ID/attempt、
+   head SHA、workflow path、artifact名/hashを検証する。`produce-prepromotion-evidence` はUTF-8順に整列し、
+   全objectを再解決した
+   canonical `pre-promotion-evidence-set.json` だけを
    `foundation-prepromotion-evidence-<sourceSha>` として保護 run に保存する。
 4. `produce-promotion-subject` が current Release State を replay し、standard/companion/
    previous/emergency recovery と全 evidence を再解決して
@@ -289,18 +344,45 @@ evidence store に保存し、保存後の再読取まで一致した場合だ�
     `assignment-validated` と `observation-started` を順次 CAS append する。途中停止時は、
     同じ promotion artifact を指定した
     `record-promotion` または read-only `reconcile` だけを使う。
-11. `assignment-validated` の commit 後から同じ deployment ID と全 owned domain を
-    最大 5 分間隔で 24 時間以上観測し、fresh exact-source v1、minimum sample、
-    rollback inventory を満たす canonical `release-a-acceptance-evidence.json` と
-    `continuous-production-probe-source.json` を保存して bytes の SHA-256 を review する。
-12. `produce-acceptance-inputs` が reviewed evidence/source bytes から canonical
-    `continuous-production-probe.json` を生成する。P1 以降で legacy bootstrap を解除する場合は、
-    companion 固有の recovery drill を実施し、reviewed
-    `companion-recovery-drill-source.json` から `companion-recovery-drill.json` も生成する。
-    生成物の SHA-256 を別途 review する。
-13. `accept-standard` が evidence、continuous probe、必要時の companion drill の全 reviewed
-    hash、current head/provider identities、三役の distinct
-    approval を commit 直前にも再検証し、standard だけを `release-accepted` にする。
+11. `assignment-validated` のcommit後に`initialize-acceptance-collector`を一度だけ実行し、source、
+    assignment、provider policy、Release State headを束縛したpersistent acceptance chainを初期化する。
+    以後の`collect-continuous-sample`は毎回別のprotected runで、GitHub Run API/OIDCのprior-run authorityを
+    検証し、provider APIのdeployment lookup raw responseと全owned domainのpublic HTTP response/bodyを
+    実取得する。receipt/bodyをimmutable storeへ保存・readbackした後だけ、sample、chain commit、headを
+    `ops/release-state/migrations/0002_acceptance_evidence_chains.sql`の同一transaction/CASでappendする。
+    stale predecessor、fork/replay、異なるchain identity、途中rollback、caller supplied observationは拒否する。
+    最大5分間隔で24時間以上とminimum sampleを満たした後、`finalize-acceptance-evidence`がcurrent chainから
+    fresh exact-source v1とrollback inventoryを持つcanonical evidence/sourceをcreate-onlyで閉じる。
+    bytesのSHA-256とrun authorityをreviewし、`publish-acceptance-evidence`がexact prior artifactだけを
+    `foundation-acceptance-evidence-<sourceSha>`として再公開する。
+12. `produce-acceptance-requirements` が current Release State、pending standard、active release
+    policy の `phaseSequence` を replay し、次の `acceptedGate` と performance evidence の要否・kind を
+    canonical `acceptance-requirements.json` にする。人が bytes の SHA-256 を review し、後続 run は
+    exact prior run ID と hash で artifact を download する。後続 run は current state から同じ要件を
+    再導出し、bytes/hash が一致しない場合、同一 run の artifact、caller supplied gate を拒否する。
+13. performance evidence は accepted gate ごとに固定する。`P0-RELEASE` は
+    `P0-TOOLCHAIN` own-gate envelope、`P3-XLSX`、`P5-DUAL`、`P5-LIST` は各 own-gate
+    envelope、`P8-CLEAN` は四つの historical accepted event と live archive readback を束縛した
+    `performance-inherited-closure/v1` だけを許可する。P8 closure は
+    `produce-performance-inherited-closure` の別 run で作り、同じ artifact name/file/hash 契約で review
+    する。その他の accepted gate は performance bytes/hash とも `null` とし、dummy evidence を拒否する。
+14. `produce-acceptance-inputs` が reviewed requirements、evidence/source、必要時だけ reviewed
+    performance bytes から canonical `continuous-production-probe.json` を生成する。P1 以降で legacy
+    bootstrap を解除する場合は、companion 固有の recovery drill を実施し、reviewed
+    `companion-recovery-drill-source.json` から `companion-recovery-drill.json` も生成する。同じ保護 run で
+    三役の実 approval receipt、candidate event、DB/policy/provider/assignment/continuous probe と optional
+    performance ref の全 object closure を持つ `acceptance-final` bundle を生成し、bundle/object-set の
+    SHA-256 を別途 review する。source v2とfinal v1はそれぞれclosed JSON schemaで検証し、unknown field、
+    source workflow authority、sample/chain commit、HTTP/provider receiptの欠落またはkeyword制約違反を拒否する。
+15. `accept-standard` が reviewed requirements、evidence、continuous probe、必要時の performance と
+    companion drill、terminal bundle/object-set、current head/provider identities、三役の distinct approval
+    chain を再検証する。performance の full gate verifier は immutable evidence 保存前と CAS commit 直前の
+    二回実行し、完全一致した candidate event だけを CAS appendして standard だけを
+    `release-accepted` にする。
+
+collectorの下位CLIは`npm run release:acceptance-collector -- initialize|append|finalize`、final inputの
+下位CLIは`npm run release:acceptance-input -- continuous-probe|companion-recovery`である。productionでは
+上記workflow operationからだけ呼び、local shellの成功、fixture、同一run生成物をacceptanceへ流用しない。
 
 workflow の `source_sha` は protected `main` の dispatch head と exact 一致しなければならない。
 subject/evidence は caller が組み立てた snapshot を信用せず、Release State replay と immutable
@@ -322,6 +404,21 @@ post-assignment / pre-acceptance の失敗では、prepared operation が束縛�
 - package bytes が残り deployment だけ失われた場合:
   `package-redeploy-activated`
 
+`plan-archive-recovery` は provider mutation を行わない事前確認として残す。本番 recovery は次の
+二つの保護 run に分ける。
+
+1. `produce-archive-recovery-subject` が durable archive、availability receipt、manifest、package index、
+   content hash、path closure を再読込する。build/install は行わず exact prebuilt package だけを
+   materialize する。package redeploy の場合は alias を変えない immutable deployment と
+   `DeploymentBinding` を先に生成し、current head/target/origin/companion/emergency を束縛した canonical
+   subject を upload する。
+2. 人が subject SHA-256 を review し、`execute-reviewed-archive-recovery` が prior run の exact artifact を
+   download する。subject/approval を再検証し、pending operation を CAS appendしてから provider mutation、
+   assignment receipt/validation、terminal rollback/containment/redeploy event を順に CAS appendする。
+
+alias 変更後の terminal CAS 失敗は成功扱いにせず pending operation を維持し、execution artifact に
+reconcile-required material を残す。reviewed subject のない local shell や同一 run で mutation しない。
+
 containment は recovery deadline と target standard を記録する。expiry だけで alias を
 自動変更しない。blocking incident を継続し、source-hardened standard への recovery を
 完了する。
@@ -332,18 +429,22 @@ provider alias 変更と Release State append の間で process が停止した�
 
 1. Release State head と pending operation を read-only で取得する。
 2. provider API から全 owned domain の現在 assignment を取得する。
-3. immutable deployment の package/index/manifest/DB/policy hash を再解決する。
-4. prepared operation と exact 一致する場合だけ missing event を `state-reconciled` として
-   CAS append する。
-5. 一致しない、一部 domain だけ変更、unknown deployment、evidence 欠損の場合は自動推測
-   せず incident として停止する。
+3. pending target/previous/emergency binding の immutable provider policy、package/index/manifest/DB/policy
+   hash を store から再解決する。caller supplied policy/config は authority にしない。
+4. fresh exact observation が target の場合は `state-reconciled`、assignment validation、pending terminal
+   retry を続ける。全 domain が再 probe 済み previous の場合は accepted origin event/gate/floors を復元して
+   rollback terminal にする。previous を回復できず、verified emergency が exact な場合だけ containment
+   terminal にする。legacy bootstrap は temporary 6 時間、source-hardened containment は 24 時間の
+   recovery deadline を持つ。
+5. 一部 domain、unknown/ambiguous deployment、stale observation、evidence 欠損は自動推測せず blocked
+   decision として停止する。
 
 古い binding/artifact/event/evidence を reconcile の都合で削除しない。
 
-workflow の `reconcile` operation は provider API から owned domain assignment を直接取得し、
-raw response receipt と canonical observation を先に immutable store へ保存する。prepared
-operation、全 domain target、current Release State predecessor が exact 一致した場合だけ
-`state-reconciled` を CAS append する。caller supplied domain/target/snapshot は受け付けない。
+workflow の `reconcile` operation は provider API から owned domain assignment を直接取得し、raw response
+receipt と canonical observation を先に immutable store へ保存する。上記三分岐のいずれかが pending
+operation、全 domain、current predecessor と exact 一致した場合だけ lifecycle を進める。caller supplied
+domain/target/snapshot/provider policy は受け付けない。
 
 ## 完了記録
 

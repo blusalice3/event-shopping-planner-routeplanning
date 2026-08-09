@@ -9,9 +9,9 @@ import {
 import { SpaceNavigatorFooterButton } from "../features/space-navigation/components/SpaceNavigatorFooterButton";
 import { useOptionalSpaceNavigator } from "../features/space-navigation/SpaceNavigatorContext";
 import {
-  clearFooterHeightCss,
-  setFooterHeightCss,
-} from "../styles/useDynamicCssClass";
+  clearFooterHeightAttribute,
+  setFooterHeightAttribute,
+} from "../styles/runtimeLayoutAttributes";
 
 interface SummaryBarProps {
   items: ShoppingItem[];
@@ -38,7 +38,7 @@ const SummaryBar: React.FC<SummaryBarProps> = ({
     if (!el) return;
 
     const updateHeight = () => {
-      setFooterHeightCss(footerHeightOwnerId, el.offsetHeight);
+      setFooterHeightAttribute(footerHeightOwnerId, el.offsetHeight);
     };
 
     const observer = new ResizeObserver(updateHeight);
@@ -47,7 +47,7 @@ const SummaryBar: React.FC<SummaryBarProps> = ({
 
     return () => {
       observer.disconnect();
-      clearFooterHeightCss(footerHeightOwnerId);
+      clearFooterHeightAttribute(footerHeightOwnerId);
     };
   }, [footerHeightOwnerId]);
 

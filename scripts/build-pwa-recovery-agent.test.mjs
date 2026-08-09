@@ -3,8 +3,21 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { buildPwaRecoveryIdentity } from "./build-pwa-recovery-agent.mjs";
-import { readJsonStrict, sha256Json } from "./lib/canonical-json.mjs";
+import {
+  buildIndependentOuterAgent,
+  buildPwaRecoveryIdentity,
+} from "./build-pwa-recovery-agent.mjs";
+import {
+  canonicalJsonBytes,
+  readJsonStrict,
+  sha256Bytes,
+  sha256Json,
+} from "./lib/canonical-json.mjs";
+import {
+  OUTER_AGENT_ENTRY_MODULE,
+  OUTER_AGENT_URL,
+  parseIndependentOuterAgentGraph,
+} from "./lib/outer-agent-contract.mjs";
 import {
   computeVariantId,
   projectContainmentDimensions,
@@ -16,11 +29,40 @@ const dbFingerprint = "2".repeat(64);
 const createOutput = async (serviceWorkerSource) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "pwa-identity-test-"));
   await mkdir(path.join(root, "assets"), { recursive: true });
+  const outerAgentBytes = Buffer.from("export const outer = true;\n", "utf8");
+  const outerAgentGraph = {
+    schemaVersion: 1,
+    graphKind: "single-entry-outer-agent-v1",
+    sourceSha,
+    entryModule: OUTER_AGENT_ENTRY_MODULE,
+    entryFile: OUTER_AGENT_URL,
+    modules: [
+      {
+        id: OUTER_AGENT_ENTRY_MODULE,
+        external: false,
+        staticImports: [],
+        dynamicImports: [],
+      },
+    ],
+    chunks: [
+      {
+        file: OUTER_AGENT_URL,
+        sha256: sha256Bytes(outerAgentBytes),
+        size: outerAgentBytes.length,
+        staticImports: [],
+        dynamicImports: [],
+        modules: [OUTER_AGENT_ENTRY_MODULE],
+      },
+    ],
+  };
   await Promise.all([
     writeFile(
       path.join(root, "assets", "outer-recovery-agent.js"),
-      "export const outer = true;\n",
-      "utf8",
+      outerAgentBytes,
+    ),
+    writeFile(
+      path.join(root, "outer-agent-graph.json"),
+      canonicalJsonBytes(outerAgentGraph),
     ),
     writeFile(
       path.join(root, "assets", "release-role.js"),
@@ -31,6 +73,102 @@ const createOutput = async (serviceWorkerSource) => {
   ]);
   return root;
 };
+
+test("builds a reproducible self-contained outer agent graph", async () => {
+  const roots = await Promise.all([
+    mkdtemp(path.join(os.tmpdir(), "outer-agent-build-a-")),
+    mkdtemp(path.join(os.tmpdir(), "outer-agent-build-b-")),
+  ]);
+  try {
+    const [first, second] = await Promise.all(
+      roots.map((outputDirectory) =>
+        buildIndependentOuterAgent({ outputDirectory, sourceSha }),
+      ),
+    );
+    const [firstBytes, secondBytes, firstGraphBytes, secondGraphBytes] =
+      await Promise.all([
+        readFile(first.outerAgentPath),
+        readFile(second.outerAgentPath),
+        readFile(first.graphPath),
+        readFile(second.graphPath),
+      ]);
+    assert.deepEqual(firstBytes, secondBytes);
+    assert.deepEqual(firstGraphBytes, secondGraphBytes);
+    const graph = parseIndependentOuterAgentGraph({
+      graphBytes: firstGraphBytes,
+      sourceSha,
+      outerAgentBytes: firstBytes,
+    });
+    assert.equal(graph.chunks.length, 1);
+    assert.deepEqual(graph.chunks[0].staticImports, []);
+    assert.deepEqual(graph.chunks[0].dynamicImports, []);
+    assert.equal(firstBytes.includes(Buffer.from("src/index.tsx")), false);
+  } finally {
+    await Promise.all(
+      roots.map((root) => rm(root, { recursive: true, force: true })),
+    );
+  }
+});
+
+test("rejects outer agent byte and source-graph tampering", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "outer-agent-tamper-"));
+  try {
+    const result = await buildIndependentOuterAgent({
+      outputDirectory: root,
+      sourceSha,
+    });
+    const [outerAgentBytes, graphBytes] = await Promise.all([
+      readFile(result.outerAgentPath),
+      readFile(result.graphPath),
+    ]);
+    assert.throws(
+      () =>
+        parseIndependentOuterAgentGraph({
+          graphBytes,
+          sourceSha,
+          outerAgentBytes: Buffer.concat([
+            outerAgentBytes,
+            Buffer.from("\n// tampered", "utf8"),
+          ]),
+        }),
+      /self-contained byte-exact entry/,
+    );
+
+    const graph = JSON.parse(graphBytes.toString("utf8"));
+    graph.modules.push({
+      id: "src/index.tsx",
+      external: false,
+      staticImports: [],
+      dynamicImports: [],
+    });
+    graph.chunks[0].modules.push("src/index.tsx");
+    assert.throws(
+      () =>
+        parseIndependentOuterAgentGraph({
+          graphBytes: canonicalJsonBytes(graph),
+          sourceSha,
+          outerAgentBytes,
+        }),
+      /closed outer-agent source graph/,
+    );
+
+    const outputDependencyGraph = JSON.parse(graphBytes.toString("utf8"));
+    outputDependencyGraph.chunks[0].staticImports.push(
+      "/assets/release-role.js",
+    );
+    assert.throws(
+      () =>
+        parseIndependentOuterAgentGraph({
+          graphBytes: canonicalJsonBytes(outputDependencyGraph),
+          sourceSha,
+          outerAgentBytes,
+        }),
+      /self-contained byte-exact entry/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("writes byte-identical canonical stable and versioned identities", async () => {
   const policy = await readJsonStrict(
@@ -135,6 +273,48 @@ test("marks a CLI-selected QA identity as nonpromotable", async () => {
     assert.equal(result.identity.nonPromotable, true);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("marks policy-activation identities as nonpromotable for either release role", async () => {
+  const policy = await readJsonStrict(
+    new URL("../config/release-variants.json", import.meta.url),
+  );
+  const cases = [
+    {
+      releaseRole: "standard",
+      dimensions: policy.targetStandard,
+    },
+    {
+      releaseRole: "containment",
+      dimensions: projectContainmentDimensions(policy, policy.targetStandard),
+    },
+  ];
+
+  for (const entry of cases) {
+    const variantId = computeVariantId(policy, entry.dimensions);
+    const root = await createOutput(
+      `const identityUrl="/release-identity.${sourceSha}.${variantId}.json";`,
+    );
+    try {
+      const result = await buildPwaRecoveryIdentity({
+        distDirectory: root,
+        sourceSha,
+        releaseRole: entry.releaseRole,
+        dimensions: entry.dimensions,
+        dbFingerprint,
+        buildPurpose: "non-promotable-policy-activation-qa",
+        nonPromotable: true,
+      });
+      assert.equal(
+        result.identity.buildPurpose,
+        "non-promotable-policy-activation-qa",
+      );
+      assert.equal(result.identity.nonPromotable, true);
+      assert.equal(result.identity.releaseRole, entry.releaseRole);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   }
 });
 

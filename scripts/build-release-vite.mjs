@@ -1,14 +1,26 @@
 import { execFileSync } from "node:child_process";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
-import { buildPwaRecoveryIdentity } from "./build-pwa-recovery-agent.mjs";
+import {
+  buildIndependentOuterAgent,
+  buildPwaRecoveryIdentity,
+} from "./build-pwa-recovery-agent.mjs";
 import { readJsonStrict, sha256Json } from "./lib/canonical-json.mjs";
 import {
   bindReleaseBuildLauncher,
+  POLICY_ACTIVATION_QA_BUILD_PURPOSE,
+  RELEASE_BUILD_PURPOSE_ENV,
   resolveReleaseBuildInput,
 } from "./lib/release-build-input.mjs";
+import {
+  OUTER_AGENT_BUNDLE_ENV,
+  OUTER_AGENT_GRAPH_ENV,
+  parseIndependentOuterAgentGraph,
+} from "./lib/outer-agent-contract.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -33,8 +45,25 @@ if (
 ) {
   throw new Error("--qa-profile must be xlsx-main or list-force-full");
 }
-const cliBuildPurpose = qaProfile === null ? "production" : `qa-${qaProfile}`;
-if (qaProfile !== null && cliRole === "containment") {
+const reviewedRequirementsSha256 =
+  process.env.FOUNDATION_ARTIFACT_BUILD_REQUIREMENTS_SHA256 ?? null;
+const reviewedPolicyQaLaunch =
+  qaProfile === null &&
+  process.env[RELEASE_BUILD_PURPOSE_ENV] ===
+    POLICY_ACTIVATION_QA_BUILD_PURPOSE &&
+  typeof reviewedRequirementsSha256 === "string" &&
+  /^[0-9a-f]{64}$/.test(reviewedRequirementsSha256);
+const cliBuildPurpose =
+  qaProfile !== null
+    ? `qa-${qaProfile}`
+    : reviewedPolicyQaLaunch
+      ? POLICY_ACTIVATION_QA_BUILD_PURPOSE
+      : "production";
+if (
+  qaProfile !== null &&
+  cliBuildPurpose !== POLICY_ACTIVATION_QA_BUILD_PURPOSE &&
+  cliRole === "containment"
+) {
   throw new Error("Nonproduction QA profiles require the standard role");
 }
 const sourceSha = execFileSync("git", ["rev-parse", "HEAD"], {
@@ -83,20 +112,61 @@ const buildInput = resolveReleaseBuildInput({
 
 Object.assign(process.env, bindReleaseBuildLauncher(buildInput, releasePolicy));
 
-await build({
-  root: repositoryRoot,
-  mode: "release-a",
-});
-const result = await buildPwaRecoveryIdentity({
-  distDirectory: path.join(repositoryRoot, "dist"),
-  sourceSha: buildInput.sourceSha,
-  releaseRole: buildInput.releaseRole,
-  dimensions: buildInput.dimensions,
-  variantId: buildInput.variantId,
-  dbFingerprint: buildInput.dbFingerprint,
-  buildPurpose: buildInput.buildPurpose,
-  nonPromotable: buildInput.nonPromotable,
-});
+const suppliedOuterAgentPath = process.env[OUTER_AGENT_BUNDLE_ENV] ?? null;
+const suppliedOuterGraphPath = process.env[OUTER_AGENT_GRAPH_ENV] ?? null;
+if ((suppliedOuterAgentPath === null) !== (suppliedOuterGraphPath === null)) {
+  throw new Error(
+    "Independent outer agent bundle and graph must be supplied together",
+  );
+}
+let temporaryOuterRoot = null;
+let outerAgentPath = suppliedOuterAgentPath;
+let outerGraphPath = suppliedOuterGraphPath;
+if (outerAgentPath === null || outerGraphPath === null) {
+  temporaryOuterRoot = await mkdtemp(
+    path.join(os.tmpdir(), "foundation-independent-outer-"),
+  );
+  const builtOuter = await buildIndependentOuterAgent({
+    outputDirectory: temporaryOuterRoot,
+    sourceSha: buildInput.sourceSha,
+  });
+  outerAgentPath = builtOuter.outerAgentPath;
+  outerGraphPath = builtOuter.graphPath;
+} else {
+  const [outerAgentBytes, graphBytes] = await Promise.all([
+    readFile(path.resolve(outerAgentPath)),
+    readFile(path.resolve(outerGraphPath)),
+  ]);
+  parseIndependentOuterAgentGraph({
+    graphBytes,
+    sourceSha: buildInput.sourceSha,
+    outerAgentBytes,
+  });
+}
+process.env[OUTER_AGENT_BUNDLE_ENV] = path.resolve(outerAgentPath);
+process.env[OUTER_AGENT_GRAPH_ENV] = path.resolve(outerGraphPath);
+
+let result;
+try {
+  await build({
+    root: repositoryRoot,
+    mode: "release-a",
+  });
+  result = await buildPwaRecoveryIdentity({
+    distDirectory: path.join(repositoryRoot, "dist"),
+    sourceSha: buildInput.sourceSha,
+    releaseRole: buildInput.releaseRole,
+    dimensions: buildInput.dimensions,
+    variantId: buildInput.variantId,
+    dbFingerprint: buildInput.dbFingerprint,
+    buildPurpose: buildInput.buildPurpose,
+    nonPromotable: buildInput.nonPromotable,
+  });
+} finally {
+  if (temporaryOuterRoot !== null) {
+    await rm(temporaryOuterRoot, { recursive: true, force: true });
+  }
+}
 if (
   result.identity.sourceSha !== buildInput.sourceSha ||
   result.identity.releaseRole !== buildInput.releaseRole ||

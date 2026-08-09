@@ -3,9 +3,9 @@ import ReactDOM from "react-dom";
 import { SpaceNavigatorFooterButton } from "../../features/space-navigation/components/SpaceNavigatorFooterButton";
 import { useOptionalSpaceNavigator } from "../../features/space-navigation/SpaceNavigatorContext";
 import {
-  clearFooterHeightCss,
-  setFooterHeightCss,
-} from "../../styles/useDynamicCssClass";
+  clearFooterHeightAttribute,
+  setFooterHeightAttribute,
+} from "../../styles/runtimeLayoutAttributes";
 
 interface FocusModeFooterPortalProps {
   compact?: boolean;
@@ -51,14 +51,14 @@ export function FocusModeFooterPortal({
     const element = footerRef.current;
     if (!element) return;
     const updateHeight = () => {
-      setFooterHeightCss(footerHeightOwnerId, element.offsetHeight);
+      setFooterHeightAttribute(footerHeightOwnerId, element.offsetHeight);
     };
     const observer = new ResizeObserver(updateHeight);
     observer.observe(element);
     updateHeight();
     return () => {
       observer.disconnect();
-      clearFooterHeightCss(footerHeightOwnerId);
+      clearFooterHeightAttribute(footerHeightOwnerId);
     };
   }, [footerHeightOwnerId]);
 

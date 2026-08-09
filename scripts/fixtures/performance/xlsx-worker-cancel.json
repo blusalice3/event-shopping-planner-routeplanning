@@ -12,12 +12,19 @@
     "execution": "worker",
     "cancelTrigger": "first-parse-progress"
   },
+  "faultInjection": {
+    "method": "playwright-exact-worker-response-substitution-v1",
+    "replacementRef": "scripts/performance/fault-workers/cancel.worker.js",
+    "replacementSha256": "bf1fb5f64ed868214004ebd67517bd454f7f77685638b1f508eae687edcc20a2",
+    "beaconPath": "/__foundation-performance-worker-beacon"
+  },
   "expectedTerminal": {
     "kind": "abort",
     "name": "AbortError"
   },
   "requiredAssertions": [
     "cancel-message-observed",
+    "worker-terminated",
     "late-result-ignored",
     "zero-domain-commits",
     "zero-download-side-effects"

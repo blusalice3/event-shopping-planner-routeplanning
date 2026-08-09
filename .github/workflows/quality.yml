@@ -62,7 +62,7 @@ jobs:
       - name: DB compatibility policy
         run: npm run verify:db-compatibility
 
-      - name: Disposable PostgreSQL migration
+      - name: Disposable application and Release State PostgreSQL
         run: npm run test:db:disposable
 
       - name: Provider policy

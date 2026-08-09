@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  applyCspDeliveryToVercelOutput,
   assertNoPythonBuildTriggers,
   assertVercelOutputShape,
   buildBootstrapGeneratedFiles,
@@ -29,11 +30,18 @@ import {
 } from "./lib/release-policy.mjs";
 import {
   assertArtifactManifest,
+  assertPairRelationship,
   assertReleasePackageIndex,
   assertRoleEntryGraph,
   computeRoleEntryGraphHash,
   publicPathToOutputPath,
 } from "./lib/artifact-contract.mjs";
+import { POLICY_ACTIVATION_QA_BUILD_PURPOSE } from "./lib/release-build-input.mjs";
+import {
+  OUTER_AGENT_ENTRY_MODULE,
+  OUTER_AGENT_GRAPH_URL,
+  OUTER_AGENT_URL,
+} from "./lib/outer-agent-contract.mjs";
 import {
   contentAddressedObjectPath,
   contentAddressedUri,
@@ -41,9 +49,55 @@ import {
   resolveContentAddressedObject,
   writeContentAddressedObject,
 } from "./lib/content-addressed-store.mjs";
+import {
+  cspReportSinkContract,
+  renderCspHeaders,
+} from "./lib/csp-delivery.mjs";
 import { verifyReleasePackage } from "./verify-release-artifact.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+const fixtureApplicationStylesheet = Buffer.from(
+  "#loading-screen{display:flex}#loading-screen.hidden{display:none;visibility:hidden}\n",
+  "utf8",
+);
+
+const createFixtureOuterAgent = (sourceSha) => {
+  const outerAgentBytes = Buffer.from(
+    "export const outerRecoveryAgent = true;\n",
+    "utf8",
+  );
+  const graph = {
+    schemaVersion: 1,
+    graphKind: "single-entry-outer-agent-v1",
+    sourceSha,
+    entryModule: OUTER_AGENT_ENTRY_MODULE,
+    entryFile: OUTER_AGENT_URL,
+    modules: [
+      {
+        id: OUTER_AGENT_ENTRY_MODULE,
+        external: false,
+        staticImports: [],
+        dynamicImports: [],
+      },
+    ],
+    chunks: [
+      {
+        file: OUTER_AGENT_URL,
+        sha256: sha256Bytes(outerAgentBytes),
+        size: outerAgentBytes.length,
+        staticImports: [],
+        dynamicImports: [],
+        modules: [OUTER_AGENT_ENTRY_MODULE],
+      },
+    ],
+  };
+  return {
+    graph,
+    graphBytes: canonicalJsonBytes(graph),
+    outerAgentBytes,
+  };
+};
 
 const loadFixtureContext = async () => {
   const [
@@ -110,7 +164,7 @@ const writeBytes = async (base, relativePath, bytes) => {
   await writeFile(target, bytes, { flag: "wx" });
 };
 
-const buildCapabilityBytes = (sourceSha) =>
+const buildCapabilityBytes = (sourceSha, buildPurpose = "production") =>
   canonicalJsonBytes({
     kind: "event-shopping-planner-release-capabilities",
     version: 1,
@@ -120,23 +174,33 @@ const buildCapabilityBytes = (sourceSha) =>
     sourceState: "clean",
     releaseChannel: "release-a",
     legacyLocalStorageCleanup: "forced-off",
+    ...(buildPurpose === "production"
+      ? {}
+      : { buildPurpose, nonPromotable: true }),
   });
+
+const buildAuthority = (seed = "fixture-build-authority") => {
+  const sha256 = sha256Json({ seed });
+  return {
+    uri: `release-state://foundation-fixture/evidence/${sha256}`,
+    sha256,
+  };
+};
 
 const createVercelOutputBase = async ({
   outputRoot,
   sourceSha,
   capabilityBytes,
   cspPolicy,
+  cspMode = "enforced",
   sourceHardened = true,
 }) => {
   const securityHeaders = sourceHardened
-    ? {
-        "Content-Security-Policy": Object.entries(cspPolicy.directives)
-          .map(([directive, values]) => `${directive} ${values.join(" ")}`)
-          .join("; "),
-        ...cspPolicy.securityHeaders,
-      }
+    ? renderCspHeaders({ cspMode, cspPolicy })
     : {};
+  const reportSink = sourceHardened
+    ? cspReportSinkContract({ cspMode, cspPolicy })
+    : { enabled: false };
   const configBytes = canonicalJsonBytes({
     version: 3,
     routes: [
@@ -205,16 +269,22 @@ const createVercelOutputBase = async ({
     ),
     ...(sourceHardened
       ? [
-          writeBytes(
-            outputRoot,
-            "functions/api/csp-report.func/index.mjs",
-            Buffer.from("export default()=>new Response(null,{status:204});\n"),
-          ),
-          writeBytes(
-            outputRoot,
-            "functions/api/csp-report.func/.vc-config.json",
-            functionConfigBytes,
-          ),
+          ...(reportSink.enabled
+            ? [
+                writeBytes(
+                  outputRoot,
+                  "functions/api/csp-report.func/index.mjs",
+                  Buffer.from(
+                    "export default()=>new Response(null,{status:204});\n",
+                  ),
+                ),
+                writeBytes(
+                  outputRoot,
+                  "functions/api/csp-report.func/.vc-config.json",
+                  functionConfigBytes,
+                ),
+              ]
+            : []),
           writeBytes(
             outputRoot,
             "functions/api/google-sheets-csv.func/index.mjs",
@@ -232,8 +302,21 @@ const createVercelOutputBase = async ({
     writeBytes(
       outputRoot,
       "static/index.html",
-      Buffer.from("<!doctype html><html><body>fixture</body></html>\n"),
+      Buffer.from(
+        sourceHardened
+          ? '<!doctype html><html><head><link rel="stylesheet" href="/assets/app-fixture.css" /></head><body>fixture</body></html>\n'
+          : "<!doctype html><html><body>fixture</body></html>\n",
+      ),
     ),
+    ...(sourceHardened
+      ? [
+          writeBytes(
+            outputRoot,
+            "static/assets/app-fixture.css",
+            fixtureApplicationStylesheet,
+          ),
+        ]
+      : []),
     writeBytes(outputRoot, "static/release-capabilities.json", capabilityBytes),
     writeBytes(
       outputRoot,
@@ -256,17 +339,32 @@ const createRoleOutput = async ({
   requiredDbCompatibility,
   capabilityBytes,
   cspPolicy,
+  buildPurpose = "production",
 }) => {
   await createVercelOutputBase({
     outputRoot,
     sourceSha,
     capabilityBytes,
     cspPolicy,
+    cspMode: dimensions.cspMode,
   });
   const roleEntryBytes = Buffer.from(
     `globalThis.__fixtureRole=${JSON.stringify(dimensions.releaseRole)};\n`,
   );
-  await writeBytes(outputRoot, "static/assets/release-role.js", roleEntryBytes);
+  const outerAgent = createFixtureOuterAgent(sourceSha);
+  await Promise.all([
+    writeBytes(outputRoot, "static/assets/release-role.js", roleEntryBytes),
+    writeBytes(
+      outputRoot,
+      `static${OUTER_AGENT_URL}`,
+      outerAgent.outerAgentBytes,
+    ),
+    writeBytes(
+      outputRoot,
+      `static${OUTER_AGENT_GRAPH_URL}`,
+      outerAgent.graphBytes,
+    ),
+  ]);
   const swBytes = await readFile(path.join(outputRoot, "static", "sw.js"));
   const variantId = computeVariantId(releasePolicy, dimensions);
   const identity = {
@@ -276,6 +374,9 @@ const createRoleOutput = async ({
     variantId,
     releaseRole: dimensions.releaseRole,
     requiredDbCompatibilityFingerprint: requiredDbCompatibility.fingerprint,
+    ...(buildPurpose === "production"
+      ? {}
+      : { buildPurpose, nonPromotable: true }),
     pwaLifecycle: "legacy-auto-update-v1",
     appEntryUrl: "/assets/release-role.js",
     appEntrySha256: sha256Bytes(roleEntryBytes),
@@ -339,6 +440,7 @@ const createSourceHardenedFixturePackage = async (temporaryRoot, context) => {
     standardDimensions,
   );
   const capabilityBytes = buildCapabilityBytes(sourceSha);
+  const authority = buildAuthority("source-hardened-pair");
   const artifactReferences = [];
   for (const dimensions of [standardDimensions, containmentDimensions]) {
     const outputRoot = path.join(
@@ -365,6 +467,8 @@ const createSourceHardenedFixturePackage = async (temporaryRoot, context) => {
       publicBuildEnvHash: sha256Json({ schemaVersion: 1, values: {} }),
       publicIdentityKind: "release-identity-v1",
       bootstrap: null,
+      buildAuthority: authority,
+      targetGate: "P0-RELEASE",
       cspPolicy: context.cspPolicy,
     });
     artifactReferences.push(
@@ -383,6 +487,10 @@ const createSourceHardenedFixturePackage = async (temporaryRoot, context) => {
     packageKind: "source-hardened-pair",
     sourceSha,
     buildId: sourceSha,
+    buildAuthority: authority,
+    targetGate: "P0-RELEASE",
+    buildPurpose: "production",
+    promotable: true,
     toolchainPolicyHash: context.releaseContext.toolchainPolicyHash,
     providerConfigurationHash: context.releaseContext.providerConfigurationHash,
     providerPolicyHash: context.releaseContext.providerPolicyHash,
@@ -537,6 +645,10 @@ const createBootstrapFixturePackage = async (temporaryRoot, context) => {
     packageKind: "legacy-bootstrap-single",
     sourceSha,
     buildId: sourceSha,
+    buildAuthority: null,
+    targetGate: null,
+    buildPurpose: "legacy-bootstrap",
+    promotable: false,
     toolchainPolicyHash: context.releaseContext.toolchainPolicyHash,
     providerConfigurationHash: context.releaseContext.providerConfigurationHash,
     providerPolicyHash: context.releaseContext.providerPolicyHash,
@@ -557,7 +669,7 @@ const createBootstrapFixturePackage = async (temporaryRoot, context) => {
     canonicalJsonBytes(index),
     { flag: "wx" },
   );
-  return { packageRoot, index };
+  return { packageRoot, index, manifest };
 };
 
 const verificationArguments = (context, packageRoot) => ({
@@ -578,17 +690,20 @@ const createContractFixture = (context) => {
   const dimensions = { ...context.releasePolicy.initialStandard };
   const variantId = computeVariantId(context.releasePolicy, dimensions);
   const chunkHash = sha256Bytes(Buffer.from("fixture"));
+  const outerAgent = createFixtureOuterAgent(sourceSha);
+  const outerAgentHash = sha256Bytes(outerAgent.outerAgentBytes);
+  const outerAgentGraphHash = sha256Bytes(outerAgent.graphBytes);
   const roleEntryGraph = {
     schemaVersion: 1,
     graphKind: "rollup-role-entry-v1",
     sourceSha,
     releaseRole: "standard",
     variantId,
-    entryModule: "src/bootstrap.ts",
+    entryModule: "src/index.tsx",
     entryFile: "/assets/release-role.js",
     modules: [
       {
-        id: "src/bootstrap.ts",
+        id: "src/index.tsx",
         external: false,
         staticImports: [],
         dynamicImports: [],
@@ -601,7 +716,7 @@ const createContractFixture = (context) => {
         size: 7,
         staticImports: [],
         dynamicImports: [],
-        modules: ["src/bootstrap.ts"],
+        modules: ["src/index.tsx"],
       },
     ],
   };
@@ -612,6 +727,10 @@ const createContractFixture = (context) => {
     variantId,
     releaseRole: "standard",
     dimensions,
+    buildAuthority: buildAuthority("contract-fixture"),
+    targetGate: "P0-RELEASE",
+    buildPurpose: "production",
+    promotable: true,
     buildInputClosureHash: sha256Json({ fixture: "input" }),
     lockfileSha256: sha256Json({ fixture: "lock" }),
     toolchainPolicyHash: context.releaseContext.toolchainPolicyHash,
@@ -623,15 +742,27 @@ const createContractFixture = (context) => {
     publicIdentityKind: "release-identity-v1",
     bootstrap: null,
     publicResponseHashes: {
+      [OUTER_AGENT_URL]: outerAgentHash,
       "/assets/release-role.js": chunkHash,
+      [OUTER_AGENT_GRAPH_URL]: outerAgentGraphHash,
     },
     roleEntryGraph,
     roleEntryGraphHash: computeRoleEntryGraphHash(roleEntryGraph),
     outputFiles: [
       {
+        path: publicPathToOutputPath(OUTER_AGENT_URL),
+        sha256: outerAgentHash,
+        size: outerAgent.outerAgentBytes.length,
+      },
+      {
         path: "static/assets/release-role.js",
         sha256: chunkHash,
         size: 7,
+      },
+      {
+        path: publicPathToOutputPath(OUTER_AGENT_GRAPH_URL),
+        sha256: outerAgentGraphHash,
+        size: outerAgent.graphBytes.length,
       },
     ],
   };
@@ -644,6 +775,10 @@ const createContractFixture = (context) => {
     packageKind: "source-hardened-pair",
     sourceSha,
     buildId: sourceSha,
+    buildAuthority: manifest.buildAuthority,
+    targetGate: manifest.targetGate,
+    buildPurpose: manifest.buildPurpose,
+    promotable: manifest.promotable,
     toolchainPolicyHash: manifest.toolchainPolicyHash,
     providerConfigurationHash: manifest.providerConfigurationHash,
     providerPolicyHash: manifest.providerPolicyHash,
@@ -664,8 +799,54 @@ const createContractFixture = (context) => {
       },
     ],
   };
-  return { index, manifest, roleEntryGraph };
+  const containmentDimensions = projectContainmentDimensions(
+    context.releasePolicy,
+    dimensions,
+  );
+  const containmentManifest = structuredClone(manifest);
+  containmentManifest.releaseRole = "containment";
+  containmentManifest.dimensions = containmentDimensions;
+  containmentManifest.variantId = computeVariantId(
+    context.releasePolicy,
+    containmentDimensions,
+  );
+  containmentManifest.roleEntryGraph.releaseRole = "containment";
+  containmentManifest.roleEntryGraph.variantId = containmentManifest.variantId;
+  containmentManifest.roleEntryGraphHash = computeRoleEntryGraphHash(
+    containmentManifest.roleEntryGraph,
+  );
+  index.artifacts[1].variantId = containmentManifest.variantId;
+  return { index, manifest, containmentManifest, roleEntryGraph };
 };
+
+test("requires byte-identical role-independent outer agents in a pair", async () => {
+  const context = await loadFixtureContext();
+  const { index, manifest, containmentManifest } =
+    createContractFixture(context);
+  assert.doesNotThrow(() =>
+    assertPairRelationship({
+      index,
+      standardManifest: manifest,
+      containmentManifest,
+      releasePolicy: context.releasePolicy,
+    }),
+  );
+
+  for (const publicPath of [OUTER_AGENT_URL, OUTER_AGENT_GRAPH_URL]) {
+    const tampered = structuredClone(containmentManifest);
+    tampered.publicResponseHashes[publicPath] = "f".repeat(64);
+    assert.throws(
+      () =>
+        assertPairRelationship({
+          index,
+          standardManifest: manifest,
+          containmentManifest: tampered,
+          releasePolicy: context.releasePolicy,
+        }),
+      /independent outer agent bytes or closure graph differ/,
+    );
+  }
+});
 
 test("verifies a deterministic source-hardened role pair", async () => {
   const temporaryRoot = await mkdtemp(
@@ -693,15 +874,169 @@ test("verifies bootstrap raw dist byte-for-byte and fixed staging inputs", async
   );
   try {
     const context = await loadFixtureContext();
-    const { packageRoot } = await createBootstrapFixturePackage(
-      temporaryRoot,
-      context,
-    );
+    const { packageRoot, index, manifest } =
+      await createBootstrapFixturePackage(temporaryRoot, context);
     const result = await verifyReleasePackage(
       verificationArguments(context, packageRoot),
     );
     assert.equal(result.index.packageKind, "legacy-bootstrap-single");
     assert.equal(result.productionEligible, false);
+    assert.deepEqual(
+      {
+        buildAuthority: manifest.buildAuthority,
+        targetGate: manifest.targetGate,
+        buildPurpose: manifest.buildPurpose,
+        promotable: manifest.promotable,
+      },
+      {
+        buildAuthority: null,
+        targetGate: null,
+        buildPurpose: "legacy-bootstrap",
+        promotable: false,
+      },
+    );
+    assert.deepEqual(
+      {
+        buildAuthority: index.buildAuthority,
+        targetGate: index.targetGate,
+        buildPurpose: index.buildPurpose,
+        promotable: index.promotable,
+      },
+      {
+        buildAuthority: null,
+        targetGate: null,
+        buildPurpose: "legacy-bootstrap",
+        promotable: false,
+      },
+    );
+    const authorityInjection = structuredClone(manifest);
+    authorityInjection.buildAuthority = buildAuthority("bootstrap-injection");
+    assert.throws(
+      () => assertArtifactManifest(authorityInjection, context.releasePolicy),
+      /legacy bootstrap build authority is invalid/,
+    );
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("policy activation QA artifact purpose is explicit and production-rejected", async () => {
+  const temporaryRoot = await mkdtemp(
+    path.join(os.tmpdir(), "foundation-policy-qa-contract-"),
+  );
+  try {
+    const context = await loadFixtureContext();
+    const sourceSha = "9".repeat(40);
+    const dimensions = projectContainmentDimensions(
+      context.releasePolicy,
+      context.releasePolicy.initialStandard,
+    );
+    const outputRoot = path.join(temporaryRoot, "output");
+    const capabilityBytes = buildCapabilityBytes(
+      sourceSha,
+      POLICY_ACTIVATION_QA_BUILD_PURPOSE,
+    );
+    await createRoleOutput({
+      outputRoot,
+      sourceSha,
+      dimensions,
+      releasePolicy: context.releasePolicy,
+      requiredDbCompatibility: context.releaseContext.requiredDbCompatibility,
+      capabilityBytes,
+      cspPolicy: context.cspPolicy,
+      buildPurpose: POLICY_ACTIVATION_QA_BUILD_PURPOSE,
+    });
+    const authority = buildAuthority("policy-activation-qa");
+    const common = {
+      outputRoot,
+      releasePolicy: context.releasePolicy,
+      sourceSha,
+      dimensions,
+      buildInputClosureHash: sha256Json({ fixture: "policy-qa-input" }),
+      lockfileSha256: sha256Json({ fixture: "policy-qa-lock" }),
+      releaseContext: context.releaseContext,
+      publicBuildEnvHash: sha256Json({ schemaVersion: 1, values: {} }),
+      publicIdentityKind: "release-identity-v1",
+      bootstrap: null,
+      buildAuthority: authority,
+      cspPolicy: context.cspPolicy,
+    };
+    await assert.rejects(
+      createArtifactManifestFromOutput({
+        ...common,
+        targetGate: "P6-APP",
+      }),
+      /nonpromotable QA build/,
+    );
+
+    await assert.rejects(
+      createArtifactManifestFromOutput({
+        ...common,
+        targetGate: "P6-APP",
+        buildPurpose: POLICY_ACTIVATION_QA_BUILD_PURPOSE,
+      }),
+      /targetGate is invalid for policy activation QA/,
+    );
+    await assert.rejects(
+      createArtifactManifestFromOutput({
+        ...common,
+        targetGate: "P8-CLEAN",
+        buildPurpose: POLICY_ACTIVATION_QA_BUILD_PURPOSE,
+      }),
+      /targetGate is invalid for policy activation QA/,
+    );
+    const manifest = await createArtifactManifestFromOutput({
+      ...common,
+      targetGate: "P1-PWA",
+      buildPurpose: POLICY_ACTIVATION_QA_BUILD_PURPOSE,
+    });
+    assert.equal(manifest.targetGate, "P1-PWA");
+    assert.equal(manifest.buildPurpose, POLICY_ACTIVATION_QA_BUILD_PURPOSE);
+    assert.equal(manifest.promotable, false);
+    assert.deepEqual(manifest.buildAuthority, authority);
+    assert.throws(
+      () => assertArtifactManifest(manifest, context.releasePolicy),
+      /purpose\/promotable binding is invalid/,
+    );
+    assert.doesNotThrow(() =>
+      assertArtifactManifest(manifest, context.releasePolicy, {
+        expectedBuildPurpose: POLICY_ACTIVATION_QA_BUILD_PURPOSE,
+      }),
+    );
+
+    for (const targetGate of ["P6-APP", "P8-CLEAN"]) {
+      const productionManifest = structuredClone(
+        createContractFixture(context).manifest,
+      );
+      productionManifest.targetGate = targetGate;
+      assert.doesNotThrow(() =>
+        assertArtifactManifest(productionManifest, context.releasePolicy),
+      );
+      assert.equal(productionManifest.targetGate, targetGate);
+    }
+
+    const qaIndex = structuredClone(createContractFixture(context).index);
+    qaIndex.buildAuthority = authority;
+    qaIndex.targetGate = "P1-PWA";
+    qaIndex.buildPurpose = POLICY_ACTIVATION_QA_BUILD_PURPOSE;
+    qaIndex.promotable = false;
+    assert.throws(
+      () => assertReleasePackageIndex(qaIndex),
+      /purpose\/promotable binding is invalid/,
+    );
+    assert.doesNotThrow(() =>
+      assertReleasePackageIndex(qaIndex, {
+        expectedBuildPurpose: POLICY_ACTIVATION_QA_BUILD_PURPOSE,
+      }),
+    );
+    qaIndex.targetGate = "P8-CLEAN";
+    assert.throws(
+      () =>
+        assertReleasePackageIndex(qaIndex, {
+          expectedBuildPurpose: POLICY_ACTIVATION_QA_BUILD_PURPOSE,
+        }),
+      /targetGate is invalid for policy activation QA/,
+    );
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
@@ -823,7 +1158,58 @@ test("rejects Python build triggers and non-Node Vercel functions", async () => 
   }
 });
 
-test("requires CSP/Sheets API functions and exact emitted headers", async () => {
+test("normalizes Vercel CSP headers and report function from dimensions", async () => {
+  const temporaryRoot = await mkdtemp(
+    path.join(os.tmpdir(), "foundation-artifact-csp-modes-"),
+  );
+  try {
+    const context = await loadFixtureContext();
+    const sourceSha = "d".repeat(40);
+    for (const cspMode of ["none", "report-only", "enforced"]) {
+      const outputRoot = path.join(temporaryRoot, cspMode);
+      await createVercelOutputBase({
+        outputRoot,
+        sourceSha,
+        capabilityBytes: buildCapabilityBytes(sourceSha),
+        cspPolicy: context.cspPolicy,
+      });
+      await applyCspDeliveryToVercelOutput({
+        outputRoot,
+        cspMode,
+        cspPolicy: context.cspPolicy,
+      });
+      await assertVercelOutputShape(outputRoot, {
+        publicIdentityKind: "release-identity-v1",
+        cspMode,
+        cspPolicy: context.cspPolicy,
+      });
+      const config = await readJsonStrict(path.join(outputRoot, "config.json"));
+      const globalHeaders = config.routes.find(
+        (route) => route.src === "^/.*$",
+      ).headers;
+      assert.deepEqual(
+        globalHeaders,
+        renderCspHeaders({ cspMode, cspPolicy: context.cspPolicy }),
+      );
+      const reportFunctionPath = path.join(
+        outputRoot,
+        "functions",
+        "api",
+        "csp-report.func",
+        "index.mjs",
+      );
+      if (cspMode === "none") {
+        await assert.rejects(readFile(reportFunctionPath), /ENOENT/);
+      } else {
+        assert.match(await readFile(reportFunctionPath, "utf8"), /Response/);
+      }
+    }
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("requires mode-aware CSP/Sheets API functions and exact emitted headers", async () => {
   const temporaryRoot = await mkdtemp(
     path.join(os.tmpdir(), "foundation-artifact-routes-"),
   );

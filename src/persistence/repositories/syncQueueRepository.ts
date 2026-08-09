@@ -1,31 +1,23 @@
+import type {
+  LoadResult,
+  PersistenceRecordOperations,
+} from "../contracts/persistence";
 import { DATA_KEY, STORES } from "../db/constants";
 
-export interface SyncQueueRecordOperations<TLoadResult> {
-  write(
-    storeName: typeof STORES.SYNC_QUEUE,
-    key: typeof DATA_KEY,
-    data: unknown[],
-  ): Promise<void>;
-  read(
-    storeName: typeof STORES.SYNC_QUEUE,
-    key: typeof DATA_KEY,
-  ): Promise<TLoadResult>;
-}
-
-export interface SyncQueueRepository<TLoadResult> {
+export interface SyncQueueRepository {
   savePayload(data: unknown[]): Promise<void>;
-  loadPayload(): Promise<TLoadResult>;
+  loadPayload(): Promise<LoadResult<unknown[]>>;
 }
 
-export function createSyncQueueRepository<TLoadResult>(
-  operations: SyncQueueRecordOperations<TLoadResult>,
-): SyncQueueRepository<TLoadResult> {
+export function createSyncQueueRepository(
+  operations: PersistenceRecordOperations,
+): SyncQueueRepository {
   return {
     savePayload(data): Promise<void> {
-      return operations.write(STORES.SYNC_QUEUE, DATA_KEY, data);
+      return operations.save(STORES.SYNC_QUEUE, DATA_KEY, data);
     },
-    loadPayload(): Promise<TLoadResult> {
-      return operations.read(STORES.SYNC_QUEUE, DATA_KEY);
+    loadPayload(): Promise<LoadResult<unknown[]>> {
+      return operations.load<unknown[]>(STORES.SYNC_QUEUE, DATA_KEY);
     },
   };
 }

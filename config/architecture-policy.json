@@ -14,7 +14,7 @@
   "layers": [
     {
       "name": "entry",
-      "pathRegex": "^src/(?:index\\.tsx|bootstrap\\.ts|sw\\.ts)$"
+      "pathRegex": "^src/(?:index\\.tsx|sw\\.ts|pwa/recovery/outerAgentEntry\\.ts)$"
     },
     {
       "name": "pwa",
@@ -88,9 +88,19 @@
       "targetRegex": "^src/persistence/"
     },
     {
+      "id": "ui-direct-block-detection-storage",
+      "sourceRegex": "^src/(?:components/|features/)",
+      "targetRegex": "^src/utils/blockDetectionSettingsStorage\\.ts$"
+    },
+    {
       "id": "app-direct-xlsx-implementation",
       "sourceRegex": "^src/App\\.tsx$",
       "targetRegex": "^src/xlsx/"
+    },
+    {
+      "id": "app-command-direct-xlsx-implementation",
+      "sourceRegex": "^src/app/commands/",
+      "targetRegex": "^src/xlsx/(?:adapters|download|engine|security|worker)/"
     },
     {
       "id": "app-direct-persistence-implementation",
@@ -98,8 +108,13 @@
       "targetRegex": "^src/(?:persistence/|utils/indexedDB\\.ts$)"
     },
     {
+      "id": "app-command-direct-persistence-implementation",
+      "sourceRegex": "^src/app/commands/",
+      "targetRegex": "^src/(?:persistence/|utils/(?:indexedDB|blockDetectionSettingsStorage)\\.ts$)"
+    },
+    {
       "id": "app-direct-service-worker-implementation",
-      "sourceRegex": "^src/App\\.tsx$",
+      "sourceRegex": "^src/(?:App\\.tsx|app/commands/)",
       "targetRegex": "^src/(?:pwa/|sw\\.ts$)"
     },
     {
@@ -111,6 +126,36 @@
       "id": "outer-agent-no-package-import",
       "sourceRegex": "^src/pwa/(?:recovery/|releaseIdentityProtocol\\.ts$)",
       "packageRegex": ".+"
+    }
+  ],
+  "requiredDirectImportRules": [
+    {
+      "id": "app-phase6-composition-boundaries",
+      "source": "src/App.tsx",
+      "targets": [
+        "src/app/commands/useEventLifecycleCommands.ts",
+        "src/app/commands/useEventTransferCommands.ts",
+        "src/app/commands/useEventUpdateCommands.ts",
+        "src/app/commands/useMapEditorCommands.ts",
+        "src/app/commands/useMapImportCommands.ts",
+        "src/app/commands/useMapRouteCommands.ts",
+        "src/app/commands/useMapVisitListCommands.ts",
+        "src/app/commands/useShoppingItemMutationCommands.ts",
+        "src/app/commands/useShoppingSelectionExecutionCommands.ts",
+        "src/app/navigation/navigationSelectors.ts",
+        "src/app/selectors/appListViewSelectors.ts",
+        "src/app/selectors/appMapViewSelectors.ts",
+        "src/app/state/useAppOverlayController.ts",
+        "src/features/map/domain/normalizeHydratedHallState.ts"
+      ]
+    },
+    {
+      "id": "overlay-layer-grouped-controller-boundary",
+      "source": "src/features/app-shell/components/AppOverlayLayer.tsx",
+      "targets": [
+        "src/app/state/appOverlayState.ts",
+        "src/app/state/useAppOverlayController.ts"
+      ]
     }
   ],
   "entryGraphRules": [
@@ -141,7 +186,7 @@
     },
     {
       "id": "outer-agent-closed-graph",
-      "entry": "src/pwa/recovery/outerRecoveryAgent.ts",
+      "entry": "src/pwa/recovery/outerAgentEntry.ts",
       "forbiddenTargetRegex": "^(?!src/pwa/(?:recovery/|releaseIdentityProtocol\\.ts$)).+"
     }
   ],
@@ -153,8 +198,18 @@
     },
     {
       "id": "app-no-browser-persistence-or-sw-global",
-      "sourceRegex": "^src/App\\.tsx$",
-      "pattern": "\\b(?:indexedDB|IDBDatabase|IDBTransaction|ServiceWorkerRegistration|skipWaiting|clientsClaim)\\b|\\bnavigator\\s*\\.\\s*serviceWorker\\b"
+      "sourceRegex": "^src/(?:App\\.tsx|app/(?:commands|state)/)",
+      "pattern": "\\b(?:localStorage|sessionStorage|indexedDB|IDBDatabase|IDBTransaction|ServiceWorkerRegistration|skipWaiting|clientsClaim)\\b|\\bnavigator\\s*\\.\\s*serviceWorker\\b"
+    },
+    {
+      "id": "app-ui-state-no-overlay-shadow",
+      "sourceRegex": "^src/app/state/useAppUiState\\.ts$",
+      "pattern": "\\b(?:editDialogItem|itemToDelete|pendingEventUpdate|showUrlUpdateDialog|pendingUpdateEventName|showRenameDialog|eventToRename|pendingDuplicateEvent|showExportOptions|exportEventName|pendingBackup|pendingXlsxRestoreCompletion|mapImportDialogOpen|mapImportPendingFile|mapImportPendingEventName|pendingMapReimport)\\b"
+    },
+    {
+      "id": "map-workspace-state-no-overlay-shadow",
+      "sourceRegex": "^src/app/state/useMapWorkspaceState\\.ts$",
+      "pattern": "\\b(?:visitListPanelOpen|visitListPanelMapTab|visitListHasUnsavedChanges|visitListOriginalOrder|showVisitListConfirmDialog|pendingTabChange|blockDefinitionMode|cellSelectionMode|pendingCellSelection|hallDefinitionMode|vertexSelectionMode|pendingVertexSelection|smartInsertToast)\\b"
     },
     {
       "id": "hook-no-direct-persistence-mutation",
@@ -162,9 +217,29 @@
       "pattern": "\\bdb\\s*\\.\\s*(?:save[A-Z]|migrateFromLocalStorage|adoptRecoveryCandidate)"
     },
     {
+      "id": "ui-no-direct-browser-storage-mutation",
+      "sourceRegex": "^src/(?:components/|features/(?!shopping-list/preference/localStorageListRendererPreferenceAdapter\\.ts$))",
+      "pattern": "\\b(?:window\\s*\\.\\s*)?localStorage\\s*\\.\\s*(?:getItem|setItem|removeItem|clear)\\s*\\("
+    },
+    {
       "id": "outer-agent-no-dynamic-nonliteral-import",
       "sourceRegex": "^src/pwa/(?:recovery/|releaseIdentityProtocol\\.ts$)",
       "pattern": "\\bimport\\s*\\(\\s*(?![\"'])"
+    },
+    {
+      "id": "no-legacy-navigation-projection",
+      "sourceRegex": "^src/",
+      "pattern": "\\b(?:LegacyScreenState|screenStateFromLegacy|screenStateToLegacy)\\b"
+    },
+    {
+      "id": "no-legacy-overlay-projection-consumer",
+      "sourceRegex": "^src/",
+      "pattern": "\\b(?:LegacyAppOverlay|selectLegacyAppOverlayProjection|migrateLegacyAppOverlayState)\\b"
+    },
+    {
+      "id": "overlay-controller-no-projection-bridge",
+      "sourceRegex": "^src/app/state/useAppOverlayController\\.ts$",
+      "pattern": "\\bprojection\\b"
     }
   ],
   "forbiddenContractTestTextRules": [
@@ -172,6 +247,26 @@
       "id": "no-app-source-text-contract-test",
       "sourceRegex": "\\.(?:test|spec)\\.(?:ts|tsx)$",
       "pattern": "(?:readFileSync|readFile)\\s*\\([\\s\\S]{0,240}?(?:src/|src\\\\\\\\)?App\\.tsx"
+    },
+    {
+      "id": "performance-adapter-no-runtime-injection",
+      "sourceRegex": "^scripts/performance/(?!.*\\.(?:test|spec)\\.)[^\\r\\n]+\\.(?:js|mjs|cjs)$",
+      "pattern": "\\b(?:addInitScript|addScriptTag|addStyleTag|setContent|exposeBinding|exposeFunction)\\s*\\(|\\bWorker\\s*\\.\\s*prototype\\b|\\b(?:skipWaiting|clientsClaim)\\s*\\(|\\bnavigator\\s*\\.\\s*serviceWorker\\s*\\.\\s*register\\s*\\(|\\.\\s*unregister\\s*\\(|\\bcaches\\s*\\.\\s*delete\\s*\\(|\\bURL\\s*\\.\\s*createObjectURL\\s*\\(|[\"'`]\\s*(?:blob|data):"
+    },
+    {
+      "id": "performance-adapter-route-isolation",
+      "sourceRegex": "^scripts/performance/(?!hashBoundWorkerFaults\\.mjs$)(?!.*\\.(?:test|spec)\\.)[^\\r\\n]+\\.(?:js|mjs|cjs)$",
+      "pattern": "\\.\\s*(?:route|routeFromHAR)\\s*\\("
+    },
+    {
+      "id": "performance-adapter-no-production-source-import",
+      "sourceRegex": "^scripts/performance/(?!.*\\.(?:test|spec)\\.)[^\\r\\n]+\\.(?:js|mjs|cjs)$",
+      "pattern": "(?:from\\s*|import\\s*\\(\\s*)[\"'](?:src(?:[\"']|/|\\\\)|[^\"']*(?:/|\\\\)src(?:[\"']|/|\\\\))"
+    },
+    {
+      "id": "performance-adapter-no-target-harness-contract",
+      "sourceRegex": "^scripts/performance/(?!.*\\.(?:test|spec)\\.)[^\\r\\n]+\\.(?:js|mjs|cjs)$",
+      "pattern": "__ESP_CANONICAL_PERFORMANCE_HARNESS__|foundation-performance-scenario"
     }
   ],
   "forbiddenProductionPathRules": [
@@ -182,6 +277,10 @@
     {
       "id": "no-temporary-app-persistence-bridge",
       "pathRegex": "^src/(?:app|persistence)/.*(?:legacyIndexedDb|temporary(?:Persistence)?Bridge).*(?:\\.ts|\\.tsx)$"
+    },
+    {
+      "id": "no-stale-bootstrap-entry",
+      "pathRegex": "^src/bootstrap\\.ts$"
     }
   ],
   "baseline": "config/architecture-baseline.json",

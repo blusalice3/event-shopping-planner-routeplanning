@@ -379,12 +379,14 @@ describe("FocusMode Space Navigator integration", () => {
         onTouchStart={vi.fn()}
         onTouchMove={vi.fn()}
         onTouchEnd={vi.fn()}
-        prevButtonClassName="completion-prev-offset"
+        prevButtonLeft="48px"
       />,
     );
 
-    expect(screen.getByTitle("前の訪問先")).toHaveClass(
-      "completion-prev-offset",
+    expect(screen.getByTitle("前の訪問先")).toHaveClass("esp-layout-nav-left");
+    expect(screen.getByTitle("前の訪問先")).toHaveAttribute(
+      "data-nav-left",
+      "48px",
     );
   });
 

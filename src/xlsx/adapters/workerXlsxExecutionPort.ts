@@ -37,6 +37,8 @@ type PendingRequest = {
   signal: AbortSignal;
   abortListener: () => void;
   timeoutId: ReturnType<typeof setTimeout>;
+  cancellationError: Error | null;
+  cancellationTimeoutId: ReturnType<typeof setTimeout> | null;
 };
 
 export class XlsxWorkerPortError extends Error {
@@ -65,6 +67,7 @@ export class WorkerXlsxExecutionPort implements XlsxExecutionPort {
   readonly #onProgress?: XlsxProgressListener;
   readonly #requestIdFactory: () => string;
   readonly #requestTimeoutMs: number;
+  readonly #cancelAcknowledgementTimeoutMs: number;
   #disposed = false;
 
   readonly #messageListener = ((event: MessageEvent) => {
@@ -83,6 +86,7 @@ export class WorkerXlsxExecutionPort implements XlsxExecutionPort {
       onProgress?: XlsxProgressListener;
       requestIdFactory?: () => string;
       requestTimeoutMs?: number;
+      cancelAcknowledgementTimeoutMs?: number;
     } = {},
   ) {
     this.#worker = worker;
@@ -90,11 +94,21 @@ export class WorkerXlsxExecutionPort implements XlsxExecutionPort {
     this.#requestIdFactory =
       options.requestIdFactory ?? (() => crypto.randomUUID());
     this.#requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
+    this.#cancelAcknowledgementTimeoutMs =
+      options.cancelAcknowledgementTimeoutMs ?? 1_000;
     if (
       !Number.isSafeInteger(this.#requestTimeoutMs) ||
       this.#requestTimeoutMs <= 0
     ) {
       throw new TypeError("XLSX Worker timeout must be a positive integer.");
+    }
+    if (
+      !Number.isSafeInteger(this.#cancelAcknowledgementTimeoutMs) ||
+      this.#cancelAcknowledgementTimeoutMs <= 0
+    ) {
+      throw new TypeError(
+        "XLSX Worker cancellation timeout must be a positive integer.",
+      );
     }
     worker.addEventListener("message", this.#messageListener);
     worker.addEventListener("error", this.#errorListener);
@@ -206,18 +220,24 @@ export class WorkerXlsxExecutionPort implements XlsxExecutionPort {
           // The request is settled locally even if the Worker already crashed.
         }
       };
-      const abortListener = (): void => {
+      const requestCancellation = (error: Error): void => {
+        const pending = this.#pending.get(requestId);
+        if (!pending || pending.cancellationError) return;
+        clearTimeout(pending.timeoutId);
+        pending.cancellationError = error;
         cancelWorker();
-        this.#settle(requestId, () => reject(abortError()));
+        pending.cancellationTimeoutId = setTimeout(() => {
+          this.#settle(requestId, () => reject(error));
+        }, this.#cancelAcknowledgementTimeoutMs);
+      };
+      const abortListener = (): void => {
+        requestCancellation(abortError());
       };
       const timeoutId = setTimeout(() => {
-        cancelWorker();
-        this.#settle(requestId, () =>
-          reject(
-            new XlsxWorkerPortError(
-              "TIMEOUT",
-              "XLSX Worker exceeded its operation deadline.",
-            ),
+        requestCancellation(
+          new XlsxWorkerPortError(
+            "TIMEOUT",
+            "XLSX Worker exceeded its operation deadline.",
           ),
         );
       }, this.#requestTimeoutMs);
@@ -228,6 +248,8 @@ export class WorkerXlsxExecutionPort implements XlsxExecutionPort {
         signal,
         abortListener,
         timeoutId,
+        cancellationError: null,
+        cancellationTimeoutId: null,
       });
       signal.addEventListener("abort", abortListener, { once: true });
       try {
@@ -268,6 +290,14 @@ export class WorkerXlsxExecutionPort implements XlsxExecutionPort {
       );
       return;
     }
+    if (pending.cancellationError) {
+      if (response.type === "XLSX_ERROR" && response.errorCode === "ABORTED") {
+        this.#settle(response.requestId, () =>
+          pending.reject(pending.cancellationError!),
+        );
+      }
+      return;
+    }
     if (response.type === "XLSX_PROGRESS") {
       this.#onProgress?.(response.requestId, response.progress);
       return;
@@ -292,6 +322,9 @@ export class WorkerXlsxExecutionPort implements XlsxExecutionPort {
     if (!pending) return;
     this.#pending.delete(requestId);
     clearTimeout(pending.timeoutId);
+    if (pending.cancellationTimeoutId !== null) {
+      clearTimeout(pending.cancellationTimeoutId);
+    }
     pending.signal.removeEventListener("abort", pending.abortListener);
     callback();
   }
@@ -308,6 +341,7 @@ export const createWorkerXlsxExecutionPort = (
     onProgress?: XlsxProgressListener;
     workerFactory?: () => Worker;
     requestTimeoutMs?: number;
+    cancelAcknowledgementTimeoutMs?: number;
   } = {},
 ): WorkerXlsxExecutionPort => {
   if (!options.workerFactory && typeof Worker === "undefined") {
@@ -325,5 +359,6 @@ export const createWorkerXlsxExecutionPort = (
   return new WorkerXlsxExecutionPort(worker, {
     onProgress: options.onProgress,
     requestTimeoutMs: options.requestTimeoutMs,
+    cancelAcknowledgementTimeoutMs: options.cancelAcknowledgementTimeoutMs,
   });
 };

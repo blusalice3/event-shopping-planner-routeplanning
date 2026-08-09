@@ -45,6 +45,7 @@ const PROVIDER_POLICY = {
   gitProductionAutoDeploy: false,
   allowedPreviewBranches: [],
   requiredEnvironmentNames: ["VERCEL_DEPLOYMENT_ID"],
+  cspReportEnvironmentNames: [],
   forbiddenEnvironmentNames: [],
   rawRequestByteCeilings: {
     persistenceReleaseAMetrics: 1024,
@@ -104,7 +105,11 @@ class FakeStore {
   add(bytes, mediaType = "application/json") {
     const input = Buffer.from(bytes);
     const sha256 = sha256Bytes(input);
-    this.evidence.set(sha256, { bytes: input, mediaType });
+    this.evidence.set(sha256, {
+      bytes: input,
+      mediaType,
+      committedAt: COMPLETED_AT,
+    });
     return {
       uri: `release-state://${NAMESPACE}/evidence/${sha256}`,
       sha256,
@@ -120,6 +125,7 @@ class FakeStore {
       ...reference,
       mediaType,
       byteLength: input.length,
+      committedAt: COMPLETED_AT,
       replayed,
     };
   }
@@ -127,7 +133,11 @@ class FakeStore {
   async readEvidence({ sha256 }) {
     const stored = this.evidence.get(sha256);
     return stored
-      ? { bytes: Buffer.from(stored.bytes), mediaType: stored.mediaType }
+      ? {
+          bytes: Buffer.from(stored.bytes),
+          mediaType: stored.mediaType,
+          committedAt: stored.committedAt,
+        }
       : null;
   }
 
@@ -321,6 +331,7 @@ const createFixture = ({
   );
   const providerPolicyReference = store.add(
     canonicalJsonBytes(PROVIDER_POLICY),
+    "application/vnd.event-shopping-planner.provider-policy+json;version=1",
   );
   const configurationObservation = providerObservation();
   const configurationHash = providerConfigurationHash(configurationObservation);
@@ -349,6 +360,50 @@ const createFixture = ({
   const providerEvidenceReference = store.add(
     canonicalJsonBytes(providerEvidence),
   );
+  const companionProviderEvidenceReference = store.add(
+    canonicalJsonBytes({
+      ...providerEvidence,
+      providerDeploymentId: "deployment-companion",
+      deploymentUrl: "https://deployment-companion.vercel.app",
+      releaseRole: "containment",
+    }),
+  );
+  const previousProviderEvidenceReference = store.add(
+    canonicalJsonBytes({
+      ...providerEvidence,
+      providerDeploymentId: PREVIOUS_ID,
+      deploymentUrl: "https://deployment-previous.vercel.app",
+    }),
+  );
+  const archiveBinding = (bindingId, releaseRole) => {
+    const archiveBytes = Buffer.from(`archive:${bindingId}`);
+    const artifactArchive = store.add(
+      archiveBytes,
+      "application/vnd.event-shopping-planner.artifact-archive+zip;version=1",
+    );
+    const artifactArchiveAvailability = store.add(
+      canonicalJsonBytes({
+        schemaVersion: 1,
+        evidenceKind: "artifact-archive-availability/v1",
+        availability: "available",
+        namespace: NAMESPACE,
+        bindingId,
+        sourceSha: SOURCE_SHA,
+        variantId: VARIANT_ID,
+        releaseRole,
+        artifactManifest: artifactManifestReference,
+        artifactArchive: {
+          ...artifactArchive,
+          mediaType:
+            "application/vnd.event-shopping-planner.artifact-archive+zip;version=1",
+          byteLength: archiveBytes.length,
+          committedAt: COMPLETED_AT,
+        },
+      }),
+      "application/vnd.event-shopping-planner.artifact-archive-availability+json;version=1",
+    );
+    return { artifactArchive, artifactArchiveAvailability };
+  };
   const targetBinding = {
     bindingId: "standard-target",
     sourceSha: SOURCE_SHA,
@@ -359,6 +414,7 @@ const createFixture = ({
     providerProjectId: PROJECT_ID,
     providerDeploymentId: TARGET_ID,
     deploymentUrl: DEPLOYMENT_URL,
+    ...archiveBinding("standard-target", "standard"),
     packageIndex: packageIndexReference,
     artifactManifest: artifactManifestReference,
     providerEvidence: providerEvidenceReference,
@@ -373,12 +429,16 @@ const createFixture = ({
     releaseRole: "containment",
     providerDeploymentId: "deployment-companion",
     deploymentUrl: "https://deployment-companion.vercel.app",
+    providerEvidence: companionProviderEvidenceReference,
+    ...archiveBinding("containment-companion", "containment"),
   };
   const previousBinding = {
     ...targetBinding,
     bindingId: "standard-previous",
     providerDeploymentId: PREVIOUS_ID,
     deploymentUrl: "https://deployment-previous.vercel.app",
+    providerEvidence: previousProviderEvidenceReference,
+    ...archiveBinding("standard-previous", "standard"),
   };
   const subjectReference = store.add(
     canonicalJsonBytes({ kind: "promotion-subject" }),

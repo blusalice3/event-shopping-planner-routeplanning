@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
 
+import "./acceptanceEvidenceCollectorCli.cases.mjs";
+
 import { canonicalJsonBytes, sha256Bytes } from "../lib/canonical-json.mjs";
 import {
   parseAcceptanceEvidenceInputArguments,
@@ -26,6 +28,7 @@ const environment = {
   GITHUB_SHA: sourceSha,
   GITHUB_RUN_ID: "200",
   GITHUB_RUN_ATTEMPT: "1",
+  GITHUB_TOKEN: "github-token-fixture",
   RELEASE_STATE_NAMESPACE: namespace,
   RELEASE_STATE_DATABASE_URL:
     "postgresql://executor:secret@db.example.test/foundation?sslmode=verify-full",
@@ -41,11 +44,19 @@ const sourceBytes = canonicalJsonBytes({
   schemaVersion: 1,
   sourceKind: "fixture-source/v1",
 });
+const collectorReceiptBytes = canonicalJsonBytes({
+  schemaVersion: 1,
+  evidenceKind: "acceptance-collector-receipt/v1",
+});
 
 const argumentsFor = (command, sourceHash = sha256Bytes(sourceBytes)) => [
   command,
   "--namespace",
   namespace,
+  "--collector-receipt",
+  "acceptance-collector-receipt.json",
+  "--collector-receipt-sha256",
+  sha256Bytes(collectorReceiptBytes),
   "--release-evidence",
   "release-a.json",
   "--release-evidence-sha256",
@@ -88,6 +99,7 @@ const harness = ({ sourceHash = sha256Bytes(sourceBytes) } = {}) => {
     "acceptance-producer",
   );
   const inputs = {
+    "acceptance-collector-receipt.json": collectorReceiptBytes,
     "release-a.json": releaseAEvidenceBytes,
     "source.json": sourceBytes,
   };
@@ -141,6 +153,14 @@ const harness = ({ sourceHash = sha256Bytes(sourceBytes) } = {}) => {
       snapshot: {
         pendingAcceptance: {
           operationId: "pending-operation",
+        },
+      },
+    }),
+    resolveCollectorAuthority: async () => ({
+      workflowRunAuthority: {
+        receipt: {
+          uri: `release-state://${namespace}/evidence/${"f".repeat(64)}`,
+          sha256: "f".repeat(64),
         },
       },
     }),

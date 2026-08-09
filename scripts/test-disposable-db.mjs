@@ -6,7 +6,11 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { readJsonStrict } from "./lib/canonical-json.mjs";
+import {
+  canonicalJsonBytes,
+  readJsonStrict,
+  sha256Bytes,
+} from "./lib/canonical-json.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = await readJsonStrict(path.join(root, "package.json"));
@@ -26,6 +30,15 @@ if (!cspUpgradeMatch) {
   throw new Error("CSP report contract upgrade block is missing");
 }
 const cspReportContractUpgradeSql = cspUpgradeMatch[1];
+const releaseStateStoreMigrations = await Promise.all(
+  ["0001_release_state_store.sql", "0002_acceptance_evidence_chains.sql"].map(
+    (migration) =>
+      readFile(
+        path.join(root, "ops", "release-state", "migrations", migration),
+        "utf8",
+      ),
+  ),
+);
 if (process.versions.node !== packageJson.engines.node) {
   throw new Error(
     `Disposable DB gate requires Node ${packageJson.engines.node}; received ${process.versions.node}`,
@@ -89,6 +102,597 @@ const scalar = async (client, text) => {
     throw new Error(`Disposable DB scalar query is ambiguous: ${text}`);
   }
   return Object.values(result.rows[0])[0];
+};
+
+/**
+ * @param {unknown} error
+ * @param {string} expectedCode
+ * @param {RegExp | null} [messagePattern]
+ */
+const isPostgresError = (error, expectedCode, messagePattern = null) => {
+  if (
+    typeof error !== "object" ||
+    error === null ||
+    !("code" in error) ||
+    error.code !== expectedCode
+  ) {
+    return false;
+  }
+  if (messagePattern === null) return true;
+  return (
+    "message" in error &&
+    typeof error.message === "string" &&
+    messagePattern.test(error.message)
+  );
+};
+
+const RELEASE_STATE_NAMESPACE = "foundation-disposable-control";
+const RELEASE_STATE_EXECUTOR = "foundation_disposable_release_executor";
+const RELEASE_STATE_DENIED_EXECUTOR = "foundation_disposable_release_denied";
+const RELEASE_STATE_EXECUTOR_PASSWORD = "disposable-release-executor";
+const RELEASE_STATE_DENIED_PASSWORD = "disposable-release-denied";
+const ACCEPTANCE_OPERATION_ID = "disposable-acceptance-chain";
+const ACCEPTANCE_SOURCE_SHA = "0123456789abcdef0123456789abcdef01234567";
+const ACCEPTANCE_BINDING_ID = "disposable-standard-binding";
+const ACCEPTANCE_SAMPLE_MEDIA_TYPE =
+  "application/vnd.event-shopping-planner.continuous-probe-sample+json;version=1";
+const ACCEPTANCE_COMMIT_MEDIA_TYPE =
+  "application/vnd.event-shopping-planner.continuous-probe-chain-commit+json;version=1";
+const ACCEPTANCE_CHAIN_ID = sha256Bytes(
+  Buffer.from(
+    `${RELEASE_STATE_NAMESPACE}\n${ACCEPTANCE_OPERATION_ID}\n${ACCEPTANCE_SOURCE_SHA}\n${ACCEPTANCE_BINDING_ID}`,
+    "utf8",
+  ),
+);
+
+const acceptanceReference = (sha256) => ({
+  sha256,
+  uri: `release-state://${RELEASE_STATE_NAMESPACE}/evidence/${sha256}`,
+});
+
+const createAcceptancePair = ({
+  marker,
+  previousCommit = null,
+  previousSample = null,
+  sequence,
+}) => {
+  const sampleBytes = canonicalJsonBytes({
+    collectorIdentity: { marker },
+    evidenceKind: "continuous-production-probe-sample/v1",
+    namespace: RELEASE_STATE_NAMESPACE,
+    operationId: ACCEPTANCE_OPERATION_ID,
+    previousSample,
+    results: [],
+    schemaVersion: 1,
+    sourceSha: ACCEPTANCE_SOURCE_SHA,
+    standardBindingId: ACCEPTANCE_BINDING_ID,
+  });
+  const sampleReference = acceptanceReference(sha256Bytes(sampleBytes));
+  const commitBytes = canonicalJsonBytes({
+    bindingId: ACCEPTANCE_BINDING_ID,
+    commitKind: "continuous-probe-chain-commit/v1",
+    namespace: RELEASE_STATE_NAMESPACE,
+    operationId: ACCEPTANCE_OPERATION_ID,
+    previousCommit,
+    sampleReference,
+    schemaVersion: 1,
+    sequence,
+    sourceSha: ACCEPTANCE_SOURCE_SHA,
+  });
+  return {
+    commitBytes,
+    commitReference: acceptanceReference(sha256Bytes(commitBytes)),
+    sampleBytes,
+    sampleReference,
+  };
+};
+
+const appendAcceptancePair = (
+  client,
+  {
+    bindingId = ACCEPTANCE_BINDING_ID,
+    chainId = ACCEPTANCE_CHAIN_ID,
+    commitBytes,
+    commitMediaType = ACCEPTANCE_COMMIT_MEDIA_TYPE,
+    expectedHeadSha,
+    expectedSequence,
+    operationId = ACCEPTANCE_OPERATION_ID,
+    sampleBytes,
+    sampleMediaType = ACCEPTANCE_SAMPLE_MEDIA_TYPE,
+    sourceSha = ACCEPTANCE_SOURCE_SHA,
+  },
+) =>
+  client.query({
+    text: `select *
+      from foundation_release.append_acceptance_evidence_chain(
+        $1, $2, $3, $4, $5, $6, $7,
+        $8, $9, $10, $11, $12, $13
+      )`,
+    values: [
+      RELEASE_STATE_NAMESPACE,
+      chainId,
+      operationId,
+      sourceSha,
+      bindingId,
+      expectedSequence,
+      expectedHeadSha,
+      sha256Bytes(sampleBytes),
+      sampleMediaType,
+      sampleBytes,
+      sha256Bytes(commitBytes),
+      commitMediaType,
+      commitBytes,
+    ],
+  });
+
+const readAcceptanceChain = (
+  client,
+  {
+    bindingId = ACCEPTANCE_BINDING_ID,
+    chainId = ACCEPTANCE_CHAIN_ID,
+    operationId = ACCEPTANCE_OPERATION_ID,
+    sourceSha = ACCEPTANCE_SOURCE_SHA,
+  } = {},
+) =>
+  client.query({
+    text: `select *
+      from foundation_release.read_acceptance_evidence_chain(
+        $1, $2, $3, $4, $5
+      )`,
+    values: [
+      RELEASE_STATE_NAMESPACE,
+      chainId,
+      operationId,
+      sourceSha,
+      bindingId,
+    ],
+  });
+
+const createReleaseStateEvent = ({ appendId, operationId }) => {
+  const payload = {};
+  return {
+    approvalRefs: [],
+    appendId,
+    evidenceRefs: [],
+    eventType: "operation-aborted",
+    namespace: RELEASE_STATE_NAMESPACE,
+    operationId,
+    payload,
+    payloadSha256: sha256Bytes(canonicalJsonBytes(payload)),
+    previousEventHash: null,
+    schemaVersion: 1,
+    sequence: 1,
+  };
+};
+
+const appendReleaseStateEvent = (client, event) =>
+  client.query({
+    text: `select *
+      from foundation_release.compare_and_append($1, $2, $3, $4, $5)`,
+    values: [
+      RELEASE_STATE_NAMESPACE,
+      0,
+      null,
+      event.appendId,
+      canonicalJsonBytes(event),
+    ],
+  });
+
+const putReleaseEvidence = ({
+  bytes,
+  client,
+  mediaType = "application/json",
+  sha256 = sha256Bytes(bytes),
+}) =>
+  client.query({
+    text: `select *
+      from foundation_release.put_evidence_if_absent($1, $2, $3, $4)`,
+    values: [RELEASE_STATE_NAMESPACE, sha256, mediaType, bytes],
+  });
+
+const connectReleaseStateRole = async ({ Client, password, user }) => {
+  const client = new Client({
+    host: "127.0.0.1",
+    port: 54322,
+    database: "postgres",
+    user,
+    password,
+    ssl: false,
+    connectionTimeoutMillis: 10_000,
+    statement_timeout: 15_000,
+    application_name: "foundation-disposable-release-state-gate",
+  });
+  await client.connect();
+  return client;
+};
+
+const verifyReleaseStateControlStore = async ({ Client, administrator }) => {
+  for (const migration of releaseStateStoreMigrations) {
+    await administrator.query(migration);
+  }
+  await administrator.query(`
+    create role ${RELEASE_STATE_EXECUTOR}
+      login password '${RELEASE_STATE_EXECUTOR_PASSWORD}';
+    create role ${RELEASE_STATE_DENIED_EXECUTOR}
+      login password '${RELEASE_STATE_DENIED_PASSWORD}';
+    grant usage on schema foundation_release
+      to ${RELEASE_STATE_EXECUTOR}, ${RELEASE_STATE_DENIED_EXECUTOR};
+    grant execute on function foundation_release.compare_and_append(
+      text,
+      bigint,
+      text,
+      uuid,
+      bytea
+    ) to ${RELEASE_STATE_EXECUTOR}, ${RELEASE_STATE_DENIED_EXECUTOR};
+    grant execute on function foundation_release.put_evidence_if_absent(
+      text,
+      text,
+      text,
+      bytea
+    ) to ${RELEASE_STATE_EXECUTOR}, ${RELEASE_STATE_DENIED_EXECUTOR};
+    grant execute on function foundation_release.append_acceptance_evidence_chain(
+      text,
+      text,
+      text,
+      text,
+      text,
+      bigint,
+      text,
+      text,
+      text,
+      bytea,
+      text,
+      text,
+      bytea
+    ) to ${RELEASE_STATE_EXECUTOR}, ${RELEASE_STATE_DENIED_EXECUTOR};
+    grant execute on function foundation_release.read_acceptance_evidence_chain(
+      text,
+      text,
+      text,
+      text,
+      text
+    ) to ${RELEASE_STATE_EXECUTOR}, ${RELEASE_STATE_DENIED_EXECUTOR};
+    insert into foundation_release.release_state_namespace_roles (
+      namespace,
+      executor_role
+    ) values (
+      '${RELEASE_STATE_NAMESPACE}',
+      '${RELEASE_STATE_EXECUTOR}'
+    );
+  `);
+
+  const executor = await connectReleaseStateRole({
+    Client,
+    password: RELEASE_STATE_EXECUTOR_PASSWORD,
+    user: RELEASE_STATE_EXECUTOR,
+  });
+  const deniedExecutor = await connectReleaseStateRole({
+    Client,
+    password: RELEASE_STATE_DENIED_PASSWORD,
+    user: RELEASE_STATE_DENIED_EXECUTOR,
+  });
+  try {
+    const event = createReleaseStateEvent({
+      appendId: "11111111-1111-4111-8111-111111111111",
+      operationId: "disposable-control-store-append",
+    });
+    const eventBytes = canonicalJsonBytes(event);
+    const firstAppend = await appendReleaseStateEvent(executor, event);
+    if (
+      firstAppend.rowCount !== 1 ||
+      Number(firstAppend.rows[0].sequence) !== 1 ||
+      firstAppend.rows[0].event_hash !== sha256Bytes(eventBytes) ||
+      firstAppend.rows[0].replayed !== false
+    ) {
+      throw new Error("Release State initial CAS receipt differs");
+    }
+
+    const replayedAppend = await appendReleaseStateEvent(executor, event);
+    if (
+      replayedAppend.rowCount !== 1 ||
+      replayedAppend.rows[0].event_hash !== firstAppend.rows[0].event_hash ||
+      replayedAppend.rows[0].replayed !== true
+    ) {
+      throw new Error("Release State idempotent append receipt differs");
+    }
+
+    const conflictingEvent = createReleaseStateEvent({
+      appendId: "22222222-2222-4222-8222-222222222222",
+      operationId: "disposable-control-store-conflict",
+    });
+    await assert.rejects(
+      appendReleaseStateEvent(executor, conflictingEvent),
+      (error) => isPostgresError(error, "40001", /compare-and-swap failed/u),
+    );
+    await assert.rejects(
+      appendReleaseStateEvent(deniedExecutor, event),
+      (error) =>
+        isPostgresError(error, "42501", /release namespace executor denied/u),
+    );
+    await assert.rejects(
+      deniedExecutor.query(
+        "select sequence from foundation_release.release_state_heads",
+      ),
+      (error) => isPostgresError(error, "42501"),
+    );
+
+    const evidenceBytes = canonicalJsonBytes({
+      kind: "disposable-release-evidence/v1",
+      sourceSha: "0123456789abcdef0123456789abcdef01234567",
+    });
+    const evidenceSha256 = sha256Bytes(evidenceBytes);
+    const firstEvidence = await putReleaseEvidence({
+      bytes: evidenceBytes,
+      client: executor,
+    });
+    if (
+      firstEvidence.rowCount !== 1 ||
+      firstEvidence.rows[0].sha256 !== evidenceSha256 ||
+      Number(firstEvidence.rows[0].byte_length) !== evidenceBytes.length ||
+      firstEvidence.rows[0].replayed !== false
+    ) {
+      throw new Error("Release State initial evidence receipt differs");
+    }
+
+    const replayedEvidence = await putReleaseEvidence({
+      bytes: evidenceBytes,
+      client: executor,
+    });
+    if (
+      replayedEvidence.rowCount !== 1 ||
+      replayedEvidence.rows[0].sha256 !== evidenceSha256 ||
+      replayedEvidence.rows[0].replayed !== true
+    ) {
+      throw new Error("Release State idempotent evidence receipt differs");
+    }
+    await assert.rejects(
+      putReleaseEvidence({
+        bytes: evidenceBytes,
+        client: executor,
+        mediaType: "application/octet-stream",
+      }),
+      (error) =>
+        isPostgresError(error, "23505", /different metadata or bytes/u),
+    );
+    await assert.rejects(
+      putReleaseEvidence({
+        bytes: Buffer.from("tampered", "utf8"),
+        client: executor,
+        sha256: evidenceSha256,
+      }),
+      (error) => isPostgresError(error, "22000", /SHA-256 mismatch/u),
+    );
+    await assert.rejects(
+      administrator.query(`
+        update foundation_release.release_evidence_objects
+        set media_type = 'application/octet-stream'
+        where namespace = '${RELEASE_STATE_NAMESPACE}'
+      `),
+      (error) => isPostgresError(error, "55000", /records are immutable/u),
+    );
+    await assert.rejects(
+      administrator.query(`
+        delete from foundation_release.release_state_events
+        where namespace = '${RELEASE_STATE_NAMESPACE}'
+      `),
+      (error) => isPostgresError(error, "55000", /records are immutable/u),
+    );
+
+    const firstAcceptancePair = createAcceptancePair({
+      marker: "first",
+      sequence: 1,
+    });
+    const firstAcceptanceAppend = await appendAcceptancePair(executor, {
+      ...firstAcceptancePair,
+      expectedHeadSha: null,
+      expectedSequence: 0,
+    });
+    if (
+      firstAcceptanceAppend.rowCount !== 1 ||
+      Number(firstAcceptanceAppend.rows[0].chain_sequence) !== 1 ||
+      firstAcceptanceAppend.rows[0].chain_head_sha !==
+        firstAcceptancePair.commitReference.sha256 ||
+      firstAcceptanceAppend.rows[0].sample_committed_at.toISOString() !==
+        firstAcceptanceAppend.rows[0].commit_committed_at.toISOString() ||
+      firstAcceptanceAppend.rows[0].replayed !== false
+    ) {
+      throw new Error("Acceptance chain initial atomic append differs");
+    }
+    const firstAcceptanceReplay = await appendAcceptancePair(executor, {
+      ...firstAcceptancePair,
+      expectedHeadSha: null,
+      expectedSequence: 0,
+    });
+    if (
+      firstAcceptanceReplay.rowCount !== 1 ||
+      firstAcceptanceReplay.rows[0].chain_head_sha !==
+        firstAcceptancePair.commitReference.sha256 ||
+      firstAcceptanceReplay.rows[0].replayed !== true
+    ) {
+      throw new Error("Acceptance chain idempotent replay differs");
+    }
+    const firstAcceptanceHead = await readAcceptanceChain(executor);
+    if (
+      firstAcceptanceHead.rowCount !== 1 ||
+      Number(firstAcceptanceHead.rows[0].sequence) !== 1 ||
+      firstAcceptanceHead.rows[0].head_sha !==
+        firstAcceptancePair.commitReference.sha256 ||
+      firstAcceptanceHead.rows[0].operation_id !== ACCEPTANCE_OPERATION_ID ||
+      firstAcceptanceHead.rows[0].source_sha !== ACCEPTANCE_SOURCE_SHA ||
+      firstAcceptanceHead.rows[0].binding_id !== ACCEPTANCE_BINDING_ID
+    ) {
+      throw new Error("Acceptance chain canonical head differs");
+    }
+
+    const staleAcceptancePair = createAcceptancePair({
+      marker: "stale-origin",
+      sequence: 1,
+    });
+    await assert.rejects(
+      appendAcceptancePair(executor, {
+        ...staleAcceptancePair,
+        expectedHeadSha: null,
+        expectedSequence: 0,
+      }),
+      (error) => isPostgresError(error, "40001", /compare-and-swap failed/u),
+    );
+    await assert.rejects(
+      appendAcceptancePair(executor, {
+        ...staleAcceptancePair,
+        chainId: "f".repeat(64),
+        expectedHeadSha: null,
+        expectedSequence: 0,
+      }),
+      (error) => isPostgresError(error, "22023", /arguments are invalid/u),
+    );
+    await assert.rejects(
+      appendAcceptancePair(executor, {
+        ...staleAcceptancePair,
+        expectedHeadSha: null,
+        expectedSequence: 0,
+        sampleMediaType: "application/json",
+      }),
+      (error) => isPostgresError(error, "22023", /arguments are invalid/u),
+    );
+
+    const secondAcceptancePair = createAcceptancePair({
+      marker: "second",
+      previousCommit: firstAcceptancePair.commitReference,
+      previousSample: firstAcceptancePair.sampleReference,
+      sequence: 2,
+    });
+    await administrator.query(`
+      create function foundation_release.foundation_disposable_reject_chain_update()
+      returns trigger
+      language plpgsql
+      as $$
+      begin
+        raise exception 'disposable acceptance rollback probe';
+      end;
+      $$;
+      create trigger foundation_disposable_reject_chain_update
+      before update on foundation_release.acceptance_evidence_chains
+      for each row execute function
+        foundation_release.foundation_disposable_reject_chain_update();
+    `);
+    try {
+      await assert.rejects(
+        appendAcceptancePair(executor, {
+          ...secondAcceptancePair,
+          expectedHeadSha: firstAcceptancePair.commitReference.sha256,
+          expectedSequence: 1,
+        }),
+        /disposable acceptance rollback probe/u,
+      );
+    } finally {
+      await administrator.query(`
+        drop trigger foundation_disposable_reject_chain_update
+          on foundation_release.acceptance_evidence_chains;
+        drop function
+          foundation_release.foundation_disposable_reject_chain_update();
+      `);
+    }
+    const rolledBackAcceptanceObjects = Number(
+      await scalar(
+        administrator,
+        `select count(*)::integer
+         from foundation_release.release_evidence_objects
+         where namespace = '${RELEASE_STATE_NAMESPACE}'
+           and sha256 in (
+             '${secondAcceptancePair.sampleReference.sha256}',
+             '${secondAcceptancePair.commitReference.sha256}'
+           )`,
+      ),
+    );
+    const headAfterRollback = await readAcceptanceChain(executor);
+    if (
+      rolledBackAcceptanceObjects !== 0 ||
+      Number(headAfterRollback.rows[0].sequence) !== 1 ||
+      headAfterRollback.rows[0].head_sha !==
+        firstAcceptancePair.commitReference.sha256
+    ) {
+      throw new Error("Acceptance chain failed append was not atomic");
+    }
+
+    const secondAcceptanceAppend = await appendAcceptancePair(executor, {
+      ...secondAcceptancePair,
+      expectedHeadSha: firstAcceptancePair.commitReference.sha256,
+      expectedSequence: 1,
+    });
+    if (
+      secondAcceptanceAppend.rowCount !== 1 ||
+      Number(secondAcceptanceAppend.rows[0].chain_sequence) !== 2 ||
+      secondAcceptanceAppend.rows[0].chain_head_sha !==
+        secondAcceptancePair.commitReference.sha256 ||
+      secondAcceptanceAppend.rows[0].replayed !== false
+    ) {
+      throw new Error("Acceptance chain second atomic append differs");
+    }
+    const secondAcceptanceReplay = await appendAcceptancePair(executor, {
+      ...secondAcceptancePair,
+      expectedHeadSha: firstAcceptancePair.commitReference.sha256,
+      expectedSequence: 1,
+    });
+    if (secondAcceptanceReplay.rows[0].replayed !== true) {
+      throw new Error("Acceptance chain second replay differs");
+    }
+
+    const invalidCommitBytes = canonicalJsonBytes({
+      bindingId: ACCEPTANCE_BINDING_ID,
+      commitKind: "continuous-probe-chain-commit/v1",
+      namespace: RELEASE_STATE_NAMESPACE,
+      operationId: "different-operation",
+      previousCommit: secondAcceptancePair.commitReference,
+      sampleReference: secondAcceptancePair.sampleReference,
+      schemaVersion: 1,
+      sequence: 3,
+      sourceSha: ACCEPTANCE_SOURCE_SHA,
+    });
+    await assert.rejects(
+      appendAcceptancePair(executor, {
+        commitBytes: invalidCommitBytes,
+        expectedHeadSha: secondAcceptancePair.commitReference.sha256,
+        expectedSequence: 2,
+        sampleBytes: secondAcceptancePair.sampleBytes,
+      }),
+      (error) =>
+        isPostgresError(error, "22023", /commit document binding is invalid/u),
+    );
+
+    const thirdAcceptancePair = createAcceptancePair({
+      marker: "denied",
+      previousCommit: secondAcceptancePair.commitReference,
+      previousSample: secondAcceptancePair.sampleReference,
+      sequence: 3,
+    });
+    await assert.rejects(
+      appendAcceptancePair(deniedExecutor, {
+        ...thirdAcceptancePair,
+        expectedHeadSha: secondAcceptancePair.commitReference.sha256,
+        expectedSequence: 2,
+      }),
+      (error) => isPostgresError(error, "42501", /executor is not authorized/u),
+    );
+    await assert.rejects(readAcceptanceChain(deniedExecutor), (error) =>
+      isPostgresError(error, "42501", /reader is not authorized/u),
+    );
+    await assert.rejects(
+      readAcceptanceChain(executor, { chainId: "e".repeat(64) }),
+      (error) => isPostgresError(error, "22023", /reader identity is invalid/u),
+    );
+    for (const statement of [
+      "select * from foundation_release.acceptance_evidence_chains",
+      `update foundation_release.acceptance_evidence_chains
+       set updated_at = clock_timestamp()`,
+      "delete from foundation_release.acceptance_evidence_chains",
+    ]) {
+      await assert.rejects(executor.query(statement), (error) =>
+        isPostgresError(error, "42501"),
+      );
+    }
+  } finally {
+    await Promise.allSettled([executor.end(), deniedExecutor.end()]);
+  }
 };
 
 let started = false;
@@ -594,11 +1198,12 @@ try {
         "Disposable DB retention schedule is missing or duplicated",
       );
     }
+    await verifyReleaseStateControlStore({ Client, administrator: client });
   } finally {
     await client.end();
   }
   process.stdout.write(
-    "PASS disposable PostgreSQL 17 migrations, privileges, constraints, retention, and cron\n",
+    "PASS disposable PostgreSQL 17 application/control migrations, CAS, privileges, immutability, retention, and cron\n",
   );
 } finally {
   if (started) {

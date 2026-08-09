@@ -1,7 +1,11 @@
 {
   "schemaVersion": 1,
   "graphs": {
-    "productionRoots": ["src/bootstrap.ts", "src/index.tsx", "src/sw.ts"],
+    "productionRoots": [
+      "src/pwa/recovery/outerAgentEntry.ts",
+      "src/index.tsx",
+      "src/sw.ts"
+    ],
     "buildConfigRoots": [
       {
         "file": "eslint.config.js",
@@ -73,6 +77,12 @@
           "kind": "cli",
           "script": "test:browser",
           "binary": "playwright"
+        },
+        {
+          "kind": "module-import",
+          "graph": "release-tool",
+          "file": "scripts/collect-performance-samples.mjs",
+          "specifier": "@playwright/test"
         }
       ]
     },
@@ -291,6 +301,12 @@
           "kind": "module-import",
           "graph": "production",
           "file": "src/xlsx/engine/eventWorkbookEngine.ts",
+          "specifier": "exceljs"
+        },
+        {
+          "kind": "module-import",
+          "graph": "release-tool",
+          "file": "scripts/performance/canonicalPublicFixtures.mjs",
           "specifier": "exceljs"
         }
       ]

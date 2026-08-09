@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -12,24 +12,66 @@ import {
   hashReleaseEvent,
   replayReleaseEvents,
 } from "./release-state/releaseStateReducer.mjs";
+import {
+  assertReleaseEventMatchesSchema,
+  assertReleaseStateSnapshotMatchesSchema,
+} from "./release-state/releaseStateSchema.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const [storePolicy, approvalPolicy, releaseStateSchema, migrationBytes] =
-  await Promise.all([
-    readJsonStrict(path.join(root, "config", "release-state-store.json")),
-    readJsonStrict(path.join(root, "config", "approval-policy.json")),
-    readJsonStrict(path.join(root, "config", "release-state.schema.json")),
-    readFile(
-      path.join(
-        root,
-        "ops",
-        "release-state",
-        "migrations",
-        "0001_release_state_store.sql",
-      ),
+const migrationDirectory = path.join(
+  root,
+  "ops",
+  "release-state",
+  "migrations",
+);
+const expectedMigrationPaths = [
+  "ops/release-state/migrations/0001_release_state_store.sql",
+  "ops/release-state/migrations/0002_acceptance_evidence_chains.sql",
+];
+const [
+  storePolicy,
+  approvalPolicy,
+  releaseStateSchema,
+  migrationBytes,
+  migrationDirectoryEntries,
+] = await Promise.all([
+  readJsonStrict(path.join(root, "config", "release-state-store.json")),
+  readJsonStrict(path.join(root, "config", "approval-policy.json")),
+  readJsonStrict(path.join(root, "config", "release-state.schema.json")),
+  Promise.all(
+    expectedMigrationPaths.map((migrationPath) =>
+      readFile(path.join(root, ...migrationPath.split("/"))),
     ),
-  ]);
-const migrationSha256 = sha256Bytes(migrationBytes);
+  ),
+  readdir(migrationDirectory),
+]);
+const migrationReferences = expectedMigrationPaths.map(
+  (migrationPath, index) => ({
+    path: migrationPath,
+    sha256: sha256Bytes(migrationBytes[index]),
+  }),
+);
+const migrationSetSha256 = sha256Json(migrationReferences);
+const migrationFileNames = migrationDirectoryEntries
+  .filter((entry) => entry.endsWith(".sql"))
+  .sort();
+const expectedMigrationFileNames = expectedMigrationPaths.map((migrationPath) =>
+  path.basename(migrationPath),
+);
+const hasClosedMigrationSet =
+  Array.isArray(storePolicy.migrations) &&
+  storePolicy.migrations.length === migrationReferences.length &&
+  storePolicy.migrations.every(
+    (reference, index) =>
+      reference !== null &&
+      typeof reference === "object" &&
+      !Array.isArray(reference) &&
+      Object.keys(reference).sort().join("\n") === "path\nsha256" &&
+      reference.path === migrationReferences[index].path &&
+      reference.sha256 === migrationReferences[index].sha256,
+  ) &&
+  migrationFileNames.join("\n") === expectedMigrationFileNames.join("\n") &&
+  storePolicy.migrationSetSha256 === migrationSetSha256;
 if (
   storePolicy.schemaVersion !== 1 ||
   storePolicy.engine !== "postgresql" ||
@@ -39,12 +81,35 @@ if (
   storePolicy.tlsMode !== "verify-full" ||
   storePolicy.maximumEvidenceObjectBytes !== 268435456 ||
   storePolicy.credentialRotationDays !== 90 ||
-  storePolicy.migrationChecksums?.["0001_release_state_store.sql"] !==
-    migrationSha256
+  !hasClosedMigrationSet
 ) {
   throw new Error(
     "Release State store policy differs from the protected-store contract",
   );
+}
+const migrationTexts = migrationBytes.map((bytes) => bytes.toString("utf8"));
+for (const requiredFragment of [
+  "create table if not exists foundation_release.release_state_heads",
+  "create or replace function foundation_release.compare_and_append",
+  "create or replace function foundation_release.put_evidence_if_absent",
+]) {
+  if (!migrationTexts[0].includes(requiredFragment)) {
+    throw new Error(`Release State base migration omits ${requiredFragment}`);
+  }
+}
+for (const requiredFragment of [
+  "create table if not exists foundation_release.acceptance_evidence_chains",
+  "create or replace function foundation_release.append_acceptance_evidence_chain",
+  "create or replace function foundation_release.read_acceptance_evidence_chain",
+  "requested_chain_id is distinct from computed_chain_id",
+  "pg_advisory_xact_lock",
+  "acceptance chain objects already exist outside atomic append",
+  "continuous-probe-chain-commit+json;version=1",
+  "revoke all on table foundation_release.acceptance_evidence_chains from public",
+]) {
+  if (!migrationTexts[1].includes(requiredFragment)) {
+    throw new Error(`Acceptance chain migration omits ${requiredFragment}`);
+  }
 }
 if (
   approvalPolicy.schemaVersion !== 1 ||
@@ -94,7 +159,53 @@ if (
 ) {
   throw new Error("Release State schema does not close the event envelope");
 }
-const migrationText = migrationBytes.toString("utf8").toLowerCase();
+const declaredEventTypes =
+  releaseStateSchema.$defs.releaseEventEnvelope.properties?.eventType?.enum ??
+  [];
+const eventPayloadBranches =
+  releaseStateSchema.$defs.releaseEventEnvelope.allOf?.[0]?.oneOf ?? [];
+const mappedEventTypes = eventPayloadBranches.map(
+  (branch) => branch.properties?.eventType?.const,
+);
+if (
+  declaredEventTypes.length !== mappedEventTypes.length ||
+  new Set(mappedEventTypes).size !== mappedEventTypes.length ||
+  declaredEventTypes.some((eventType) => !mappedEventTypes.includes(eventType))
+) {
+  throw new Error(
+    "Release State schema must map every event type to one payload schema",
+  );
+}
+for (const branch of eventPayloadBranches) {
+  const payloadReference = branch.properties?.payload?.$ref;
+  const definitionName = payloadReference?.match(/^#\/\$defs\/([^/]+)$/)?.[1];
+  const payloadDefinition = releaseStateSchema.$defs?.[definitionName];
+  const isClosed =
+    payloadDefinition?.additionalProperties === false ||
+    (Array.isArray(payloadDefinition?.oneOf) &&
+      payloadDefinition.oneOf.length > 0 &&
+      payloadDefinition.oneOf.every(
+        (variant) => variant.additionalProperties === false,
+      ));
+  if (!definitionName || !isClosed) {
+    throw new Error(
+      `Release State event payload schema is not closed: ${payloadReference ?? "missing"}`,
+    );
+  }
+}
+for (const definition of [
+  "legacyProductionObservation",
+  "containmentIncident",
+  "standardRecovery",
+  "rollbackInventoryEntry",
+]) {
+  if (releaseStateSchema.$defs?.[definition]?.additionalProperties !== false) {
+    throw new Error(
+      `Release State schema definition is not closed: ${definition}`,
+    );
+  }
+}
+const migrationText = migrationBytes[0].toString("utf8").toLowerCase();
 for (const fragment of [
   "insert into foundation_release.release_state_heads",
   "on conflict (namespace) do nothing",
@@ -123,7 +234,7 @@ if (
 const inputIndex = process.argv.indexOf("--events");
 if (inputIndex === -1) {
   console.log(
-    `PASS Release State static contract ${sha256Json(releaseStateSchema)}; migration ${migrationSha256}; store ${storePolicy.bindingStatus}.`,
+    `PASS Release State static contract ${sha256Json(releaseStateSchema)}; migrations ${migrationSetSha256}; store ${storePolicy.bindingStatus}.`,
   );
   process.exitCode = 0;
 } else if (!process.argv[inputIndex + 1]) {
@@ -149,6 +260,11 @@ if (inputIndex === -1) {
   for (let index = 0; index < input.events.length; index += 1) {
     const event = input.events[index];
     const receipt = input.receipts[index];
+    assertReleaseEventMatchesSchema(
+      event,
+      releaseStateSchema,
+      `Release State event ${index + 1}`,
+    );
     const eventHash = hashReleaseEvent(event);
     const committedAt = new Date(receipt.committedAt).getTime();
     if (
@@ -170,6 +286,11 @@ if (inputIndex === -1) {
     }
   }
   const snapshot = replayReleaseEvents(input.events);
+  assertReleaseStateSnapshotMatchesSchema(
+    snapshot,
+    releaseStateSchema,
+    "Release State terminal snapshot",
+  );
   if (snapshot.eventHash !== input.receipts.at(-1).eventHash) {
     throw new Error("Release State terminal head does not match receipts");
   }

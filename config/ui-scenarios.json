@@ -47,7 +47,7 @@
       "id": "xlsx-worker-import-valid",
       "kind": "browser-integration-performance",
       "fixtureRef": "scripts/fixtures/performance/xlsx-worker-import-valid.json",
-      "fixtureSha256": "6735aa18fb958644e26302aa49f2c2d360301264fb1a1d4c21ec108d7b4ed395",
+      "fixtureSha256": "92cb5e666642c7dff4b69026c572dde9f3e213e02b3f0ba0c684a351ca97321f",
       "fixtureBinding": "current-policy-tree",
       "introducedAtGate": "P3-XLSX",
       "requiredFromExit": "P3-XLSX"
@@ -56,7 +56,7 @@
       "id": "xlsx-worker-export-roundtrip",
       "kind": "browser-integration-performance",
       "fixtureRef": "scripts/fixtures/performance/xlsx-worker-export-roundtrip.json",
-      "fixtureSha256": "c690da278e338a43186c033863edd381dd5447a50b3a664375e315dbea5fc3e4",
+      "fixtureSha256": "bab26e38f6ff10a295b37de9338918052fb7d5984b2364d02f5ae6e3c69de809",
       "fixtureBinding": "current-policy-tree",
       "introducedAtGate": "P3-XLSX",
       "requiredFromExit": "P3-XLSX"
@@ -92,7 +92,7 @@
       "id": "xlsx-worker-cancel",
       "kind": "worker-integration-performance",
       "fixtureRef": "scripts/fixtures/performance/xlsx-worker-cancel.json",
-      "fixtureSha256": "f5830630144285650838423f437c842327adbbe35ce4c962b1fe81385ecd9424",
+      "fixtureSha256": "052cbe168b6bd7954dadde59de084b01afb38281ac5de7e9f4d9aac22eab249f",
       "fixtureBinding": "current-policy-tree",
       "introducedAtGate": "P3-XLSX",
       "requiredFromExit": "P3-XLSX"
@@ -101,7 +101,7 @@
       "id": "xlsx-worker-timeout",
       "kind": "worker-integration-performance",
       "fixtureRef": "scripts/fixtures/performance/xlsx-worker-timeout.json",
-      "fixtureSha256": "a9ee2e4e54e1a4f95a3260914834bfdf67e4823cee7f9be6401da3a98dcee520",
+      "fixtureSha256": "1a139280b17d325009cde5946f60dd03c686fb2bb560f0b9f47a321ab6fec841",
       "fixtureBinding": "current-policy-tree",
       "introducedAtGate": "P3-XLSX",
       "requiredFromExit": "P3-XLSX"
@@ -146,7 +146,7 @@
       "id": "list-renderer-selection",
       "kind": "browser-a11y-integration-performance",
       "fixtureRef": "scripts/fixtures/performance/list-renderer-selection.json",
-      "fixtureSha256": "0a17824be738abc5f31d05717a96304d01f522b83a0f997222a69d70015db82e",
+      "fixtureSha256": "e93b2464e56743f8a730052c9083562f6336dde60143cf01770338c513f19456",
       "fixtureBinding": "current-policy-tree",
       "introducedAtGate": "P5-LIST",
       "requiredFromExit": "P5-LIST"

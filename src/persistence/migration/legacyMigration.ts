@@ -60,7 +60,6 @@ import {
 import { isPlainRecord } from "../internal/valueValidation";
 import {
   assertCurrentCheckpointMatchesExpected,
-  assertCurrentMapMatchesExpected,
   assertCurrentSnapshotMatchesExpected,
   assertStructuredCloneable,
   createNextPersistenceCheckpoint,
@@ -77,10 +76,8 @@ import {
   persistenceWriterId,
   readErrorName,
   readPersistenceSnapshotWithRetry,
-  readRawMapSnapshotWithRetry,
   readRuntimeCandidateSnapshots,
   runtimeSnapshotsToRecoveryCandidates,
-  validateMapSnapshot,
   validatePersistenceSnapshot,
   type LegacyMigrationArchive,
   type LegacyMigrationConflictResolution,
@@ -96,7 +93,6 @@ import {
   type PersistenceLegacyCleanupTaskBlockedReason,
   type PersistenceLegacyCleanupTaskDeferredReason,
   type PersistenceMigrationResult,
-  type RawMapSnapshot,
   type RuntimeCandidateSnapshot,
   type StoredPersistenceMetadata,
   type ValidatedPersistenceSnapshot,
@@ -112,9 +108,13 @@ import {
   type RecoveryAdoptionStoreName,
 } from "../recovery/recoverySourceEvidence";
 import {
+  assertCurrentMapMatchesExpected,
   buildMapDataPuts,
   materializeMapData,
+  readRawMapSnapshotWithRetry,
   readMapEntriesFromStore,
+  validateMapSnapshot,
+  type RawMapSnapshot,
 } from "../repositories/mapRepository";
 import { validateCheckpointForRoot } from "../recovery/checkpoint";
 

@@ -9,32 +9,55 @@ import {
   computeVariantId,
   projectContainmentDimensions,
 } from "../lib/release-policy.mjs";
+import { ACCEPTANCE_PERFORMANCE_REQUIREMENTS } from "../lib/performance-evidence-identity.mjs";
 import { providerConfigurationHash } from "../provider/providerConfiguration.mjs";
 import { readCurrentReleaseState } from "./currentReleaseState.mjs";
 import {
-  COMPANION_RECOVERY_STEPS,
+  PROVIDER_ALIAS_OBSERVATION_KIND,
+  PROVIDER_ALIAS_OBSERVATION_MEDIA_TYPE,
+} from "./reconcileDecision.mjs";
+import {
   produceCompanionRecoveryDrill,
   produceContinuousProductionProbe,
 } from "./acceptanceEvidenceInputs.mjs";
 import {
+  GITHUB_OIDC_RECEIPT_MEDIA_TYPE,
+  collectContinuousProductionSample,
+  collectReleaseAEvidenceAuthority,
+  createCompanionRecoverySource,
+  initializeContinuousProbeCollection,
+} from "./acceptanceEvidenceAuthority.mjs";
+import {
   acceptPendingStandardRelease,
   appendReadyReconciliation,
+  deriveAcceptedGateForCandidate,
+  deriveRollbackInventory,
+  preparePendingStandardAcceptanceBundle,
   recordPreparedPromotionAssignment,
   recordPreparedPromotionLifecycle,
+  resolveAcceptedStandardAuthority,
 } from "./lifecycleExecution.mjs";
 import {
   createReleaseEvent,
   hashReleaseEvent,
 } from "./releaseStateReducer.mjs";
+import {
+  GITHUB_WORKFLOW_RUN_RESPONSE_MEDIA_TYPE,
+  REVIEWED_WORKFLOW_RUN_RECEIPT_MEDIA_TYPE,
+} from "./reviewedWorkflowRunAuthority.mjs";
 
 const namespace = "lifecycle-test";
 const sourceSha = "a".repeat(40);
 const operationId = "promote-lifecycle-fixture";
 const completedAt = "2026-08-06T00:00:00.000Z";
 const observationEndedAt = "2026-08-07T00:00:00.000Z";
-const dbCompatibility = {
+const dbCompatibilityContract = {
   contractUri: "urn:test:db:v1",
-  fingerprint: "d".repeat(64),
+  schemaVersion: 1,
+};
+const dbCompatibility = {
+  contractUri: dbCompatibilityContract.contractUri,
+  fingerprint: sha256Json(dbCompatibilityContract),
 };
 const domains = ["a.example.test", "b.example.test"];
 const providerPolicy = {
@@ -95,10 +118,79 @@ const releasePolicy = {
     },
   ],
 };
+
+test("advances null-change P6 and P8 gates without collapsing equal floors", () => {
+  const policy = {
+    ...releasePolicy,
+    phaseSequence: [
+      { gate: "P5-LIST", change: null },
+      { gate: "P6-APP", change: null },
+      {
+        gate: "P7-IDB",
+        change: { persistenceArchitecture: "facade" },
+      },
+      { gate: "P8-CLEAN", change: null },
+    ],
+  };
+  const initialFloors = Object.fromEntries(
+    Object.entries(policy.initialStandard).filter(
+      ([key]) => key !== "releaseRole",
+    ),
+  );
+  assert.equal(
+    deriveAcceptedGateForCandidate({
+      snapshot: {
+        acceptedStandard: {},
+        acceptedGate: "P5-LIST",
+        acceptedStandardFloors: initialFloors,
+      },
+      releasePolicy: policy,
+      candidateFloors: initialFloors,
+    }),
+    "P6-APP",
+  );
+  const p7Floors = {
+    ...initialFloors,
+    persistenceArchitecture: "facade",
+  };
+  assert.equal(
+    deriveAcceptedGateForCandidate({
+      snapshot: {
+        acceptedStandard: {},
+        acceptedGate: "P7-IDB",
+        acceptedStandardFloors: p7Floors,
+      },
+      releasePolicy: policy,
+      candidateFloors: p7Floors,
+    }),
+    "P8-CLEAN",
+  );
+  assert.throws(
+    () =>
+      deriveAcceptedGateForCandidate({
+        snapshot: {
+          acceptedStandard: {},
+          acceptedGate: "P5-LIST",
+          acceptedStandardFloors: initialFloors,
+        },
+        releasePolicy: policy,
+        candidateFloors: p7Floors,
+      }),
+    /exactly one phase gate/,
+  );
+});
 const approvalPolicy = {
   bindingStatus: "configured",
   trustedIssuer: "https://token.actions.githubusercontent.com",
   protectedEnvironment: "foundation-release-state",
+  repository: "example/event-shopping-planner",
+  workflowRef:
+    "example/event-shopping-planner/.github/workflows/release.yml@refs/heads/main",
+  roles: {
+    releaseOwner: { reviewerTeam: "release-owners" },
+    dataSafetyReviewer: { reviewerTeam: "data-safety-reviewers" },
+    operationsReviewer: { reviewerTeam: "operations-reviewers" },
+  },
   oidcMaxTokenAgeSeconds: 600,
   oidcClockSkewSeconds: 60,
 };
@@ -108,6 +200,9 @@ class FakeReleaseStateStore {
     this.namespace = namespace;
     this.records = [];
     this.evidence = new Map();
+    this.acceptanceChains = new Map();
+    this.commitAt = completedAt;
+    this.failAtomicAppendAfterSample = false;
     this.compareAndAppendCalls = 0;
     this.failCompareAndAppendAt = null;
   }
@@ -125,7 +220,7 @@ class FakeReleaseStateStore {
       .map((record) => structuredClone(record));
   }
 
-  seedEvent(event, committedAtValue = completedAt) {
+  seedEvent(event, committedAtValue = this.commitAt) {
     const eventHash = hashReleaseEvent(event);
     this.records.push({
       sequence: event.sequence,
@@ -177,14 +272,17 @@ class FakeReleaseStateStore {
     const objectBytes = Buffer.from(bytes);
     const sha256 = sha256Bytes(objectBytes);
     const existing = this.evidence.get(sha256);
-    if (existing && !existing.bytes.equals(objectBytes)) {
+    if (
+      existing &&
+      (!existing.bytes.equals(objectBytes) || existing.mediaType !== mediaType)
+    ) {
       throw new Error("fixture evidence collision");
     }
     if (!existing) {
       this.evidence.set(sha256, {
         bytes: objectBytes,
         mediaType,
-        committedAt: completedAt,
+        committedAt: this.commitAt,
       });
     }
     const stored = this.evidence.get(sha256);
@@ -208,6 +306,110 @@ class FakeReleaseStateStore {
         }
       : null;
   }
+
+  async appendAcceptanceSample({
+    operationId: acceptanceOperationId,
+    sourceSha: acceptanceSourceSha,
+    bindingId,
+    expectedPreviousCommit,
+    expectedSequence,
+    sampleBytes,
+    sampleMediaType,
+    commitBytes,
+    commitMediaType,
+  }) {
+    const chainKey = `${acceptanceOperationId}\n${acceptanceSourceSha}\n${bindingId}`;
+    const head = this.acceptanceChains.get(chainKey) ?? null;
+    const sampleObjectBytes = Buffer.from(sampleBytes);
+    const commitObjectBytes = Buffer.from(commitBytes);
+    const sampleSha256 = sha256Bytes(sampleObjectBytes);
+    const commitSha256 = sha256Bytes(commitObjectBytes);
+    const receipt = (sha256, stored, replayed) => ({
+      uri: `release-state://${namespace}/evidence/${sha256}`,
+      sha256,
+      mediaType: stored.mediaType,
+      byteLength: stored.bytes.length,
+      committedAt: stored.committedAt,
+      replayed,
+    });
+    if (
+      head?.sequence === expectedSequence + 1 &&
+      head.head.sha256 === commitSha256
+    ) {
+      const storedSample = this.evidence.get(sampleSha256);
+      const storedCommit = this.evidence.get(commitSha256);
+      if (
+        !storedSample?.bytes.equals(sampleObjectBytes) ||
+        storedSample.mediaType !== sampleMediaType ||
+        !storedCommit?.bytes.equals(commitObjectBytes) ||
+        storedCommit.mediaType !== commitMediaType ||
+        storedSample.committedAt !== storedCommit.committedAt
+      ) {
+        throw new Error("fixture acceptance replay differs");
+      }
+      return {
+        sample: receipt(sampleSha256, storedSample, true),
+        commit: receipt(commitSha256, storedCommit, true),
+      };
+    }
+    if (
+      (head?.sequence ?? 0) !== expectedSequence ||
+      (head === null
+        ? expectedPreviousCommit !== null
+        : head.head.sha256 !== expectedPreviousCommit?.sha256 ||
+          head.head.uri !== expectedPreviousCommit?.uri)
+    ) {
+      throw new Error("fixture acceptance chain CAS conflict");
+    }
+    if (this.evidence.has(sampleSha256) || this.evidence.has(commitSha256)) {
+      throw new Error("fixture acceptance objects predate atomic append");
+    }
+    const evidenceSnapshot = new Map(this.evidence);
+    const chainSnapshot = new Map(this.acceptanceChains);
+    try {
+      const storedSample = {
+        bytes: sampleObjectBytes,
+        mediaType: sampleMediaType,
+        committedAt: this.commitAt,
+      };
+      const storedCommit = {
+        bytes: commitObjectBytes,
+        mediaType: commitMediaType,
+        committedAt: this.commitAt,
+      };
+      this.evidence.set(sampleSha256, storedSample);
+      if (this.failAtomicAppendAfterSample) {
+        this.failAtomicAppendAfterSample = false;
+        throw new Error("fixture acceptance atomic failure");
+      }
+      this.evidence.set(commitSha256, storedCommit);
+      const commit = receipt(commitSha256, storedCommit, false);
+      this.acceptanceChains.set(chainKey, {
+        sequence: expectedSequence + 1,
+        head: { uri: commit.uri, sha256: commit.sha256 },
+        updatedAt: commit.committedAt,
+      });
+      return {
+        sample: receipt(sampleSha256, storedSample, false),
+        commit,
+      };
+    } catch (error) {
+      this.evidence = evidenceSnapshot;
+      this.acceptanceChains = chainSnapshot;
+      throw error;
+    }
+  }
+
+  async readAcceptanceEvidenceChain({
+    operationId: acceptanceOperationId,
+    sourceSha: acceptanceSourceSha,
+    bindingId,
+  }) {
+    const value = this.acceptanceChains.get(
+      `${acceptanceOperationId}\n${acceptanceSourceSha}\n${bindingId}`,
+    );
+    return value ? structuredClone(value) : null;
+  }
 }
 
 const putJson = async (store, value, mediaType = "application/json") => {
@@ -217,6 +419,99 @@ const putJson = async (store, value, mediaType = "application/json") => {
   });
   return { uri: receipt.uri, sha256: receipt.sha256 };
 };
+
+const putWorkflowRunAuthority = async (store, runId = "4000") => {
+  const apiResponse = await putJson(
+    store,
+    {
+      id: Number(runId),
+      run_attempt: 1,
+      event: "workflow_dispatch",
+      status: "completed",
+      conclusion: "success",
+      head_branch: "main",
+      head_sha: sourceSha,
+      path: ".github/workflows/release.yml",
+      repository: { full_name: approvalPolicy.repository },
+    },
+    GITHUB_WORKFLOW_RUN_RESPONSE_MEDIA_TYPE,
+  );
+  return putJson(
+    store,
+    {
+      schemaVersion: 1,
+      kind: "reviewed-github-workflow-run/v1",
+      repository: approvalPolicy.repository,
+      runId,
+      runAttempt: "1",
+      workflowPath: ".github/workflows/release.yml",
+      event: "workflow_dispatch",
+      status: "completed",
+      conclusion: "success",
+      headBranch: "main",
+      headSha: sourceSha,
+      apiResponse,
+    },
+    REVIEWED_WORKFLOW_RUN_RECEIPT_MEDIA_TYPE,
+  );
+};
+
+const putAcceptanceCollectorIdentity = async ({ store, observedAt, runId }) => {
+  const expiresAt = new Date(
+    Date.parse(observedAt) + 15 * 60 * 1000,
+  ).toISOString();
+  return putJson(
+    store,
+    {
+      schemaVersion: 1,
+      kind: "github-actions-oidc-verification/v1",
+      issuer: "https://token.actions.githubusercontent.com",
+      audience: "release-state",
+      subject:
+        "repo:example/event-shopping-planner:environment:production-release",
+      tokenSha256: sha256Json({ runId, observedAt }),
+      signingKey: {
+        kid: "lifecycle-fixture",
+        jwkThumbprintSha256: "1".repeat(64),
+      },
+      claims: {
+        repository: "example/event-shopping-planner",
+        workflowRef:
+          "example/event-shopping-planner/.github/workflows/release.yml@refs/heads/main",
+        workflowSha: sourceSha,
+        environment: "production-release",
+        runId,
+        runAttempt: "1",
+        sourceSha,
+        eventName: "workflow_dispatch",
+        ref: "refs/heads/main",
+        refProtected: true,
+        jti: `lifecycle-acceptance-${runId}`,
+        issuedAt: observedAt,
+        notBefore: observedAt,
+        expiresAt,
+      },
+      verifiedAt: observedAt,
+    },
+    GITHUB_OIDC_RECEIPT_MEDIA_TYPE,
+  );
+};
+
+const acceptanceHttpResponse = ({ url, bytes, observedAt }) => ({
+  status: 200,
+  url,
+  redirected: false,
+  headers: {
+    get(name) {
+      const key = name.toLowerCase();
+      if (key === "content-length") return String(bytes.length);
+      if (key === "content-type") return "application/json; charset=utf-8";
+      if (key === "date") return new Date(observedAt).toUTCString();
+      return null;
+    },
+  },
+  arrayBuffer: async () => bytes,
+});
 
 const compareUtf8 = (left, right) =>
   Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
@@ -248,6 +543,38 @@ const createBinding = async ({
       kind: "provider-deployment",
       suffix,
     });
+    const archiveBytes = Buffer.from(`archive:${role}:${suffix}\n`);
+    const archiveReceipt = await store.putEvidence({
+      bytes: archiveBytes,
+      mediaType:
+        "application/vnd.event-shopping-planner.artifact-archive+zip;version=1",
+    });
+    const artifactArchive = {
+      uri: archiveReceipt.uri,
+      sha256: archiveReceipt.sha256,
+    };
+    const artifactArchiveAvailability = await putJson(
+      store,
+      {
+        schemaVersion: 1,
+        evidenceKind: "artifact-archive-availability/v1",
+        availability: "available",
+        namespace,
+        bindingId: `${role}-${suffix}`,
+        sourceSha,
+        variantId: suffix.repeat(64),
+        releaseRole: role,
+        artifactManifest,
+        artifactArchive: {
+          ...artifactArchive,
+          mediaType:
+            "application/vnd.event-shopping-planner.artifact-archive+zip;version=1",
+          byteLength: archiveBytes.length,
+          committedAt: completedAt,
+        },
+      },
+      "application/vnd.event-shopping-planner.artifact-archive-availability+json;version=1",
+    );
     return {
       bindingId: `${role}-${suffix}`,
       sourceSha,
@@ -258,6 +585,8 @@ const createBinding = async ({
       providerProjectId: providerPolicy.expectedProjectId,
       providerDeploymentId: `deployment-${role}-${suffix}`,
       deploymentUrl: `https://${role}-${suffix}.example.test`,
+      artifactArchive,
+      artifactArchiveAvailability,
       packageIndex,
       artifactManifest,
       providerEvidence,
@@ -306,9 +635,7 @@ const createBinding = async ({
           serviceWorkerSha256: sha256Bytes(serviceWorkerBytes),
         };
   const entryModule =
-    role === "standard"
-      ? "src/bootstrap.ts"
-      : "src/pwa/containment-recovery-entry.ts";
+    role === "standard" ? "src/index.tsx" : "src/pwa/containment/index.ts";
   const roleEntryGraph = {
     schemaVersion: 1,
     graphKind: "rollup-role-entry-v1",
@@ -343,6 +670,12 @@ const createBinding = async ({
       ? [outputFile("static/assets/outer-recovery-agent.js", outerAgentBytes)]
       : []),
   ].sort((left, right) => compareUtf8(left.path, right.path));
+  const buildAuthority = await putJson(store, {
+    schemaVersion: 1,
+    requirementsKind: "artifact-build-requirements/v1",
+    operationId: `build-${role}-${suffix}`,
+    targetGate: "P0-RELEASE",
+  });
   const manifest = {
     schemaVersion: 1,
     sourceSha,
@@ -350,6 +683,10 @@ const createBinding = async ({
     variantId,
     releaseRole: role,
     dimensions,
+    buildAuthority,
+    targetGate: "P0-RELEASE",
+    buildPurpose: "production",
+    promotable: true,
     buildInputClosureHash: "1".repeat(64),
     lockfileSha256: "2".repeat(64),
     toolchainPolicyHash: "3".repeat(64),
@@ -388,6 +725,38 @@ const createBinding = async ({
     routeProbeEvidenceHash: "5".repeat(64),
     environmentPresenceEvidenceHash: "6".repeat(64),
   });
+  const archiveBytes = Buffer.from(`archive:${role}:${suffix}\n`);
+  const archiveReceipt = await store.putEvidence({
+    bytes: archiveBytes,
+    mediaType:
+      "application/vnd.event-shopping-planner.artifact-archive+zip;version=1",
+  });
+  const artifactArchive = {
+    uri: archiveReceipt.uri,
+    sha256: archiveReceipt.sha256,
+  };
+  const artifactArchiveAvailability = await putJson(
+    store,
+    {
+      schemaVersion: 1,
+      evidenceKind: "artifact-archive-availability/v1",
+      namespace,
+      bindingId: `${role}-${suffix}`,
+      sourceSha,
+      variantId,
+      releaseRole: role,
+      artifactManifest,
+      artifactArchive: {
+        ...artifactArchive,
+        mediaType:
+          "application/vnd.event-shopping-planner.artifact-archive+zip;version=1",
+        byteLength: archiveBytes.length,
+        committedAt: completedAt,
+      },
+      availability: "available",
+    },
+    "application/vnd.event-shopping-planner.artifact-archive-availability+json;version=1",
+  );
   return {
     bindingId: `${role}-${suffix}`,
     sourceSha,
@@ -400,6 +769,8 @@ const createBinding = async ({
     deploymentUrl,
     packageIndex,
     artifactManifest,
+    artifactArchive,
+    artifactArchiveAvailability,
     providerEvidence,
     releasePolicy: policyReference,
     providerPolicy: providerPolicyReference,
@@ -472,16 +843,17 @@ const createApprovalReference = async ({
   role,
   index,
   subjectSha256,
+  approvalOperationId = operationId,
   approvedAt = completedAt,
 }) => {
   const issuer = await putJson(store, {
     kind: "issuer",
-    operationId,
+    operationId: approvalOperationId,
     index,
   });
   const receipt = await putJson(store, {
     kind: "approval",
-    operationId,
+    operationId: approvalOperationId,
     role,
     index,
   });
@@ -489,7 +861,7 @@ const createApprovalReference = async ({
     uri: receipt.uri,
     sha256: receipt.sha256,
     approvalId: `approval-${index}`,
-    operationId,
+    operationId: approvalOperationId,
     subjectSha256,
     trustedIssuer: approvalPolicy.trustedIssuer,
     issuerReceiptUri: issuer.uri,
@@ -507,8 +879,35 @@ const initializePromotionFixture = async ({
   pwaLifecycle = "legacy-auto-update-v1",
   companionDimensions = null,
   releasePolicyValue = releasePolicy,
+  operationKind = "promote-standard",
+  fixtureOperationId = operationId,
+  existingStore = null,
+  withRecoveryHistory = false,
 } = {}) => {
-  const store = new FakeReleaseStateStore();
+  if (withRecoveryHistory && existingStore === null) {
+    const recoveryFixture = await initializePromotionFixture({
+      pwaLifecycle,
+      companionDimensions,
+      releasePolicyValue,
+      operationKind: "redeploy-containment",
+      fixtureOperationId: "independent-companion-recovery",
+    });
+    await runPromotionLifecycle(recoveryFixture);
+    const recoveryTerminalRecord = recoveryFixture.store.records.find(
+      (record) =>
+        record.event.eventType === "package-redeploy-activated" &&
+        record.event.operationId === "independent-companion-recovery",
+    );
+    assert.ok(recoveryTerminalRecord);
+    const standardFixture = await initializePromotionFixture({
+      pwaLifecycle,
+      companionDimensions,
+      releasePolicyValue,
+      existingStore: recoveryFixture.store,
+    });
+    return { ...standardFixture, recoveryTerminalRecord };
+  }
+  const store = existingStore ?? new FakeReleaseStateStore();
   const policyReference = await putJson(store, releasePolicyValue);
   const providerPolicyReference = await putJson(store, providerPolicy);
   const configurationHash = providerConfigurationHash(
@@ -523,26 +922,29 @@ const initializePromotionFixture = async ({
     configurationHash,
     publicIdentityKind: "legacy-bootstrap-v1",
   });
-  const initialEvidence = await putJson(store, { kind: "initial" });
-  const initial = createReleaseEvent({
-    namespace,
-    sequence: 1,
-    eventType: "state-initialized",
-    operationId: "initialize",
-    previousEventHash: null,
-    payload: {
-      legacyObservedProduction: {
-        observationUri: initialEvidence.uri,
-        observationSha256: initialEvidence.sha256,
+  if (store.records.length === 0) {
+    const initialEvidence = await putJson(store, { kind: "initial" });
+    const initial = createReleaseEvent({
+      namespace,
+      sequence: 1,
+      eventType: "state-initialized",
+      operationId: "initialize",
+      previousEventHash: null,
+      payload: {
+        acceptedGate: null,
+        legacyObservedProduction: {
+          observationUri: initialEvidence.uri,
+          observationSha256: initialEvidence.sha256,
+        },
+        bootstrapRecovery: bootstrap,
+        minimumSafetyFloors: { releaseChannel: "release-a" },
+        currentDbCompatibility: dbCompatibility,
+        activeReleasePolicy: policyReference,
       },
-      bootstrapRecovery: bootstrap,
-      minimumSafetyFloors: { releaseChannel: "release-a" },
-      currentDbCompatibility: dbCompatibility,
-      activeReleasePolicy: policyReference,
-    },
-    evidenceRefs: [initialEvidence],
-  });
-  store.seedEvent(initial);
+      evidenceRefs: [initialEvidence],
+    });
+    store.seedEvent(initial);
+  }
   const targetBinding = await createBinding({
     store,
     role: "standard",
@@ -567,9 +969,15 @@ const initializePromotionFixture = async ({
     dimensions: companionDimensions ?? projectedCompanionDimensions,
     releasePolicyValue,
   });
+  const operationTarget = operationKind.includes("containment")
+    ? companionBinding
+    : targetBinding;
+  const operationCompanion = operationKind.includes("containment")
+    ? null
+    : companionBinding;
   const subjectReference = await putJson(store, {
     kind: "promotion-subject",
-    operationId,
+    operationId: fixtureOperationId,
   });
   const subjectSha256 = subjectReference.sha256;
   const approvals = [
@@ -578,23 +986,25 @@ const initializePromotionFixture = async ({
       role: "releaseOwner",
       index: 1,
       subjectSha256,
+      approvalOperationId: fixtureOperationId,
     }),
     await createApprovalReference({
       store,
       role: "dataSafetyReviewer",
       index: 2,
       subjectSha256,
+      approvalOperationId: fixtureOperationId,
     }),
   ];
   const current = await readCurrentReleaseState({ store });
   const pendingOperation = {
-    operationId,
-    kind: "promote-standard",
+    operationId: fixtureOperationId,
+    kind: operationKind,
     expectedState: structuredClone(current.head),
-    targetBinding,
-    originBinding: null,
+    targetBinding: operationTarget,
+    originBinding: operationKind === "redeploy-containment" ? bootstrap : null,
     originCompanionBinding: null,
-    companionBinding,
+    companionBinding: operationCompanion,
     previousBinding: null,
     emergencyRecoveryBinding: bootstrap,
     approvalRefs: approvals,
@@ -604,7 +1014,7 @@ const initializePromotionFixture = async ({
     namespace,
     sequence: current.snapshot.sequence + 1,
     eventType: "promotion-prepared",
-    operationId,
+    operationId: fixtureOperationId,
     previousEventHash: current.snapshot.eventHash,
     payload: { pendingOperation },
     evidenceRefs: [
@@ -638,11 +1048,11 @@ const initializePromotionFixture = async ({
   };
   const before = domainObservation({
     phase: "before",
-    targetDeploymentId: targetBinding.providerDeploymentId,
+    targetDeploymentId: operationTarget.providerDeploymentId,
   });
   const after = domainObservation({
     phase: "after",
-    targetDeploymentId: targetBinding.providerDeploymentId,
+    targetDeploymentId: operationTarget.providerDeploymentId,
   });
   const beforeProvider = providerObservation("before");
   const afterProvider = providerObservation("after");
@@ -652,8 +1062,8 @@ const initializePromotionFixture = async ({
     providerProjectId: providerPolicy.expectedProjectId,
     assignments: domains.map((productionDomain) => ({
       productionDomain,
-      previousDeploymentId: targetBinding.providerDeploymentId,
-      assignedDeploymentId: targetBinding.providerDeploymentId,
+      previousDeploymentId: operationTarget.providerDeploymentId,
+      assignedDeploymentId: operationTarget.providerDeploymentId,
     })),
     assignmentApiReceiptSetHash: sha256Json({
       before: before.receipts,
@@ -671,31 +1081,34 @@ const initializePromotionFixture = async ({
       providerTeamId: providerPolicy.expectedTeamId,
       providerProjectId: providerPolicy.expectedProjectId,
       domains,
-      targetDeploymentId: targetBinding.providerDeploymentId,
+      targetDeploymentId: operationTarget.providerDeploymentId,
     })}`,
     completedAt,
     preparedEvent: {
       uri: preparedResult.eventUri,
       sha256: preparedResult.eventHash,
       sequence: preparedEvent.sequence,
-      operationId,
+      operationId: fixtureOperationId,
       committedAt: completedAt,
     },
     sourceSha,
     target: {
-      bindingId: targetBinding.bindingId,
-      releaseRole: "standard",
-      providerDeploymentId: targetBinding.providerDeploymentId,
-      deploymentUrl: targetBinding.deploymentUrl,
-      providerDeploymentEvidenceSha256: targetBinding.providerEvidence.sha256,
+      bindingId: operationTarget.bindingId,
+      releaseRole: operationTarget.releaseRole,
+      providerDeploymentId: operationTarget.providerDeploymentId,
+      deploymentUrl: operationTarget.deploymentUrl,
+      providerDeploymentEvidenceSha256: operationTarget.providerEvidence.sha256,
     },
-    companion: {
-      bindingId: companionBinding.bindingId,
-      releaseRole: "containment",
-      providerDeploymentId: companionBinding.providerDeploymentId,
-      providerDeploymentEvidenceSha256:
-        companionBinding.providerEvidence.sha256,
-    },
+    companion:
+      operationCompanion === null
+        ? null
+        : {
+            bindingId: operationCompanion.bindingId,
+            releaseRole: "containment",
+            providerDeploymentId: operationCompanion.providerDeploymentId,
+            providerDeploymentEvidenceSha256:
+              operationCompanion.providerEvidence.sha256,
+          },
     approvalReferences: approvals.map((approval) => ({
       role: approval.role,
       uri: approval.uri,
@@ -737,16 +1150,16 @@ const initializePromotionFixture = async ({
   const assignmentSha256 = sha256Bytes(assignmentBytes);
   const providerAssignmentObservation = await putJson(store, {
     observationKind: "fixture-provider-assignment-observation/v1",
-    targetBindingId: targetBinding.bindingId,
+    targetBindingId: operationTarget.bindingId,
   });
   const assignmentAuthority = {
     schemaVersion: 1,
     evidenceKind: "production-assignment-authority/v1",
     namespace,
     preparedResultSha256: sha256Bytes(canonicalJsonBytes(preparedResult)),
-    targetBindingId: targetBinding.bindingId,
+    targetBindingId: operationTarget.bindingId,
     providerProjectId: providerPolicy.expectedProjectId,
-    providerDeploymentId: targetBinding.providerDeploymentId,
+    providerDeploymentId: operationTarget.providerDeploymentId,
     promotionReceipt: {
       uri:
         `release-state://${namespace}/evidence/` +
@@ -789,21 +1202,21 @@ const initializePromotionFixture = async ({
     byteLength: 0,
   });
   const immutableApiReceipts = productionPaths.map((path) =>
-    productionReceipt(targetBinding.deploymentUrl, path),
+    productionReceipt(operationTarget.deploymentUrl, path),
   );
   const productionProbe = {
     schemaVersion: 1,
     evidenceKind: "production-assignment-probe/v1",
     providerProjectId: providerPolicy.expectedProjectId,
-    providerDeploymentId: targetBinding.providerDeploymentId,
-    providerDeploymentEvidenceHash: targetBinding.providerEvidence.sha256,
+    providerDeploymentId: operationTarget.providerDeploymentId,
+    providerDeploymentEvidenceHash: operationTarget.providerEvidence.sha256,
     immutableRouteProbeEvidenceHash: "5".repeat(64),
     providerAssignmentObservation,
     observedAt: completedAt,
     immutableApiReceipts,
     results: domains.map((productionDomain) => ({
       productionDomain,
-      providerDeploymentId: targetBinding.providerDeploymentId,
+      providerDeploymentId: operationTarget.providerDeploymentId,
       status: "PASS",
       responseSha256: sha256Json(
         productionPaths.map((path) =>
@@ -836,8 +1249,10 @@ const initializePromotionFixture = async ({
   };
   return {
     store,
+    releasePolicy: releasePolicyValue,
     bootstrap,
     targetBinding,
+    operationTarget,
     companionBinding,
     preparedResult,
     preparedResultBytes: canonicalJsonBytes(preparedResult),
@@ -901,99 +1316,321 @@ const acceptanceEvidence = () => ({
       status: "PASS",
       command: "npm run test:release-a-rollback",
       commitSha: sourceSha,
-      completedAt: observationEndedAt,
+      completedAt,
       evidenceRef: "artifact://release-a/rollback-recovery-drill",
     },
   },
 });
 
+const collectContinuousAcceptanceEvidence = async ({
+  fixture,
+  current,
+  pendingAcceptance,
+  evidenceBytes,
+  expectedEvidenceSha256,
+  rollbackTerminalEvent = null,
+}) => {
+  const store = fixture.store;
+  const binding = pendingAcceptance.standardBinding;
+  store.commitAt = completedAt;
+  const initializationIdentity = await putAcceptanceCollectorIdentity({
+    store,
+    observedAt: completedAt,
+    runId: "1000",
+  });
+  let source = (
+    await initializeContinuousProbeCollection({
+      store,
+      namespace,
+      pendingAcceptance,
+      collectorIdentity: initializationIdentity,
+    })
+  ).source;
+  for (let index = 0; index < 289; index += 1) {
+    const observedAt = new Date(
+      Date.parse(completedAt) + index * 5 * 60 * 1000,
+    ).toISOString();
+    store.commitAt = observedAt;
+    const collectorIdentity = await putAcceptanceCollectorIdentity({
+      store,
+      observedAt,
+      runId: String(2000 + index),
+    });
+    const fetchImpl = async (url) => {
+      const parsed = new URL(url);
+      const providerLookup = parsed.hostname === "api.vercel.test";
+      const productionDomain = providerLookup
+        ? decodeURIComponent(parsed.pathname.split("/").at(-1))
+        : parsed.hostname;
+      const bytes = providerLookup
+        ? canonicalJsonBytes({
+            alias: productionDomain,
+            projectId: binding.providerProjectId,
+            deploymentId: binding.providerDeploymentId,
+            redirect: null,
+          })
+        : canonicalJsonBytes({
+            schemaVersion: 1,
+            sourceSha: binding.sourceSha,
+            buildId: binding.buildId,
+            variantId: binding.variantId,
+            releaseRole: binding.releaseRole,
+          });
+      return acceptanceHttpResponse({ url, bytes, observedAt });
+    };
+    source = (
+      await collectContinuousProductionSample({
+        store,
+        namespace,
+        pendingAcceptance,
+        providerPolicy,
+        providerToken: "provider-token-fixture",
+        collectorIdentity,
+        priorSource: source,
+        fetchImpl,
+        clock: () => Date.parse(observedAt),
+      })
+    ).source;
+  }
+  store.commitAt = observationEndedAt;
+  const authorityCollectorIdentity = await putAcceptanceCollectorIdentity({
+    store,
+    observedAt: observationEndedAt,
+    runId: "3000",
+  });
+  const evidenceUrl =
+    "https://observability.example.test/release-a-evidence.json";
+  const finalized = await collectReleaseAEvidenceAuthority({
+    store,
+    current,
+    namespace,
+    pendingAcceptance,
+    providerPolicy,
+    evidenceUrl,
+    evidenceToken: "observability-token-fixture",
+    collectorIdentity: authorityCollectorIdentity,
+    continuousSource: source,
+    rollbackTerminalEvent,
+    validateEvidence: () => [],
+    fetchImpl: async (url) =>
+      acceptanceHttpResponse({
+        url,
+        bytes: evidenceBytes,
+        observedAt: observationEndedAt,
+      }),
+    clock: () => Date.parse(observationEndedAt),
+  });
+  const sourceBytes = canonicalJsonBytes(finalized.continuousSource);
+  const sourceWorkflowAuthority = await putWorkflowRunAuthority(store);
+  const produced = await produceContinuousProductionProbe({
+    store,
+    current,
+    namespace,
+    pendingAcceptance,
+    releaseAEvidenceBytes: evidenceBytes,
+    expectedReleaseAEvidenceSha256: expectedEvidenceSha256,
+    sourceBytes,
+    expectedSourceSha256: sha256Bytes(sourceBytes),
+    sourceWorkflowAuthority,
+    approvalPolicy,
+    providerPolicy,
+    nowMilliseconds: Date.parse(observationEndedAt),
+  });
+  return {
+    ...produced,
+    authorityBundle: finalized.authority.reference,
+  };
+};
+
 const acceptanceInputOptions = async ({
   fixture,
   evidence = acceptanceEvidence(),
   includeRecoveryDrill = false,
+  collectApprovals = acceptanceCollector,
+  prepareClock = () => Date.parse(observationEndedAt),
 }) => {
   const current = await readCurrentReleaseState({ store: fixture.store });
   const pendingAcceptance = current.snapshot.pendingAcceptance;
   const evidenceBytes = canonicalJsonBytes(evidence);
   const expectedEvidenceSha256 = sha256Bytes(evidenceBytes);
-  const continuousSource = {
-    schemaVersion: 1,
-    sourceKind: "continuous-production-probe-source/v1",
-    samples: Array.from({ length: 289 }, (_, index) => ({
-      observedAt: new Date(
-        Date.parse(completedAt) + index * 5 * 60 * 1000,
-      ).toISOString(),
-      results: domains.map((productionDomain) => ({
-        productionDomain,
-        providerDeploymentId:
-          pendingAcceptance.standardBinding.providerDeploymentId,
-        status: "PASS",
-        responseSha256: sha256Json({ index, productionDomain }),
-      })),
-    })),
-  };
-  const continuousSourceBytes = canonicalJsonBytes(continuousSource);
-  const continuous = produceContinuousProductionProbe({
-    namespace,
+  const currentGateIndex =
+    current.snapshot.acceptedGate === null
+      ? -1
+      : fixture.releasePolicy.phaseSequence.findIndex(
+          ({ gate }) => gate === current.snapshot.acceptedGate,
+        );
+  const acceptedGate =
+    fixture.releasePolicy.phaseSequence[currentGateIndex + 1].gate;
+  const performanceRequirement =
+    ACCEPTANCE_PERFORMANCE_REQUIREMENTS[acceptedGate];
+  let performanceEvidenceBytes = null;
+  if (performanceRequirement !== null) {
+    if (performanceRequirement === "performance-inherited-closure/v1") {
+      const closure = {
+        kind: performanceRequirement,
+        p8Source: { gitCommitSha: sourceSha },
+      };
+      performanceEvidenceBytes = canonicalJsonBytes({
+        schemaVersion: 1,
+        closure,
+        closureSha256: sha256Json(closure),
+      });
+    } else {
+      const performanceEvidenceBody = {
+        evidenceKind: "foundation-performance-evidence/v1",
+        gate: performanceRequirement,
+        collectedAtUtc: completedAt,
+        source: {
+          gitCommitSha: sourceSha,
+          sourceClosureSha256: "9".repeat(64),
+          treeState: "clean",
+          artifactSha256:
+            pendingAcceptance.standardBinding.artifactArchive.sha256,
+        },
+      };
+      const performanceEnvelope = {
+        schemaVersion: 1,
+        evidence: performanceEvidenceBody,
+        evidenceSha256: sha256Json(performanceEvidenceBody),
+      };
+      const performanceRequirements = {
+        schemaVersion: 1,
+        requirementKind: "standard-acceptance-requirements/v1",
+        namespace,
+        operationId: pendingAcceptance.operationId,
+        sourceSha,
+        expectedArtifactSha256:
+          pendingAcceptance.standardBinding.artifactArchive.sha256,
+        expectedState: structuredClone(current.head),
+        acceptedGate,
+        performanceEvidenceKind: "own-gate-performance-evidence/v1",
+        performanceGate: performanceRequirement,
+      };
+      const producerReceiptBody = {
+        kind: "own-gate-performance-evidence-producer-receipt/v1",
+        namespace,
+        operationId: pendingAcceptance.operationId,
+        acceptedGate,
+        performanceGate: performanceRequirement,
+        source: {
+          gitCommitSha: sourceSha,
+          sourceClosureSha256: "9".repeat(64),
+          treeState: "clean",
+        },
+        authoritativeState: structuredClone(current.head),
+        requirementsSha256: sha256Json(performanceRequirements),
+        artifactArchiveSha256:
+          pendingAcceptance.standardBinding.artifactArchive.sha256,
+        rawSamplesArtifact: {
+          name: `foundation-performance-raw-samples-${sourceSha}`,
+          runId: "100",
+          sha256: "8".repeat(64),
+          collectorIdentity: {
+            uri: `release-state://${namespace}/evidence/${"a".repeat(64)}`,
+            sha256: "a".repeat(64),
+          },
+          workflowRunAuthority: {
+            uri: `release-state://${namespace}/evidence/${"b".repeat(64)}`,
+            sha256: "b".repeat(64),
+          },
+        },
+        producerRunId: "150",
+        performanceEvidence: {
+          name: `foundation-performance-own-gate-evidence-${sourceSha}`,
+          envelopeSha256: sha256Bytes(canonicalJsonBytes(performanceEnvelope)),
+          evidenceSha256: performanceEnvelope.evidenceSha256,
+        },
+        producedAtUtc: new Date(Date.parse(completedAt) + 1000).toISOString(),
+      };
+      performanceEvidenceBytes = canonicalJsonBytes({
+        ...performanceEnvelope,
+        producerReceipt: {
+          schemaVersion: 1,
+          receipt: producerReceiptBody,
+          receiptSha256: sha256Json(producerReceiptBody),
+        },
+      });
+    }
+  }
+  const recoveryTerminalEvent = fixture.recoveryTerminalRecord
+    ? {
+        uri:
+          `release-state://${namespace}/events/` +
+          `${fixture.recoveryTerminalRecord.sequence}/` +
+          fixture.recoveryTerminalRecord.eventHash,
+        sha256: fixture.recoveryTerminalRecord.eventHash,
+      }
+    : null;
+  const continuous = await collectContinuousAcceptanceEvidence({
+    fixture,
+    current,
     pendingAcceptance,
-    releaseAEvidenceBytes: evidenceBytes,
-    expectedReleaseAEvidenceSha256: expectedEvidenceSha256,
-    sourceBytes: continuousSourceBytes,
-    expectedSourceSha256: sha256Bytes(continuousSourceBytes),
-    providerPolicy,
-    nowMilliseconds: Date.parse(observationEndedAt),
+    evidenceBytes,
+    expectedEvidenceSha256,
+    rollbackTerminalEvent:
+      includeRecoveryDrill && recoveryTerminalEvent !== null
+        ? recoveryTerminalEvent
+        : null,
   });
   const options = {
     store: fixture.store,
     evidenceBytes,
     expectedEvidenceSha256,
+    performanceEvidenceBytes,
+    expectedPerformanceEvidenceSha256:
+      performanceEvidenceBytes === null
+        ? null
+        : sha256Bytes(performanceEvidenceBytes),
     continuousProbeBytes: continuous.evidenceBytes,
     expectedContinuousProbeSha256: continuous.sha256,
     approvalPolicy,
     expectedRunId: "200",
   };
-  if (!includeRecoveryDrill) return options;
-  const companion = pendingAcceptance.companionBinding;
-  const recoverySource = {
-    schemaVersion: 1,
-    sourceKind: "companion-recovery-drill-source/v1",
-    status: "PASS",
-    command: "npm run test:release-a-rollback",
-    startedAt: "2026-08-06T23:00:00.000Z",
-    completedAt: evidence.automatedGates.rollback.completedAt,
-    drillEvidenceRef: evidence.automatedGates.rollback.evidenceRef,
-    companion: {
-      bindingId: companion.bindingId,
-      sourceSha: companion.sourceSha,
-      buildId: companion.buildId,
-      variantId: companion.variantId,
-      providerProjectId: companion.providerProjectId,
-      providerDeploymentId: companion.providerDeploymentId,
-      packageIndexSha256: companion.packageIndex.sha256,
-      artifactManifestSha256: companion.artifactManifest.sha256,
-      providerEvidenceSha256: companion.providerEvidence.sha256,
+  if (includeRecoveryDrill && recoveryTerminalEvent !== null) {
+    const recoverySource = createCompanionRecoverySource({
+      current,
+      namespace,
+      pendingAcceptance,
+      authorityBundle: continuous.authorityBundle,
+      terminalEventSha256: recoveryTerminalEvent.sha256,
+    });
+    const recoverySourceBytes = canonicalJsonBytes(recoverySource);
+    const recovery = await produceCompanionRecoveryDrill({
+      store: fixture.store,
+      current,
+      namespace,
+      pendingAcceptance,
+      releaseAEvidenceBytes: evidenceBytes,
+      expectedReleaseAEvidenceSha256: expectedEvidenceSha256,
+      sourceBytes: recoverySourceBytes,
+      expectedSourceSha256: sha256Bytes(recoverySourceBytes),
+      sourceWorkflowAuthority: continuous.evidence.sourceWorkflowAuthority,
+      approvalPolicy,
+      nowMilliseconds: Date.parse(observationEndedAt),
+      futureClockSkewSeconds: 30,
+      providerPolicy,
+    });
+    options.companionRecoveryDrillBytes = recovery.evidenceBytes;
+    options.expectedCompanionRecoveryDrillSha256 = recovery.sha256;
+  }
+  const prepared = await preparePendingStandardAcceptanceBundle(
+    {
+      ...options,
+      dbCompatibilityContractBytes: canonicalJsonBytes(dbCompatibilityContract),
     },
-    steps: COMPANION_RECOVERY_STEPS.map((step, index) => ({
-      step,
-      status: "PASS",
-      evidenceRef: `artifact://release-a/recovery-step-${index + 1}`,
-    })),
-  };
-  const recoverySourceBytes = canonicalJsonBytes(recoverySource);
-  const recovery = produceCompanionRecoveryDrill({
-    namespace,
-    pendingAcceptance,
-    releaseAEvidenceBytes: evidenceBytes,
-    expectedReleaseAEvidenceSha256: expectedEvidenceSha256,
-    sourceBytes: recoverySourceBytes,
-    expectedSourceSha256: sha256Bytes(recoverySourceBytes),
-    nowMilliseconds: Date.parse(observationEndedAt),
-    futureClockSkewSeconds: 30,
-  });
+    {
+      validateEvidence: () => [],
+      validatePerformanceEvidence: async () => ({ errors: [] }),
+      collectApprovals,
+      clock: prepareClock,
+    },
+  );
   return {
     ...options,
-    companionRecoveryDrillBytes: recovery.evidenceBytes,
-    expectedCompanionRecoveryDrillSha256: recovery.sha256,
+    terminalBundleBytes: prepared.bundleBytes,
+    expectedTerminalBundleSha256: prepared.bundleSha256,
+    terminalObjectSetBytes: prepared.objectSetBytes,
+    expectedTerminalObjectSetSha256: prepared.objectSetSha256,
   };
 };
 
@@ -1003,9 +1640,22 @@ const acceptanceCollector = async ({
   subjectSha256,
   observedThrough,
 }) => {
+  const expiresAt = new Date(
+    Date.parse(observedThrough) + 10 * 60 * 1000,
+  ).toISOString();
   const issuer = await putJson(store, {
-    kind: "acceptance-issuer",
-    subjectSha256,
+    schemaVersion: 1,
+    kind: "github-actions-oidc-verification/v1",
+    issuer: approvalPolicy.trustedIssuer,
+    verifiedAt: observedThrough,
+    claims: {
+      sourceSha,
+      runId: "200",
+      environment: approvalPolicy.protectedEnvironment,
+      repository: approvalPolicy.repository,
+      workflowRef: approvalPolicy.workflowRef,
+      expiresAt,
+    },
   });
   const approvalRefs = [];
   for (const [role, index] of [
@@ -1013,15 +1663,26 @@ const acceptanceCollector = async ({
     ["dataSafetyReviewer", 2],
     ["operationsReviewer", 3],
   ]) {
+    const approvalId = `acceptance-${index}`;
+    const providerReviewerId = `acceptance-reviewer-${index}`;
     const receipt = await putJson(store, {
-      kind: "acceptance-approval",
+      schemaVersion: 1,
+      kind: "github-protected-environment-approval/v1",
+      approvalId,
+      operationId: boundOperationId,
+      decision: "APPROVED",
+      providerReviewerId,
+      providerReviewerTeamIds: [approvalPolicy.roles[role].reviewerTeam],
+      workflowRunId: "200",
+      protectedEnvironment: approvalPolicy.protectedEnvironment,
+      approvedAt: observedThrough,
       role,
       subjectSha256,
     });
     approvalRefs.push({
       uri: receipt.uri,
       sha256: receipt.sha256,
-      approvalId: `acceptance-${index}`,
+      approvalId,
       operationId: boundOperationId,
       subjectSha256,
       trustedIssuer: approvalPolicy.trustedIssuer,
@@ -1029,7 +1690,7 @@ const acceptanceCollector = async ({
       issuerReceiptSha256: issuer.sha256,
       workflowRunId: "200",
       protectedEnvironment: approvalPolicy.protectedEnvironment,
-      providerReviewerId: `acceptance-reviewer-${index}`,
+      providerReviewerId,
       role,
       decision: "APPROVED",
       approvedAt: observedThrough,
@@ -1038,18 +1699,34 @@ const acceptanceCollector = async ({
   return {
     approvalRefs,
     issuerReceiptReference: issuer,
-    oidcExpiresAt: new Date(
-      Date.parse(observedThrough) + 10 * 60 * 1000,
-    ).toISOString(),
+    oidcExpiresAt: expiresAt,
     verifiedAt: observedThrough,
   };
 };
 
 test("appends a ready reconcile plan once and replays the deterministic event", async () => {
   const fixture = await initializePromotionFixture();
-  const observationReference = await putJson(fixture.store, {
-    kind: "provider-observation",
+  const providerReceipt = await putJson(fixture.store, {
+    kind: "provider-receipt",
   });
+  const observationReference = await putJson(
+    fixture.store,
+    {
+      schemaVersion: 1,
+      observationKind: PROVIDER_ALIAS_OBSERVATION_KIND,
+      namespace,
+      providerProjectId: fixture.targetBinding.providerProjectId,
+      assignments: [
+        {
+          productionDomain: domains[0],
+          assignedDeploymentId: fixture.targetBinding.providerDeploymentId,
+        },
+      ],
+      observedBinding: fixture.targetBinding,
+      providerReceiptReferences: [providerReceipt],
+    },
+    PROVIDER_ALIAS_OBSERVATION_MEDIA_TYPE,
+  );
   const current = await readCurrentReleaseState({ store: fixture.store });
   const decision = {
     schemaVersion: 1,
@@ -1058,6 +1735,7 @@ test("appends a ready reconcile plan once and replays the deterministic event", 
     action: "append-state-reconciled",
     operationId,
     observationSha256: observationReference.sha256,
+    terminalPlan: null,
     eventPlan: {
       eventType: "state-reconciled",
       operationId,
@@ -1069,6 +1747,7 @@ test("appends a ready reconcile plan once and replays the deterministic event", 
       },
       evidenceRefs: [
         observationReference,
+        providerReceipt,
         fixture.targetBinding.providerEvidence,
       ],
     },
@@ -1118,6 +1797,142 @@ test("never appends a blocked reconcile decision", async () => {
   assert.equal(fixture.store.compareAndAppendCalls, 0);
 });
 
+test("rejects a reconcile decision whose observation has the wrong immutable media type", async () => {
+  const fixture = await initializePromotionFixture();
+  const providerReceipt = await putJson(fixture.store, {
+    kind: "provider-receipt",
+  });
+  const providerObservation = await putJson(fixture.store, {
+    schemaVersion: 1,
+    observationKind: PROVIDER_ALIAS_OBSERVATION_KIND,
+    namespace,
+    providerProjectId: fixture.targetBinding.providerProjectId,
+    assignments: [
+      {
+        productionDomain: domains[0],
+        assignedDeploymentId: fixture.targetBinding.providerDeploymentId,
+      },
+    ],
+    observedBinding: fixture.targetBinding,
+    providerReceiptReferences: [providerReceipt],
+  });
+  const current = await readCurrentReleaseState({ store: fixture.store });
+  await assert.rejects(
+    appendReadyReconciliation({
+      store: fixture.store,
+      decision: {
+        status: "ready",
+        operationId,
+        observationSha256: providerObservation.sha256,
+        terminalPlan: null,
+        eventPlan: {
+          eventType: "state-reconciled",
+          operationId,
+          expectedState: current.head,
+          payload: {
+            reconciliationKind: "provider-target-assigned/v1",
+            observedBinding: fixture.targetBinding,
+            providerObservation,
+          },
+          evidenceRefs: [providerObservation, providerReceipt],
+        },
+      },
+    }),
+    /provider observation authority is invalid/,
+  );
+  assert.equal(fixture.store.compareAndAppendCalls, 0);
+});
+
+test("reconciles a verified bootstrap emergency through assignment validation and a six-hour terminal", async () => {
+  const fixture = await initializePromotionFixture();
+  const providerReceipt = await putJson(fixture.store, {
+    kind: "provider-receipt",
+  });
+  const providerObservation = await putJson(
+    fixture.store,
+    {
+      schemaVersion: 1,
+      observationKind: PROVIDER_ALIAS_OBSERVATION_KIND,
+      namespace,
+      providerProjectId: fixture.bootstrap.providerProjectId,
+      assignments: [
+        {
+          productionDomain: domains[0],
+          assignedDeploymentId: fixture.bootstrap.providerDeploymentId,
+        },
+      ],
+      observedBinding: fixture.bootstrap,
+      providerReceiptReferences: [providerReceipt],
+    },
+    PROVIDER_ALIAS_OBSERVATION_MEDIA_TYPE,
+  );
+  const current = await readCurrentReleaseState({ store: fixture.store });
+  const activatedAt = "2026-08-06T01:00:00.000Z";
+  const recoveryDeadline = "2026-08-06T07:00:00.000Z";
+  const decision = {
+    schemaVersion: 1,
+    decisionKind: "release-state-reconcile-decision/v1",
+    status: "ready",
+    action: "append-state-reconciled",
+    operationId,
+    observationSha256: providerObservation.sha256,
+    observationReference: providerObservation,
+    terminalPlan: {
+      eventType: "temporary-containment-activated",
+      targetBinding: fixture.bootstrap,
+      payload: {
+        binding: fixture.bootstrap,
+        activatedAt,
+        recoveryDeadline,
+        targetStandard: null,
+      },
+      approvalRefs: current.snapshot.pendingOperation.approvalRefs,
+    },
+    eventPlan: {
+      eventType: "state-reconciled",
+      operationId,
+      expectedState: current.head,
+      payload: {
+        reconciliationKind: "provider-emergency-assigned/v1",
+        observedBinding: fixture.bootstrap,
+        providerObservation,
+      },
+      evidenceRefs: [
+        providerObservation,
+        providerReceipt,
+        fixture.bootstrap.providerEvidence,
+      ],
+    },
+  };
+  const first = await appendReadyReconciliation({
+    store: fixture.store,
+    decision,
+  });
+  const calls = fixture.store.compareAndAppendCalls;
+  const replay = await appendReadyReconciliation({
+    store: fixture.store,
+    decision,
+  });
+  const finalState = await readCurrentReleaseState({ store: fixture.store });
+  assert.equal(
+    first.terminalEvent.eventType,
+    "temporary-containment-activated",
+  );
+  assert.equal(first.replayed, false);
+  assert.equal(replay.replayed, true);
+  assert.equal(fixture.store.compareAndAppendCalls, calls);
+  assert.equal(finalState.snapshot.pendingOperation, null);
+  assert.equal(
+    finalState.snapshot.activeProduction.bindingId,
+    fixture.bootstrap.bindingId,
+  );
+  assert.equal(
+    Date.parse(finalState.snapshot.containmentIncident.recoveryDeadline) -
+      Date.parse(finalState.snapshot.containmentIncident.activatedAt),
+    6 * 60 * 60 * 1000,
+  );
+});
+
 test("records assignment, validation, and observation events and replays exactly", async () => {
   const fixture = await initializePromotionFixture();
   const first = await runPromotionLifecycle(fixture);
@@ -1141,6 +1956,45 @@ test("records assignment, validation, and observation events and replays exactly
   assert.equal(
     current.snapshot.pendingAcceptance.minimumObservationEndsAt,
     observationEndedAt,
+  );
+});
+
+test("records containment recovery terminal only after assignment validation and preserves pending on terminal CAS failure", async () => {
+  const fixture = await initializePromotionFixture({
+    operationKind: "activate-containment",
+  });
+  fixture.store.failCompareAndAppendAt = 3;
+  await assert.rejects(runPromotionLifecycle(fixture), /fixture CAS conflict/);
+  let current = await readCurrentReleaseState({ store: fixture.store });
+  assert.equal(current.snapshot.pendingOperation?.kind, "activate-containment");
+  assert.equal(current.snapshot.activeProduction, null);
+  assert.ok(
+    current.records.some(
+      (record) => record.event.eventType === "assignment-validated",
+    ),
+  );
+  assert.equal(
+    current.records.some(
+      (record) => record.event.eventType === "containment-activated",
+    ),
+    false,
+  );
+
+  fixture.store.failCompareAndAppendAt = null;
+  const recovered = await runPromotionLifecycle(fixture);
+  current = await readCurrentReleaseState({ store: fixture.store });
+  assert.equal(recovered.resultKind, "recovery-lifecycle-recorded/v1");
+  assert.equal(recovered.operationKind, "activate-containment");
+  assert.equal(current.snapshot.pendingOperation, null);
+  assert.equal(
+    current.snapshot.activeProduction?.bindingId,
+    fixture.operationTarget.bindingId,
+  );
+  assert.equal(
+    current.records.some(
+      (record) => record.event.eventType === "observation-started",
+    ),
+    false,
   );
 });
 
@@ -1319,6 +2173,7 @@ test("rejects caller-supplied lifecycle state and authority fields", async () =>
       },
       {
         validateEvidence: () => [],
+        validatePerformanceEvidence: async () => ({ errors: [] }),
         collectApprovals: acceptanceCollector,
         clock: () => Date.parse(observationEndedAt),
       },
@@ -1340,6 +2195,7 @@ test("rejects acceptance bytes that differ from the reviewed evidence hash", asy
       },
       {
         validateEvidence: () => [],
+        validatePerformanceEvidence: async () => ({ errors: [] }),
         collectApprovals: acceptanceCollector,
         clock: () => Date.parse(observationEndedAt),
       },
@@ -1349,10 +2205,114 @@ test("rejects acceptance bytes that differ from the reviewed evidence hash", asy
   assert.equal(fixture.store.compareAndAppendCalls, calls);
 });
 
+test("requires an untampered acceptance-final bundle bound to the current candidate", async (t) => {
+  await t.test("missing bundle", async () => {
+    const fixture = await initializePromotionFixture();
+    await runPromotionLifecycle(fixture);
+    const input = await acceptanceInputOptions({ fixture });
+    const calls = fixture.store.compareAndAppendCalls;
+    await assert.rejects(
+      acceptPendingStandardRelease(
+        {
+          ...input,
+          terminalBundleBytes: null,
+          expectedTerminalBundleSha256: null,
+        },
+        {
+          validateEvidence: () => [],
+          validatePerformanceEvidence: async () => ({ errors: [] }),
+          clock: () => Date.parse(observationEndedAt),
+        },
+      ),
+      /terminal bundle differs from its reviewed SHA-256/,
+    );
+    assert.equal(fixture.store.compareAndAppendCalls, calls);
+  });
+
+  await t.test("tampered immutable object", async () => {
+    const fixture = await initializePromotionFixture();
+    await runPromotionLifecycle(fixture);
+    const input = await acceptanceInputOptions({ fixture });
+    const objectSet = JSON.parse(input.terminalObjectSetBytes.toString("utf8"));
+    objectSet.objects[0].bytesBase64 = canonicalJsonBytes({
+      tampered: true,
+    }).toString("base64");
+    const terminalObjectSetBytes = canonicalJsonBytes(objectSet);
+    await assert.rejects(
+      acceptPendingStandardRelease(
+        {
+          ...input,
+          terminalObjectSetBytes,
+          expectedTerminalObjectSetSha256: sha256Bytes(terminalObjectSetBytes),
+        },
+        {
+          validateEvidence: () => [],
+          validatePerformanceEvidence: async () => ({ errors: [] }),
+          clock: () => Date.parse(observationEndedAt),
+        },
+      ),
+      /object set is unsorted or tampered/,
+    );
+  });
+
+  await t.test("wrong standard binding", async () => {
+    const fixture = await initializePromotionFixture();
+    await runPromotionLifecycle(fixture);
+    const input = await acceptanceInputOptions({ fixture });
+    const bundle = JSON.parse(input.terminalBundleBytes.toString("utf8"));
+    bundle.artifactManifest = structuredClone(bundle.packageIndex);
+    const terminalBundleBytes = canonicalJsonBytes(bundle);
+    await assert.rejects(
+      acceptPendingStandardRelease(
+        {
+          ...input,
+          terminalBundleBytes,
+          expectedTerminalBundleSha256: sha256Bytes(terminalBundleBytes),
+        },
+        {
+          validateEvidence: () => [],
+          validatePerformanceEvidence: async () => ({ errors: [] }),
+          clock: () => Date.parse(observationEndedAt),
+        },
+      ),
+      /binding\/hash chain differs/,
+    );
+  });
+
+  await t.test("wrong bundle source", async () => {
+    const fixture = await initializePromotionFixture();
+    await runPromotionLifecycle(fixture);
+    const input = await acceptanceInputOptions({ fixture });
+    const bundle = JSON.parse(input.terminalBundleBytes.toString("utf8"));
+    bundle.sourceSha = "9".repeat(40);
+    const terminalBundleBytes = canonicalJsonBytes(bundle);
+    await assert.rejects(
+      acceptPendingStandardRelease(
+        {
+          ...input,
+          terminalBundleBytes,
+          expectedTerminalBundleSha256: sha256Bytes(terminalBundleBytes),
+        },
+        {
+          validateEvidence: () => [],
+          validatePerformanceEvidence: async () => ({ errors: [] }),
+          clock: () => Date.parse(observationEndedAt),
+        },
+      ),
+      /source chain differs|approval receipt chain differs/,
+    );
+  });
+});
+
 test("accepts only fresh standard evidence with three derived roles and replays", async () => {
   const fixture = await initializePromotionFixture();
   await runPromotionLifecycle(fixture);
   const input = await acceptanceInputOptions({ fixture });
+  const performanceVerifications = [];
+  const validatePerformanceEvidence = async (options) => {
+    performanceVerifications.push(structuredClone(options));
+    return { errors: [] };
+  };
   const first = await acceptPendingStandardRelease(
     {
       ...input,
@@ -1362,9 +2322,17 @@ test("accepts only fresh standard evidence with three derived roles and replays"
     },
     {
       validateEvidence: () => [],
+      validatePerformanceEvidence,
       collectApprovals: acceptanceCollector,
       clock: () => Date.parse(observationEndedAt),
     },
+  );
+  assert.equal(performanceVerifications.length, 2);
+  assert.ok(
+    performanceVerifications.every(
+      ({ gate, evidence }) =>
+        gate === "P0-TOOLCHAIN" && evidence.evidence.gate === "P0-TOOLCHAIN",
+    ),
   );
   const calls = fixture.store.compareAndAppendCalls;
   const replay = await acceptPendingStandardRelease(
@@ -1376,16 +2344,30 @@ test("accepts only fresh standard evidence with three derived roles and replays"
     },
     {
       validateEvidence: () => [],
+      validatePerformanceEvidence,
       collectApprovals: acceptanceCollector,
       clock: () => Date.parse(observationEndedAt),
     },
   );
   const current = await readCurrentReleaseState({ store: fixture.store });
+  const acceptedAuthority = resolveAcceptedStandardAuthority({
+    current,
+    binding: current.snapshot.acceptedStandard,
+  });
   assert.equal(first.replayed, false);
   assert.equal(replay.replayed, true);
+  assert.equal(performanceVerifications.length, 3);
   assert.equal(fixture.store.compareAndAppendCalls, calls);
   assert.equal(first.approvals.length, 3);
   assert.equal(current.snapshot.pendingAcceptance, null);
+  assert.deepEqual(
+    acceptedAuthority.acceptedEvent,
+    current.snapshot.acceptedStandardEvent,
+  );
+  assert.deepEqual(
+    acceptedAuthority.acceptedStandardFloors,
+    current.snapshot.acceptedStandardFloors,
+  );
   assert.equal(current.snapshot.pendingOperation, null);
   assert.equal(
     current.snapshot.acceptedStandard.bindingId,
@@ -1417,11 +2399,12 @@ test("accepts only fresh standard evidence with three derived roles and replays"
       },
       {
         validateEvidence: () => [],
+        validatePerformanceEvidence: async () => ({ errors: [] }),
         collectApprovals: acceptanceCollector,
         clock: () => Date.parse(observationEndedAt),
       },
     ),
-    /subject or payload differs/,
+    /subject or payload differs|retry terminal bundle differs/,
   );
 });
 
@@ -1430,11 +2413,12 @@ test("derives prompt-close-all floors and clears bootstrap only with a passing r
     ...releasePolicy,
     initialStandard: standardDimensions("prompt-close-all-v1"),
     targetStandard: standardDimensions("prompt-close-all-v1"),
-    phaseSequence: [{ gate: "P1-PWA", change: null }],
+    phaseSequence: [{ gate: "P0-RELEASE", change: null }],
   };
   const fixture = await initializePromotionFixture({
     pwaLifecycle: "prompt-close-all-v1",
     releasePolicyValue: promptPolicy,
+    withRecoveryHistory: true,
   });
   await runPromotionLifecycle(fixture);
   const input = await acceptanceInputOptions({
@@ -1443,6 +2427,7 @@ test("derives prompt-close-all floors and clears bootstrap only with a passing r
   });
   await acceptPendingStandardRelease(input, {
     validateEvidence: () => [],
+    validatePerformanceEvidence: async () => ({ errors: [] }),
     collectApprovals: acceptanceCollector,
     clock: () => Date.parse(observationEndedAt),
   });
@@ -1463,7 +2448,7 @@ test("fails prompt-close-all bootstrap clearance without recovery PASS or an exa
     ...releasePolicy,
     initialStandard: standardDimensions("prompt-close-all-v1"),
     targetStandard: standardDimensions("prompt-close-all-v1"),
-    phaseSequence: [{ gate: "P1-PWA", change: null }],
+    phaseSequence: [{ gate: "P0-RELEASE", change: null }],
   };
   await t.test("missing recovery PASS", async () => {
     const fixture = await initializePromotionFixture({
@@ -1473,13 +2458,8 @@ test("fails prompt-close-all bootstrap clearance without recovery PASS or an exa
     await runPromotionLifecycle(fixture);
     const evidence = acceptanceEvidence();
     evidence.automatedGates.rollback.status = "FAIL";
-    const input = await acceptanceInputOptions({ fixture, evidence });
     await assert.rejects(
-      acceptPendingStandardRelease(input, {
-        validateEvidence: () => [],
-        collectApprovals: acceptanceCollector,
-        clock: () => Date.parse(observationEndedAt),
-      }),
+      acceptanceInputOptions({ fixture, evidence }),
       /lacks an independent recovery drill/,
     );
   });
@@ -1493,15 +2473,10 @@ test("fails prompt-close-all bootstrap clearance without recovery PASS or an exa
       },
     });
     await runPromotionLifecycle(fixture);
-    const input = await acceptanceInputOptions({
-      fixture,
-      includeRecoveryDrill: true,
-    });
     await assert.rejects(
-      acceptPendingStandardRelease(input, {
-        validateEvidence: () => [],
-        collectApprovals: acceptanceCollector,
-        clock: () => Date.parse(observationEndedAt),
+      acceptanceInputOptions({
+        fixture,
+        includeRecoveryDrill: true,
       }),
       /does not match the standard policy projection/,
     );
@@ -1509,6 +2484,31 @@ test("fails prompt-close-all bootstrap clearance without recovery PASS or an exa
 });
 
 test("rejects stale evidence, source tamper, and duplicate acceptance roles", async (t) => {
+  await t.test("less than 24 hours", async () => {
+    const fixture = await initializePromotionFixture();
+    await runPromotionLifecycle(fixture);
+    const input = await acceptanceInputOptions({ fixture });
+    const evidence = acceptanceEvidence();
+    evidence.canary.endedAt = "2026-08-06T23:59:59.000Z";
+    evidence.automatedGates.rollback.completedAt = evidence.canary.endedAt;
+    const evidenceBytes = canonicalJsonBytes(evidence);
+    await assert.rejects(
+      acceptPendingStandardRelease(
+        {
+          ...input,
+          evidenceBytes,
+          expectedEvidenceSha256: sha256Bytes(evidenceBytes),
+        },
+        {
+          validateEvidence: () => [],
+          validatePerformanceEvidence: async () => ({ errors: [] }),
+          clock: () => Date.parse(observationEndedAt),
+        },
+      ),
+      /does not cover the pending 24-hour observation/,
+    );
+  });
+
   await t.test("stale evidence", async () => {
     const fixture = await initializePromotionFixture();
     await runPromotionLifecycle(fixture);
@@ -1516,6 +2516,7 @@ test("rejects stale evidence, source tamper, and duplicate acceptance roles", as
     await assert.rejects(
       acceptPendingStandardRelease(input, {
         validateEvidence: () => [],
+        validatePerformanceEvidence: async () => ({ errors: [] }),
         collectApprovals: acceptanceCollector,
         clock: () => Date.parse(observationEndedAt) + 60 * 60 * 1000,
       }),
@@ -1538,6 +2539,7 @@ test("rejects stale evidence, source tamper, and duplicate acceptance roles", as
         },
         {
           validateEvidence: () => [],
+          validatePerformanceEvidence: async () => ({ errors: [] }),
           collectApprovals: acceptanceCollector,
           clock: () => Date.parse(observationEndedAt),
         },
@@ -1548,16 +2550,14 @@ test("rejects stale evidence, source tamper, and duplicate acceptance roles", as
   await t.test("duplicate role", async () => {
     const fixture = await initializePromotionFixture();
     await runPromotionLifecycle(fixture);
-    const input = await acceptanceInputOptions({ fixture });
     await assert.rejects(
-      acceptPendingStandardRelease(input, {
-        validateEvidence: () => [],
+      acceptanceInputOptions({
+        fixture,
         collectApprovals: async (options) => {
           const result = await acceptanceCollector(options);
           result.approvalRefs[2] = structuredClone(result.approvalRefs[1]);
           return result;
         },
-        clock: () => Date.parse(observationEndedAt),
       }),
       /Approval IDs are not distinct|required approval roles/,
     );
@@ -1569,11 +2569,32 @@ test("rejects stale evidence, source tamper, and duplicate acceptance roles", as
     await assert.rejects(
       acceptPendingStandardRelease(input, {
         validateEvidence: () => ["minimum sample is not satisfied"],
+        validatePerformanceEvidence: async () => ({ errors: [] }),
         collectApprovals: acceptanceCollector,
         clock: () => Date.parse(observationEndedAt),
       }),
       /minimum sample is not satisfied/,
     );
+  });
+  await t.test("authoritative performance verifier failure", async () => {
+    const fixture = await initializePromotionFixture();
+    await runPromotionLifecycle(fixture);
+    const input = await acceptanceInputOptions({ fixture });
+    const storedEvidenceCount = fixture.store.evidence.size;
+    await assert.rejects(
+      acceptPendingStandardRelease(input, {
+        validateEvidence: () => [],
+        validatePerformanceEvidence: async ({ gate, evidence }) => {
+          assert.equal(gate, "P0-TOOLCHAIN");
+          assert.equal(evidence.evidence.gate, "P0-TOOLCHAIN");
+          return { errors: ["canonical 30-sample ceiling is not satisfied"] };
+        },
+        collectApprovals: acceptanceCollector,
+        clock: () => Date.parse(observationEndedAt),
+      }),
+      /authoritative gate verifier: canonical 30-sample ceiling is not satisfied/,
+    );
+    assert.equal(fixture.store.evidence.size, storedEvidenceCount);
   });
 });
 
@@ -1586,6 +2607,7 @@ test("fails acceptance closed on a CAS conflict and succeeds on exact retry", as
   await assert.rejects(
     acceptPendingStandardRelease(options, {
       validateEvidence: () => [],
+      validatePerformanceEvidence: async () => ({ errors: [] }),
       collectApprovals: acceptanceCollector,
       clock: () => Date.parse(observationEndedAt),
     }),
@@ -1594,20 +2616,45 @@ test("fails acceptance closed on a CAS conflict and succeeds on exact retry", as
   fixture.store.failCompareAndAppendAt = null;
   const result = await acceptPendingStandardRelease(options, {
     validateEvidence: () => [],
+    validatePerformanceEvidence: async () => ({ errors: [] }),
     collectApprovals: acceptanceCollector,
     clock: () => Date.parse(observationEndedAt),
   });
   assert.equal(result.replayed, false);
 });
 
-test("rechecks OIDC authority immediately before the acceptance CAS", async () => {
+test("marks rollback and package redeploy ineligible when the archive is unavailable", async () => {
   const fixture = await initializePromotionFixture();
   await runPromotionLifecycle(fixture);
-  const input = await acceptanceInputOptions({ fixture });
+  const options = await acceptanceInputOptions({ fixture });
+  await acceptPendingStandardRelease(options, {
+    validateEvidence: () => [],
+    validatePerformanceEvidence: async () => ({ errors: [] }),
+    collectApprovals: acceptanceCollector,
+    clock: () => Date.parse(observationEndedAt),
+  });
+  const current = await readCurrentReleaseState({ store: fixture.store });
+  fixture.store.evidence.delete(fixture.targetBinding.artifactArchive.sha256);
+  const inventory = await deriveRollbackInventory({
+    store: fixture.store,
+    current,
+    releasePolicy,
+    minimumAcceptedGate: current.snapshot.acceptedGate,
+    minimumAcceptedFloors: current.snapshot.acceptedStandardFloors,
+  });
+  assert.equal(inventory.length, 1);
+  assert.equal(inventory[0].eligibility, "ineligible");
+  assert.deepEqual(inventory[0].eligibleActions, []);
+  assert.deepEqual(inventory[0].reasonCodes, ["artifact-archive-unavailable"]);
+});
+
+test("rechecks OIDC authority before publishing the terminal bundle", async () => {
+  const fixture = await initializePromotionFixture();
+  await runPromotionLifecycle(fixture);
   let reads = 0;
   await assert.rejects(
-    acceptPendingStandardRelease(input, {
-      validateEvidence: () => [],
+    acceptanceInputOptions({
+      fixture,
       collectApprovals: async (options) => {
         const collected = await acceptanceCollector(options);
         return {
@@ -1617,7 +2664,7 @@ test("rechecks OIDC authority immediately before the acceptance CAS", async () =
           ).toISOString(),
         };
       },
-      clock: () => {
+      prepareClock: () => {
         reads += 1;
         return (
           Date.parse(observationEndedAt) + (reads === 1 ? 0 : 2 * 60 * 1000)

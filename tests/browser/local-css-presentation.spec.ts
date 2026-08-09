@@ -71,6 +71,28 @@ const collectVisualSignature = async (page: Page): Promise<VisualSignature> =>
     };
   });
 
+test("binds one local application stylesheet and statically hides loading", async ({
+  page,
+}) => {
+  await waitForApplication(page);
+  const contract = await page.evaluate(() => {
+    const links = Array.from(
+      document.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"]'),
+    ).map((link) => new URL(link.href, document.baseURI));
+    const loading = document.getElementById("loading-screen");
+    if (!loading) throw new Error("Loading screen is missing.");
+    return {
+      display: getComputedStyle(loading).display,
+      paths: links.map((link) => link.pathname),
+      sameOrigin: links.every((link) => link.origin === location.origin),
+    };
+  });
+  expect(contract.sameOrigin).toBe(true);
+  expect(contract.paths).toHaveLength(1);
+  expect(contract.paths[0]).toMatch(/^\/assets\/[A-Za-z0-9._/-]+\.css$/);
+  expect(contract.display).toBe("none");
+});
+
 test("prepaints every stored theme before the first rendered frame", async ({
   context,
 }) => {
@@ -262,6 +284,40 @@ test("renders without horizontal overflow at smartphone and desktop breakpoints"
   expect(measurements[0]?.rootWidth).toBeLessThan(
     measurements[1]?.rootWidth ?? 0,
   );
+});
+
+test("resolves runtime layout data through the static stylesheet", async ({
+  page,
+}) => {
+  await waitForApplication(page);
+  const layout = await page.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.className =
+      "absolute esp-layout-left esp-layout-top esp-layout-width esp-layout-height";
+    probe.dataset.layoutLeft = "37px";
+    probe.dataset.layoutTop = "41px";
+    probe.dataset.layoutWidth = "83px";
+    probe.dataset.layoutHeight = "97px";
+    document.body.append(probe);
+    const computed = getComputedStyle(probe);
+    const result = {
+      height: computed.height,
+      left: computed.left,
+      styleAttribute: probe.getAttribute("style"),
+      top: computed.top,
+      width: computed.width,
+    };
+    probe.remove();
+    return result;
+  });
+
+  expect(layout).toEqual({
+    height: "97px",
+    left: "37px",
+    styleAttribute: null,
+    top: "41px",
+    width: "83px",
+  });
 });
 
 test("renders under print media and produces a valid in-memory PDF", async ({

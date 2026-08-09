@@ -10,6 +10,12 @@
     "execution": "worker",
     "requestTimeoutMs": 30000
   },
+  "faultInjection": {
+    "method": "playwright-exact-worker-response-substitution-v1",
+    "replacementRef": "scripts/performance/fault-workers/timeout.worker.js",
+    "replacementSha256": "c494a8b4d05c8676c8b7b8606d7ce7e1cb38aa30a2d5b463a0752fc4b0f85ca7",
+    "beaconPath": "/__foundation-performance-worker-beacon"
+  },
   "resourcePolicyExpectation": {
     "limitField": "maxWallTimeMs",
     "configuredLimitMs": 30000
@@ -22,6 +28,7 @@
     "cancel-message-observed",
     "worker-terminated",
     "late-result-ignored",
+    "single-timeout-error-dialog",
     "zero-domain-commits",
     "zero-download-side-effects"
   ],

@@ -13,6 +13,33 @@ const run = (...arguments_) =>
   });
 const output = (result) => `${result.stdout}\n${result.stderr}`;
 
+test("foundation readiness includes baseline, retention, and startup authorities", () => {
+  const result = run("scripts/verify-foundation-policy.mjs", "--json");
+  assert.equal(result.status, 0, output(result));
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.productionActivationReady, false);
+  for (const blocker of [
+    "P0-BOOTSTRAP-BASELINE",
+    "backup-retention-owner-unconfigured",
+    "cron-not-remotely-observed",
+    "last-success-not-remotely-observed",
+    "production-waf-rate-unobserved",
+  ]) {
+    assert.ok(report.blockerCodes.includes(blocker), `missing ${blocker}`);
+  }
+});
+
+test("foundation production readiness rejects unresolved control authorities", () => {
+  const result = run(
+    "scripts/verify-foundation-policy.mjs",
+    "--require-production-ready",
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(output(result), /P0-BOOTSTRAP-BASELINE/);
+  assert.match(output(result), /cron-not-remotely-observed/);
+  assert.match(output(result), /production-waf-rate-unobserved/);
+});
+
 test("accepts complete per-target retention evidence", () => {
   const result = run(
     "scripts/verify-metrics-retention.mjs",

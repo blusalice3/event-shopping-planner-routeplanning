@@ -4,6 +4,11 @@ import {
   sha256Bytes,
   sha256Json,
 } from "../lib/canonical-json.mjs";
+import {
+  assertBindingPolicyEligible,
+  assertPolicyCompatibilityEntries,
+} from "./policyCompatibility.mjs";
+import { RELEASE_PHASE_GATES, nextReleasePhaseGate } from "./phaseGates.mjs";
 
 const EVENT_TYPES = new Set([
   "state-initialized",
@@ -38,7 +43,6 @@ const UUID_V4_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9-]{2,62}$/;
-
 const invariant = (condition, message) => {
   if (!condition) throw new Error(message);
 };
@@ -46,6 +50,16 @@ const invariant = (condition, message) => {
 const sameValue = (left, right) => sha256Json(left) === sha256Json(right);
 const isRecord = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+const hasExactKeys = (value, keys) =>
+  isRecord(value) &&
+  Object.keys(value).sort().join("\n") === [...keys].sort().join("\n");
+const nextPhaseGate = (acceptedGate) => {
+  try {
+    return nextReleasePhaseGate(acceptedGate);
+  } catch (error) {
+    invariant(false, error.message);
+  }
+};
 const assertImmutableRef = (reference, namespace) => {
   invariant(
     isRecord(reference) &&
@@ -77,6 +91,14 @@ const assertBindingPolicyMatches = (snapshot, binding) => {
     "Deployment binding does not match the active release policy",
   );
 };
+
+const assertRecoveryBindingPolicyMatches = (snapshot, binding, action) =>
+  assertBindingPolicyEligible({
+    snapshot,
+    binding,
+    action,
+    label: "Recovery deployment binding",
+  });
 
 const assertDbBindingMatches = (snapshot, binding) => {
   invariant(
@@ -142,6 +164,21 @@ const assertInventory = (snapshot, inventory, activePolicy) => {
   invariant(Array.isArray(inventory), "Rollback inventory must be an array");
   const bindingIds = new Set();
   for (const entry of inventory) {
+    invariant(
+      hasExactKeys(entry, [
+        "acceptedEvent",
+        "acceptedGate",
+        "acceptedStandardFloors",
+        "binding",
+        "eligibility",
+        "eligibleActions",
+        "evaluatedPolicy",
+        "reasonCodes",
+      ]) &&
+        RELEASE_PHASE_GATES.includes(entry.acceptedGate) &&
+        isRecord(entry.acceptedStandardFloors),
+      "Rollback inventory accepted authority is invalid",
+    );
     assertBindingRole(entry?.binding, "standard");
     assertDbBindingMatches(snapshot, entry.binding);
     invariant(
@@ -167,6 +204,12 @@ const assertInventory = (snapshot, inventory, activePolicy) => {
       (entry.eligibility === "eligible" && actions.length > 0) ||
         (entry.eligibility === "ineligible" && actions.length === 0),
       "Rollback inventory eligibility differs from its actions",
+    );
+    invariant(
+      entry.eligibility !== "eligible" ||
+        (entry.binding.artifactArchive !== undefined &&
+          entry.binding.artifactArchiveAvailability !== undefined),
+      "Eligible rollback inventory lacks a durable artifact archive receipt",
     );
     invariant(
       Array.isArray(entry.reasonCodes) &&
@@ -308,6 +351,17 @@ const finalize = (snapshot, event, patch) => ({
 
 const initialize = (event) => {
   const payload = event.payload;
+  invariant(
+    hasExactKeys(payload, [
+      "acceptedGate",
+      "activeReleasePolicy",
+      "bootstrapRecovery",
+      "currentDbCompatibility",
+      "legacyObservedProduction",
+      "minimumSafetyFloors",
+    ]),
+    "State initialization payload has unknown or missing fields",
+  );
   assertBindingRole(payload.bootstrapRecovery, "containment");
   invariant(
     payload.bootstrapRecovery.publicIdentityKind === "legacy-bootstrap-v1",
@@ -327,12 +381,22 @@ const initialize = (event) => {
     ),
     "Initial bootstrap recovery does not match release policy",
   );
+  invariant(
+    payload.acceptedGate === null,
+    "State initialization cannot synthesize an accepted phase gate",
+  );
+  invariant(
+    event.approvalRefs.length === 0,
+    "State initialization must not synthesize protected approvals",
+  );
   return {
     sequence: event.sequence,
     eventHash: hashReleaseEvent(event),
     legacyObservedProduction: payload.legacyObservedProduction,
     activeProduction: null,
     acceptedStandard: null,
+    acceptedStandardEvent: null,
+    acceptedGate: null,
     bootstrapRecovery: payload.bootstrapRecovery,
     containmentCompanion: null,
     pendingOperation: null,
@@ -340,6 +404,7 @@ const initialize = (event) => {
     containmentIncident: null,
     standardRecovery: null,
     rollbackInventory: [],
+    activePolicyCompatibility: [],
     minimumSafetyFloors: payload.minimumSafetyFloors,
     acceptedStandardFloors: {},
     currentDbCompatibility: payload.currentDbCompatibility,
@@ -348,31 +413,185 @@ const initialize = (event) => {
 };
 
 const applyPolicyActivated = (snapshot, event) => {
+  const payload = event.payload;
+  invariant(
+    hasExactKeys(payload, [
+      "activationGate",
+      "activePolicyCompatibility",
+      "activeReleasePolicy",
+      "behaviorDimensionChange",
+      "closureBundle",
+      "closureEvidenceRefs",
+      "minimumSafetyFloorChange",
+      "minimumSafetyFloors",
+      "previousReleasePolicy",
+      "proposedReleasePolicy",
+      "rollbackInventory",
+    ]),
+    "Policy activation payload has unknown or missing fields",
+  );
   invariant(
     snapshot.pendingOperation === null,
     "Cannot activate policy mid-operation",
   );
+  invariant(
+    snapshot.pendingAcceptance === null && snapshot.acceptedStandard !== null,
+    "Policy activation requires an idle accepted standard",
+  );
+  assertImmutableRef(payload.previousReleasePolicy, event.namespace);
+  assertImmutableRef(payload.proposedReleasePolicy, event.namespace);
+  assertImmutableRef(payload.activeReleasePolicy, event.namespace);
+  assertImmutableRef(payload.closureBundle, event.namespace);
+  invariant(
+    sameValue(payload.previousReleasePolicy, snapshot.activeReleasePolicy),
+    "Policy activation does not bind the active policy predecessor",
+  );
+  invariant(
+    Array.isArray(payload.closureEvidenceRefs) &&
+      payload.closureEvidenceRefs.length === 5,
+    "Policy activation requires the five closed closure receipts",
+  );
+  for (const reference of payload.closureEvidenceRefs) {
+    assertImmutableRef(reference, event.namespace);
+  }
+  invariant(
+    event.evidenceRefs.some((reference) =>
+      sameValue(reference, payload.closureBundle),
+    ) &&
+      payload.closureEvidenceRefs.every((required) =>
+        event.evidenceRefs.some((reference) => sameValue(reference, required)),
+      ),
+    "Policy activation closure evidence is absent from the event",
+  );
+  const p8Transition = payload.activationGate === "P8-CLEAN";
+  invariant(
+    p8Transition
+      ? snapshot.acceptedGate === "P8-CLEAN"
+      : payload.activationGate === nextPhaseGate(snapshot.acceptedGate),
+    "Policy activation is not authorized by the accepted phase gate",
+  );
+  invariant(
+    p8Transition
+      ? sameValue(
+          payload.previousReleasePolicy,
+          payload.proposedReleasePolicy,
+        ) &&
+          sameValue(payload.previousReleasePolicy, payload.activeReleasePolicy)
+      : !sameValue(
+          payload.previousReleasePolicy,
+          payload.proposedReleasePolicy,
+        ) &&
+          !sameValue(
+            payload.proposedReleasePolicy,
+            payload.activeReleasePolicy,
+          ) &&
+          !sameValue(
+            payload.previousReleasePolicy,
+            payload.activeReleasePolicy,
+          ),
+    "Policy activation reference transition is invalid",
+  );
+  invariant(
+    p8Transition
+      ? payload.behaviorDimensionChange === null &&
+          hasExactKeys(payload.minimumSafetyFloorChange, ["styleSrcAttr"]) &&
+          payload.minimumSafetyFloorChange.styleSrcAttr === "none"
+      : hasExactKeys(payload.behaviorDimensionChange, [
+          "dimension",
+          "from",
+          "to",
+        ]) &&
+          typeof payload.behaviorDimensionChange.dimension === "string" &&
+          typeof payload.behaviorDimensionChange.from === "string" &&
+          typeof payload.behaviorDimensionChange.to === "string" &&
+          payload.behaviorDimensionChange.from !==
+            payload.behaviorDimensionChange.to &&
+          snapshot.acceptedStandardFloors[
+            payload.behaviorDimensionChange.dimension
+          ] === payload.behaviorDimensionChange.from &&
+          payload.minimumSafetyFloorChange === null,
+    "Policy activation does not describe exactly one gate delta",
+  );
+  const expectedFloors = p8Transition
+    ? {
+        ...snapshot.minimumSafetyFloors,
+        ...payload.minimumSafetyFloorChange,
+      }
+    : snapshot.minimumSafetyFloors;
+  invariant(
+    sameValue(payload.minimumSafetyFloors, expectedFloors) &&
+      Object.entries(snapshot.minimumSafetyFloors).every(
+        ([key, value]) => payload.minimumSafetyFloors[key] === value,
+      ) &&
+      (!p8Transition || snapshot.minimumSafetyFloors.styleSrcAttr !== "none"),
+    "Policy activation must preserve or strengthen safety floors monotonically",
+  );
+  assertPolicyCompatibilityEntries(payload.activePolicyCompatibility, {
+    namespace: event.namespace,
+    minimumSafetyFloors: payload.minimumSafetyFloors,
+    currentDbCompatibility: snapshot.currentDbCompatibility,
+  });
   assertDistinctApprovals(
     event.approvalRefs,
-    ["releaseOwner", "dataSafetyReviewer"],
+    ["releaseOwner", "dataSafetyReviewer", "operationsReviewer"],
     event.operationId,
   );
+  const nextPolicySnapshot = {
+    ...snapshot,
+    activeReleasePolicy: payload.activeReleasePolicy,
+    activePolicyCompatibility: payload.activePolicyCompatibility,
+    minimumSafetyFloors: payload.minimumSafetyFloors,
+  };
+  for (const [label, binding] of [
+    ["Active production", snapshot.activeProduction],
+    ["Accepted standard", snapshot.acceptedStandard],
+  ]) {
+    if (binding !== null) {
+      assertBindingPolicyEligible({
+        snapshot: nextPolicySnapshot,
+        binding,
+        action: binding.releaseRole === "standard" ? "rollback" : "containment",
+        label,
+      });
+    }
+  }
   assertInventory(
-    snapshot,
-    event.payload.rollbackInventory,
-    event.payload.activeReleasePolicy,
+    nextPolicySnapshot,
+    payload.rollbackInventory,
+    payload.activeReleasePolicy,
   );
   return finalize(snapshot, event, {
-    activeReleasePolicy: event.payload.activeReleasePolicy,
-    minimumSafetyFloors: event.payload.minimumSafetyFloors,
-    rollbackInventory: event.payload.rollbackInventory,
+    activeReleasePolicy: payload.activeReleasePolicy,
+    activePolicyCompatibility: payload.activePolicyCompatibility,
+    minimumSafetyFloors: payload.minimumSafetyFloors,
+    rollbackInventory: payload.rollbackInventory,
   });
 };
 
 const applyDbContractActivated = (snapshot, event) => {
   invariant(
+    hasExactKeys(event.payload, [
+      "currentDbCompatibility",
+      "previousDbCompatibility",
+      "rollbackInventory",
+    ]),
+    "DB contract activation payload has unknown or missing fields",
+  );
+  invariant(
     snapshot.pendingOperation === null,
     "Cannot activate DB contract mid-operation",
+  );
+  invariant(
+    snapshot.pendingAcceptance === null &&
+      sameValue(
+        event.payload.previousDbCompatibility,
+        snapshot.currentDbCompatibility,
+      ) &&
+      !sameValue(
+        event.payload.currentDbCompatibility,
+        snapshot.currentDbCompatibility,
+      ),
+    "DB contract activation does not bind a new predecessor contract",
   );
   assertDistinctApprovals(
     event.approvalRefs,
@@ -424,12 +643,16 @@ const applyPromotionPrepared = (snapshot, event) => {
     sameValue(operation.approvalRefs, event.approvalRefs),
     "Prepared operation approvals differ from the event envelope",
   );
-  assertDbBindingMatches(snapshot, operation.targetBinding);
-  assertBindingPolicyMatches(snapshot, operation.targetBinding);
   assertBindingRole(operation.emergencyRecoveryBinding, "containment");
   assertDbBindingMatches(snapshot, operation.emergencyRecoveryBinding);
-  assertBindingPolicyMatches(snapshot, operation.emergencyRecoveryBinding);
+  assertRecoveryBindingPolicyMatches(
+    snapshot,
+    operation.emergencyRecoveryBinding,
+    "containment",
+  );
   if (operation.kind === "promote-standard") {
+    assertDbBindingMatches(snapshot, operation.targetBinding);
+    assertBindingPolicyMatches(snapshot, operation.targetBinding);
     assertCompanionPair(operation.targetBinding, operation.companionBinding);
     invariant(
       operation.originBinding === null &&
@@ -437,10 +660,22 @@ const applyPromotionPrepared = (snapshot, event) => {
       "Promotion cannot claim redeploy origins",
     );
   } else if (operation.kind === "redeploy-standard") {
+    assertDbBindingMatches(snapshot, operation.targetBinding);
+    assertRecoveryBindingPolicyMatches(
+      snapshot,
+      operation.targetBinding,
+      "rollback",
+    );
     assertBindingRole(operation.originBinding, "standard");
     assertBindingRole(operation.originCompanionBinding, "containment");
     assertCompanionPair(operation.targetBinding, operation.companionBinding);
   } else if (operation.kind === "redeploy-containment") {
+    assertDbBindingMatches(snapshot, operation.targetBinding);
+    assertRecoveryBindingPolicyMatches(
+      snapshot,
+      operation.targetBinding,
+      "containment",
+    );
     assertBindingRole(operation.originBinding, "containment");
     assertBindingRole(operation.targetBinding, "containment");
     invariant(
@@ -449,6 +684,12 @@ const applyPromotionPrepared = (snapshot, event) => {
       "Containment redeploy cannot claim a companion pair",
     );
   } else {
+    assertDbBindingMatches(snapshot, operation.targetBinding);
+    assertRecoveryBindingPolicyMatches(
+      snapshot,
+      operation.targetBinding,
+      operation.kind === "rollback-standard" ? "rollback" : "containment",
+    );
     invariant(
       operation.originBinding === null &&
         operation.originCompanionBinding === null,
@@ -469,11 +710,198 @@ const assertPendingOperation = (snapshot, event) => {
   );
 };
 
+const assertCurrentHeadEvidence = (snapshot, event, label) => {
+  const expected = {
+    uri:
+      `release-state://${event.namespace}/events/${snapshot.sequence}/` +
+      snapshot.eventHash,
+    sha256: snapshot.eventHash,
+  };
+  invariant(
+    event.evidenceRefs.some((reference) => sameValue(reference, expected)),
+    `${label} must reference the immediately preceding lifecycle event`,
+  );
+};
+
+const assertRecoveryTerminalAuthority = (snapshot, event) => {
+  assertPendingOperation(snapshot, event);
+  const requiredLifecycleEvents =
+    snapshot.pendingOperation.reconciliationAuthority === undefined ? 3 : 2;
+  invariant(
+    snapshot.sequence ===
+      snapshot.pendingOperation.expectedState.sequence +
+        requiredLifecycleEvents,
+    "Recovery terminal requires assignment and validation lifecycle events",
+  );
+  assertCurrentHeadEvidence(snapshot, event, "Recovery terminal");
+  invariant(
+    sameValue(event.approvalRefs, snapshot.pendingOperation.approvalRefs),
+    "Recovery terminal approvals differ from the prepared operation",
+  );
+  assertDistinctApprovals(
+    event.approvalRefs,
+    ["releaseOwner", "dataSafetyReviewer"],
+    event.operationId,
+  );
+};
+
+const assertAcceptedOriginAuthority = ({
+  snapshot,
+  event,
+  binding,
+  inventoryEntry,
+}) => {
+  assertImmutableRef(event.payload.originAcceptedEvent, event.namespace);
+  invariant(
+    event.evidenceRefs.some((reference) =>
+      sameValue(reference, event.payload.originAcceptedEvent),
+    ),
+    "Accepted origin event is absent from recovery terminal evidence",
+  );
+  invariant(
+    inventoryEntry !== undefined &&
+      sameValue(inventoryEntry.binding, binding) &&
+      sameValue(
+        inventoryEntry.acceptedEvent,
+        event.payload.originAcceptedEvent,
+      ) &&
+      inventoryEntry.acceptedGate === event.payload.originAcceptedGate &&
+      sameValue(
+        inventoryEntry.acceptedStandardFloors,
+        event.payload.originAcceptedStandardFloors,
+      ),
+    "Recovery accepted origin differs from the rollback inventory",
+  );
+  if (sameValue(snapshot.acceptedStandard, binding)) {
+    invariant(
+      sameValue(
+        snapshot.acceptedStandardEvent,
+        event.payload.originAcceptedEvent,
+      ) &&
+        sameValue(
+          snapshot.acceptedStandardFloors,
+          event.payload.originAcceptedStandardFloors,
+        ) &&
+        snapshot.acceptedGate === event.payload.originAcceptedGate,
+      "Recovery accepted origin differs from the current accepted standard",
+    );
+  }
+};
+
+const applyDeploymentAssigned = (snapshot, event) => {
+  assertPendingOperation(snapshot, event);
+  invariant(
+    hasExactKeys(event.payload, [
+      "assignmentReceipt",
+      "promotionReceipt",
+      "targetBinding",
+    ]) &&
+      sameValue(
+        event.payload.targetBinding,
+        snapshot.pendingOperation.targetBinding,
+      ) &&
+      snapshot.pendingOperation.reconciliationAuthority === undefined,
+    "Deployment assignment differs from the prepared target",
+  );
+  assertImmutableRef(event.payload.assignmentReceipt, event.namespace);
+  assertImmutableRef(event.payload.promotionReceipt, event.namespace);
+  assertCurrentHeadEvidence(snapshot, event, "Deployment assignment");
+  invariant(
+    snapshot.sequence ===
+      snapshot.pendingOperation.expectedState.sequence + 1 &&
+      event.approvalRefs.length === 0,
+    "Deployment assignment lifecycle order or approvals are invalid",
+  );
+  return finalize(snapshot, event, {});
+};
+
+const applyAssignmentValidated = (snapshot, event) => {
+  assertPendingOperation(snapshot, event);
+  const reconciliation = snapshot.pendingOperation.reconciliationAuthority;
+  if (reconciliation !== undefined) {
+    invariant(
+      hasExactKeys(event.payload, [
+        "providerObservation",
+        "reconciliationKind",
+        "stateReconciled",
+        "targetBinding",
+      ]) &&
+        sameValue(
+          event.payload.targetBinding,
+          snapshot.pendingOperation.targetBinding,
+        ) &&
+        sameValue(
+          event.payload.providerObservation,
+          reconciliation.providerObservation,
+        ) &&
+        event.payload.reconciliationKind ===
+          reconciliation.reconciliationKind &&
+        sameValue(
+          event.payload.stateReconciled,
+          reconciliation.stateReconciled,
+        ),
+      "Reconcile assignment validation differs from its authority",
+    );
+    assertImmutableRef(event.payload.providerObservation, event.namespace);
+    assertImmutableRef(event.payload.stateReconciled, event.namespace);
+    invariant(
+      event.evidenceRefs.some((reference) =>
+        sameValue(reference, event.payload.providerObservation),
+      ) &&
+        event.evidenceRefs.some((reference) =>
+          sameValue(reference, event.payload.stateReconciled),
+        ),
+      "Reconcile assignment validation evidence is incomplete",
+    );
+    assertCurrentHeadEvidence(
+      snapshot,
+      event,
+      "Reconcile assignment validation",
+    );
+    invariant(
+      snapshot.sequence ===
+        snapshot.pendingOperation.expectedState.sequence + 1 &&
+        event.approvalRefs.length === 0,
+      "Reconcile assignment validation lifecycle order or approvals are invalid",
+    );
+    return finalize(snapshot, event, {});
+  }
+  invariant(
+    hasExactKeys(event.payload, [
+      "assignmentReceipt",
+      "assignmentValidation",
+      "productionProbe",
+      "targetBinding",
+    ]) &&
+      sameValue(
+        event.payload.targetBinding,
+        snapshot.pendingOperation.targetBinding,
+      ),
+    "Assignment validation differs from the prepared target",
+  );
+  for (const reference of [
+    event.payload.assignmentReceipt,
+    event.payload.assignmentValidation,
+    event.payload.productionProbe,
+  ]) {
+    assertImmutableRef(reference, event.namespace);
+  }
+  assertCurrentHeadEvidence(snapshot, event, "Assignment validation");
+  invariant(
+    snapshot.sequence ===
+      snapshot.pendingOperation.expectedState.sequence + 2 &&
+      event.approvalRefs.length === 0,
+    "Assignment validation lifecycle order or approvals are invalid",
+  );
+  return finalize(snapshot, event, {});
+};
+
 const applyObservationStarted = (snapshot, event) => {
   assertPendingOperation(snapshot, event);
   const acceptance = event.payload.pendingAcceptance;
   invariant(
     snapshot.pendingOperation.kind === "promote-standard" &&
+      snapshot.pendingOperation.reconciliationAuthority === undefined &&
       acceptance.operationId === event.operationId &&
       sameValue(
         acceptance.standardBinding,
@@ -533,6 +961,10 @@ const applyReleaseAccepted = (snapshot, event) => {
     "Containment cannot be release-accepted",
   );
   invariant(
+    event.payload.acceptedGate === nextPhaseGate(snapshot.acceptedGate),
+    "Accepted standard does not advance exactly one phase gate",
+  );
+  invariant(
     new Date(event.payload.observedThrough).getTime() >=
       new Date(snapshot.pendingAcceptance.minimumObservationEndsAt).getTime(),
     "Minimum observation window has not elapsed",
@@ -541,6 +973,13 @@ const applyReleaseAccepted = (snapshot, event) => {
     legacyObservedProduction: null,
     activeProduction: standard,
     acceptedStandard: standard,
+    acceptedStandardEvent: {
+      uri:
+        `release-state://${event.namespace}/events/${event.sequence}/` +
+        hashReleaseEvent(event),
+      sha256: hashReleaseEvent(event),
+    },
+    acceptedGate: event.payload.acceptedGate,
     containmentCompanion: companion,
     pendingOperation: null,
     pendingAcceptance: null,
@@ -556,19 +995,45 @@ const applyReleaseAccepted = (snapshot, event) => {
 };
 
 const applyContainment = (snapshot, event, kind) => {
+  assertRecoveryTerminalAuthority(snapshot, event);
   const binding = event.payload.binding;
   assertBindingRole(binding, "containment");
   assertDbBindingMatches(snapshot, binding);
-  assertBindingPolicyMatches(snapshot, binding);
+  assertRecoveryBindingPolicyMatches(snapshot, binding, "containment");
   if (kind === "legacy-bootstrap") {
     invariant(
       snapshot.bootstrapRecovery !== null &&
-        sameValue(binding, snapshot.bootstrapRecovery),
+        snapshot.acceptedStandard === null &&
+        snapshot.acceptedStandardEvent === null &&
+        snapshot.legacyObservedProduction !== null &&
+        sameValue(binding, snapshot.bootstrapRecovery) &&
+        snapshot.pendingOperation.kind === "promote-standard" &&
+        sameValue(binding, snapshot.pendingOperation.emergencyRecoveryBinding),
       "Temporary containment must use the verified bootstrap recovery",
     );
+  } else {
+    const expectedKind =
+      event.eventType === "package-redeploy-activated"
+        ? "redeploy-containment"
+        : "activate-containment";
+    invariant(
+      snapshot.pendingOperation.kind === expectedKind &&
+        sameValue(binding, snapshot.pendingOperation.targetBinding),
+      "Containment activation differs from the prepared operation",
+    );
   }
+  const activatedAt = new Date(event.payload.activatedAt).getTime();
+  const recoveryDeadline = new Date(event.payload.recoveryDeadline).getTime();
+  const targetStandard = Object.hasOwn(event.payload, "targetStandard")
+    ? event.payload.targetStandard
+    : snapshot.acceptedStandard;
   invariant(
-    Number.isFinite(new Date(event.payload.recoveryDeadline).getTime()),
+    Number.isFinite(activatedAt) &&
+      Number.isFinite(recoveryDeadline) &&
+      recoveryDeadline > activatedAt &&
+      recoveryDeadline - activatedAt <=
+        (kind === "legacy-bootstrap" ? 6 : 24) * 60 * 60 * 1000 &&
+      sameValue(targetStandard, snapshot.acceptedStandard),
     "Containment recovery deadline is invalid",
   );
   return finalize(snapshot, event, {
@@ -583,14 +1048,31 @@ const applyContainment = (snapshot, event, kind) => {
     },
     standardRecovery: {
       containmentBinding: binding,
-      targetStandard: event.payload.targetStandard ?? snapshot.acceptedStandard,
+      targetStandard,
       recoveryDeadline: event.payload.recoveryDeadline,
     },
   });
 };
 
 const applyRollback = (snapshot, event) => {
+  assertRecoveryTerminalAuthority(snapshot, event);
   const binding = event.payload.binding;
+  invariant(
+    hasExactKeys(event.payload, [
+      "binding",
+      "companionBinding",
+      "originAcceptedEvent",
+      "originAcceptedGate",
+      "originAcceptedStandardFloors",
+    ]) &&
+      snapshot.pendingOperation.kind === "rollback-standard" &&
+      sameValue(binding, snapshot.pendingOperation.targetBinding) &&
+      sameValue(
+        event.payload.companionBinding,
+        snapshot.pendingOperation.companionBinding,
+      ),
+    "Rollback differs from the prepared operation",
+  );
   assertBindingRole(binding, "standard");
   const inventoryEntry = snapshot.rollbackInventory.find(
     (entry) => entry.binding.bindingId === binding.bindingId,
@@ -604,12 +1086,21 @@ const applyRollback = (snapshot, event) => {
     sameValue(inventoryEntry.binding, binding),
     "Rollback binding differs from the accepted inventory",
   );
+  assertAcceptedOriginAuthority({
+    snapshot,
+    event,
+    binding,
+    inventoryEntry,
+  });
   assertDbBindingMatches(snapshot, binding);
-  assertBindingPolicyMatches(snapshot, binding);
+  assertRecoveryBindingPolicyMatches(snapshot, binding, "rollback");
   assertCompanionPair(binding, event.payload.companionBinding);
   return finalize(snapshot, event, {
     activeProduction: binding,
     acceptedStandard: binding,
+    acceptedStandardEvent: event.payload.originAcceptedEvent,
+    acceptedGate: event.payload.originAcceptedGate,
+    acceptedStandardFloors: event.payload.originAcceptedStandardFloors,
     containmentCompanion: event.payload.companionBinding,
     pendingOperation: null,
     pendingAcceptance: null,
@@ -619,11 +1110,20 @@ const applyRollback = (snapshot, event) => {
 };
 
 const applyPackageRedeploy = (snapshot, event) => {
-  assertPendingOperation(snapshot, event);
+  assertRecoveryTerminalAuthority(snapshot, event);
   const standardBranch = event.payload.releaseRole === "standard";
   if (standardBranch) {
     invariant(
-      snapshot.pendingOperation.kind === "redeploy-standard" &&
+      hasExactKeys(event.payload, [
+        "companionBinding",
+        "originAcceptedEvent",
+        "originAcceptedGate",
+        "originAcceptedStandardFloors",
+        "releaseRole",
+        "rollbackInventory",
+        "standardBinding",
+      ]) &&
+        snapshot.pendingOperation.kind === "redeploy-standard" &&
         sameValue(
           event.payload.standardBinding,
           snapshot.pendingOperation.targetBinding,
@@ -643,9 +1143,43 @@ const applyPackageRedeploy = (snapshot, event) => {
       event.payload.rollbackInventory,
       snapshot.activeReleasePolicy,
     );
+    const originInventoryEntry = snapshot.rollbackInventory.find((entry) =>
+      sameValue(entry.binding, snapshot.pendingOperation.originBinding),
+    );
+    const currentOriginEntry = sameValue(
+      snapshot.acceptedStandard,
+      snapshot.pendingOperation.originBinding,
+    )
+      ? {
+          binding: snapshot.acceptedStandard,
+          acceptedEvent: snapshot.acceptedStandardEvent,
+          acceptedGate: snapshot.acceptedGate,
+          acceptedStandardFloors: snapshot.acceptedStandardFloors,
+        }
+      : undefined;
+    assertAcceptedOriginAuthority({
+      snapshot,
+      event,
+      binding: snapshot.pendingOperation.originBinding,
+      inventoryEntry: originInventoryEntry ?? currentOriginEntry,
+    });
+    const redeployedInventoryEntry = event.payload.rollbackInventory.find(
+      (entry) => sameValue(entry.binding, event.payload.standardBinding),
+    );
+    invariant(
+      redeployedInventoryEntry !== undefined &&
+        sameValue(
+          redeployedInventoryEntry.acceptedEvent,
+          event.payload.originAcceptedEvent,
+        ),
+      "Standard redeploy inventory does not preserve accepted origin authority",
+    );
     return finalize(snapshot, event, {
       activeProduction: event.payload.standardBinding,
       acceptedStandard: event.payload.standardBinding,
+      acceptedStandardEvent: event.payload.originAcceptedEvent,
+      acceptedGate: event.payload.originAcceptedGate,
+      acceptedStandardFloors: event.payload.originAcceptedStandardFloors,
       containmentCompanion: event.payload.companionBinding,
       rollbackInventory: event.payload.rollbackInventory,
       pendingOperation: null,
@@ -670,8 +1204,8 @@ const applyStateReconciled = (snapshot, event) => {
     "Reconcile payload must be derived and cannot contain a snapshot patch",
   );
   invariant(
-    payload.reconciliationKind === "provider-target-assigned/v1",
-    "Reconcile outcome is unsupported",
+    event.approvalRefs.length === 0 && snapshot.pendingAcceptance === null,
+    "Reconcile approvals or pending acceptance are invalid",
   );
   assertImmutableRef(payload.providerObservation, event.namespace);
   invariant(
@@ -682,11 +1216,86 @@ const applyStateReconciled = (snapshot, event) => {
     ),
     "Reconcile provider observation is absent from event evidence",
   );
-  invariant(
-    sameValue(payload.observedBinding, snapshot.pendingOperation.targetBinding),
-    "Reconcile provider binding differs from the prepared target",
-  );
-  return finalize(snapshot, event, {});
+  const operation = snapshot.pendingOperation;
+  let nextOperation;
+  if (payload.reconciliationKind === "provider-target-assigned/v1") {
+    invariant(
+      sameValue(payload.observedBinding, operation.targetBinding),
+      "Reconcile provider binding differs from the prepared target",
+    );
+    nextOperation = structuredClone(operation);
+  } else if (payload.reconciliationKind === "provider-previous-assigned/v1") {
+    invariant(
+      operation.previousBinding !== null &&
+        sameValue(payload.observedBinding, operation.previousBinding),
+      "Reconcile provider binding differs from the prepared previous binding",
+    );
+    if (payload.observedBinding.releaseRole === "standard") {
+      invariant(
+        snapshot.containmentCompanion !== null,
+        "Reconcile previous standard companion is absent",
+      );
+      nextOperation = {
+        ...structuredClone(operation),
+        kind: "rollback-standard",
+        targetBinding: structuredClone(payload.observedBinding),
+        companionBinding: structuredClone(snapshot.containmentCompanion),
+        originBinding: null,
+        originCompanionBinding: null,
+      };
+    } else {
+      nextOperation = {
+        ...structuredClone(operation),
+        kind: "activate-containment",
+        targetBinding: structuredClone(payload.observedBinding),
+        companionBinding: null,
+        originBinding: null,
+        originCompanionBinding: null,
+      };
+    }
+  } else {
+    invariant(
+      payload.reconciliationKind === "provider-emergency-assigned/v1" &&
+        sameValue(payload.observedBinding, operation.emergencyRecoveryBinding),
+      "Reconcile provider binding differs from the prepared emergency binding",
+    );
+    const legacyBootstrap =
+      payload.observedBinding.publicIdentityKind === "legacy-bootstrap-v1";
+    invariant(
+      !legacyBootstrap ||
+        (operation.kind === "promote-standard" &&
+          snapshot.acceptedStandard === null &&
+          snapshot.acceptedStandardEvent === null &&
+          snapshot.legacyObservedProduction !== null &&
+          snapshot.bootstrapRecovery !== null &&
+          sameValue(payload.observedBinding, snapshot.bootstrapRecovery)),
+      "Legacy emergency reconcile is not an initial promotion recovery",
+    );
+    nextOperation = {
+      ...structuredClone(operation),
+      kind: legacyBootstrap ? "promote-standard" : "activate-containment",
+      targetBinding: structuredClone(payload.observedBinding),
+      companionBinding: null,
+      originBinding: null,
+      originCompanionBinding: null,
+    };
+  }
+  nextOperation.expectedState = {
+    sequence: snapshot.sequence,
+    eventHash: snapshot.eventHash,
+  };
+  const reconciledEventHash = hashReleaseEvent(event);
+  nextOperation.reconciliationAuthority = {
+    reconciliationKind: payload.reconciliationKind,
+    providerObservation: structuredClone(payload.providerObservation),
+    stateReconciled: {
+      uri:
+        `release-state://${event.namespace}/events/${event.sequence}/` +
+        reconciledEventHash,
+      sha256: reconciledEventHash,
+    },
+  };
+  return finalize(snapshot, event, { pendingOperation: nextOperation });
 };
 
 export const reduceReleaseState = (snapshot, event) => {
@@ -701,15 +1310,19 @@ export const reduceReleaseState = (snapshot, event) => {
     case "promotion-prepared":
       return applyPromotionPrepared(snapshot, event);
     case "deployment-assigned":
+      return applyDeploymentAssigned(snapshot, event);
     case "assignment-validated":
-      assertPendingOperation(snapshot, event);
-      return finalize(snapshot, event, {});
+      return applyAssignmentValidated(snapshot, event);
     case "observation-started":
       return applyObservationStarted(snapshot, event);
     case "release-accepted":
       return applyReleaseAccepted(snapshot, event);
     case "operation-aborted":
       assertPendingOperation(snapshot, event);
+      invariant(
+        hasExactKeys(event.payload, []) && event.approvalRefs.length === 0,
+        "Operation abort payload or approvals are invalid",
+      );
       return finalize(snapshot, event, {
         pendingOperation: null,
         pendingAcceptance: null,

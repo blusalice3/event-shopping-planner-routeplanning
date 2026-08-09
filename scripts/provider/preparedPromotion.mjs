@@ -88,6 +88,13 @@ const APPROVAL_KEYS = [
   "workflowRunId",
 ];
 const REQUIRED_APPROVAL_ROLES = ["releaseOwner", "dataSafetyReviewer"];
+const PREPARED_OPERATION_KINDS = new Set([
+  "promote-standard",
+  "rollback-standard",
+  "activate-containment",
+  "redeploy-standard",
+  "redeploy-containment",
+]);
 const FORBIDDEN_CALLER_AUTHORITY_FIELDS = [
   "deploymentId",
   "deploymentUrl",
@@ -261,6 +268,30 @@ const assertMatchingPromotionPair = (standard, companion) => {
   }
 };
 
+const assertPackageRedeployIdentity = (origin, target) => {
+  if (
+    origin.providerDeploymentId === target.providerDeploymentId ||
+    origin.sourceSha !== target.sourceSha ||
+    origin.buildId !== target.buildId ||
+    origin.variantId !== target.variantId ||
+    origin.releaseRole !== target.releaseRole ||
+    origin.publicIdentityKind !== target.publicIdentityKind ||
+    origin.providerProjectId !== target.providerProjectId ||
+    origin.providerConfigurationHash !== target.providerConfigurationHash ||
+    !sameCanonicalValue(origin.artifactArchive, target.artifactArchive) ||
+    !sameCanonicalValue(origin.packageIndex, target.packageIndex) ||
+    !sameCanonicalValue(origin.artifactManifest, target.artifactManifest) ||
+    !sameCanonicalValue(origin.releasePolicy, target.releasePolicy) ||
+    !sameCanonicalValue(origin.providerPolicy, target.providerPolicy) ||
+    !sameCanonicalValue(
+      origin.requiredDbCompatibility,
+      target.requiredDbCompatibility,
+    )
+  ) {
+    throw new Error("Prepared package redeploy changed immutable identity");
+  }
+};
+
 const assertOwnedDomains = (policy) => {
   const domains = policy.ownedProductionDomains;
   const sorted = [...domains].sort(UTF8_COMPARE);
@@ -299,7 +330,6 @@ export const assertPreparedPromotionEnvironment = ({
     GITHUB_EVENT_NAME: "workflow_dispatch",
     GITHUB_REF: `refs/heads/${providerPolicy.productionBranch}`,
     GITHUB_REF_PROTECTED: "true",
-    GITHUB_SHA: operation.targetBinding.sourceSha,
     RELEASE_STATE_NAMESPACE: event.namespace,
     VERCEL_ORG_ID: providerPolicy.expectedTeamId,
     VERCEL_PROJECT_ID: providerPolicy.expectedProjectId,
@@ -310,6 +340,16 @@ export const assertPreparedPromotionEnvironment = ({
         `Promotion environment ${name} differs from the prepared binding`,
       );
     }
+  }
+  const workflowSourceSha = requireEnvironment(environment, "GITHUB_SHA");
+  if (
+    !SOURCE_SHA_PATTERN.test(workflowSourceSha) ||
+    (operation.kind === "promote-standard" &&
+      workflowSourceSha !== operation.targetBinding.sourceSha)
+  ) {
+    throw new Error(
+      "Promotion environment GITHUB_SHA differs from the protected operation",
+    );
   }
   if (
     !RUN_ID_PATTERN.test(requireEnvironment(environment, "GITHUB_RUN_ID")) ||
@@ -368,9 +408,7 @@ export const validatePreparedPromotionResult = ({
     event.eventType !== "promotion-prepared" ||
     !OPERATION_ID_PATTERN.test(event.operationId) ||
     event.operationId !== operation.operationId ||
-    operation.kind !== "promote-standard" ||
-    operation.originBinding !== null ||
-    operation.originCompanionBinding !== null ||
+    !PREPARED_OPERATION_KINDS.has(operation.kind) ||
     !Number.isSafeInteger(event.sequence) ||
     event.sequence < 2 ||
     !Number.isSafeInteger(operation.expectedState.sequence) ||
@@ -403,23 +441,37 @@ export const validatePreparedPromotionResult = ({
   ) {
     throw new Error("Prepared promotion timestamps are inconsistent");
   }
-  if (
-    !SOURCE_SHA_PATTERN.test(operation.targetBinding?.sourceSha) ||
-    operation.targetBinding.sourceSha !== operation.companionBinding?.sourceSha
-  ) {
+  if (!SOURCE_SHA_PATTERN.test(operation.targetBinding?.sourceSha)) {
     throw new Error("Prepared promotion source binding is invalid");
   }
 
+  const containmentOperation = [
+    "activate-containment",
+    "redeploy-containment",
+  ].includes(operation.kind);
   assertDeploymentBinding(operation.targetBinding, {
     namespace: event.namespace,
-    expectedRole: "standard",
+    expectedRole: containmentOperation ? "containment" : "standard",
     label: "Prepared promotion target",
   });
-  assertDeploymentBinding(operation.companionBinding, {
-    namespace: event.namespace,
-    expectedRole: "containment",
-    label: "Prepared containment companion",
-  });
+  const companionRequired = [
+    "promote-standard",
+    "rollback-standard",
+    "redeploy-standard",
+  ].includes(operation.kind);
+  if (companionRequired) {
+    assertDeploymentBinding(operation.companionBinding, {
+      namespace: event.namespace,
+      expectedRole: "containment",
+      label: "Prepared containment companion",
+    });
+    assertMatchingPromotionPair(
+      operation.targetBinding,
+      operation.companionBinding,
+    );
+  } else if (operation.companionBinding !== null) {
+    throw new Error("Prepared containment operation cannot claim a companion");
+  }
   assertDeploymentBinding(operation.emergencyRecoveryBinding, {
     namespace: event.namespace,
     expectedRole: "containment",
@@ -433,10 +485,48 @@ export const validatePreparedPromotionResult = ({
       label: "Prepared previous production",
     });
   }
-  assertMatchingPromotionPair(
-    operation.targetBinding,
-    operation.companionBinding,
-  );
+  if (operation.kind === "redeploy-standard") {
+    assertDeploymentBinding(operation.originBinding, {
+      namespace: event.namespace,
+      expectedRole: "standard",
+      label: "Prepared standard redeploy origin",
+    });
+    assertDeploymentBinding(operation.originCompanionBinding, {
+      namespace: event.namespace,
+      expectedRole: "containment",
+      label: "Prepared containment redeploy origin companion",
+    });
+    assertMatchingPromotionPair(
+      operation.originBinding,
+      operation.originCompanionBinding,
+    );
+    assertPackageRedeployIdentity(
+      operation.originBinding,
+      operation.targetBinding,
+    );
+    assertPackageRedeployIdentity(
+      operation.originCompanionBinding,
+      operation.companionBinding,
+    );
+  } else if (operation.kind === "redeploy-containment") {
+    assertDeploymentBinding(operation.originBinding, {
+      namespace: event.namespace,
+      expectedRole: "containment",
+      label: "Prepared containment redeploy origin",
+    });
+    if (operation.originCompanionBinding !== null) {
+      throw new Error("Prepared containment redeploy origin is ambiguous");
+    }
+    assertPackageRedeployIdentity(
+      operation.originBinding,
+      operation.targetBinding,
+    );
+  } else if (
+    operation.originBinding !== null ||
+    operation.originCompanionBinding !== null
+  ) {
+    throw new Error("Prepared non-redeploy operation cannot claim origins");
+  }
   if (
     operation.previousBinding?.providerDeploymentId ===
     operation.targetBinding.providerDeploymentId
@@ -445,20 +535,25 @@ export const validatePreparedPromotionResult = ({
   }
 
   const providerPolicySha256 = sha256Json(providerPolicy);
-  if (
-    operation.targetBinding.providerProjectId !==
-      providerPolicy.expectedProjectId ||
-    operation.companionBinding.providerProjectId !==
-      providerPolicy.expectedProjectId ||
-    operation.targetBinding.providerPolicy.sha256 !== providerPolicySha256 ||
-    operation.companionBinding.providerPolicy.sha256 !== providerPolicySha256 ||
-    operation.targetBinding.providerPolicy.uri !==
-      `release-state://${event.namespace}/evidence/${providerPolicySha256}` ||
-    !SHA256_PATTERN.test(operation.targetBinding.providerConfigurationHash)
-  ) {
-    throw new Error(
-      "Prepared promotion provider policy or stable configuration binding differs",
-    );
+  const operationBindings = [
+    operation.targetBinding,
+    operation.companionBinding,
+    operation.originBinding,
+    operation.originCompanionBinding,
+    operation.emergencyRecoveryBinding,
+  ].filter(Boolean);
+  for (const binding of operationBindings) {
+    if (
+      binding.providerProjectId !== providerPolicy.expectedProjectId ||
+      binding.providerPolicy.sha256 !== providerPolicySha256 ||
+      binding.providerPolicy.uri !==
+        `release-state://${event.namespace}/evidence/${providerPolicySha256}` ||
+      !SHA256_PATTERN.test(binding.providerConfigurationHash)
+    ) {
+      throw new Error(
+        "Prepared promotion provider policy or stable configuration binding differs",
+      );
+    }
   }
 
   assertExactKeys(
@@ -1033,13 +1128,17 @@ const createPromotionReceipt = ({
       deploymentUrl: target.deploymentUrl,
       providerDeploymentEvidenceSha256: target.providerEvidence.sha256,
     },
-    companion: {
-      bindingId: operation.companionBinding.bindingId,
-      releaseRole: operation.companionBinding.releaseRole,
-      providerDeploymentId: operation.companionBinding.providerDeploymentId,
-      providerDeploymentEvidenceSha256:
-        operation.companionBinding.providerEvidence.sha256,
-    },
+    companion:
+      operation.companionBinding === null
+        ? null
+        : {
+            bindingId: operation.companionBinding.bindingId,
+            releaseRole: operation.companionBinding.releaseRole,
+            providerDeploymentId:
+              operation.companionBinding.providerDeploymentId,
+            providerDeploymentEvidenceSha256:
+              operation.companionBinding.providerEvidence.sha256,
+          },
     approvalReferences: result.approvalRefs.map((approval) => ({
       role: approval.role,
       uri: approval.uri,

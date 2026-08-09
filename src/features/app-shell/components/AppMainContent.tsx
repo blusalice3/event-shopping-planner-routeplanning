@@ -55,7 +55,7 @@ type EventListScreenProps = React.ComponentProps<typeof EventListScreen>;
 type ShoppingListProps = React.ComponentProps<typeof ShoppingList>;
 type MapViewProps = React.ComponentProps<typeof MapView>;
 
-type AppMainContentProps = {
+type AppMainContentFields = {
   activeEventDate: string;
   activeEventName: string | null;
   activeTab: ActiveTab;
@@ -214,7 +214,7 @@ type AppMainContentProps = {
   setFocusModeMapVisible: React.Dispatch<React.SetStateAction<boolean>>;
   setLayoutMode: React.Dispatch<React.SetStateAction<LayoutMode>>;
   setMapIsHallOrderOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setMapIsRouteVisible: React.Dispatch<React.SetStateAction<boolean>>;
+  setMapIsRouteVisible: (visible: boolean) => void;
   setMapSelectedHallId: React.Dispatch<React.SetStateAction<string>>;
   setSpaceGroupingEnabled: React.Dispatch<React.SetStateAction<boolean>>;
   showLateFilterButton: boolean;
@@ -227,137 +227,324 @@ type AppMainContentProps = {
   zoomLevel: number;
 };
 
-const AppMainContent: React.FC<AppMainContentProps> = (props) => {
+export type AppMainContentModel = {
+  readonly navigation: Pick<
+    AppMainContentFields,
+    | "activeEventDate"
+    | "activeEventName"
+    | "activeTab"
+    | "currentMode"
+    | "eventDates"
+    | "isMapTab"
+    | "mainContentVisible"
+  >;
+  readonly events: Pick<
+    AppMainContentFields,
+    "eventLists" | "exportFileInputRef"
+  >;
+  readonly list: Pick<
+    AppMainContentFields,
+    | "availableBlocks"
+    | "blocksWithPriorityRemarks"
+    | "candidateColumnItems"
+    | "candidateNumberSortDirection"
+    | "collapsedSpaces"
+    | "duplicateCircleItemIds"
+    | "executeCollapsedSpaces"
+    | "executeColumnItems"
+    | "executeModeItems"
+    | "executeSpaceGroupingEnabled"
+    | "items"
+    | "itemToEdit"
+    | "newItemDefaults"
+    | "rangeEnd"
+    | "rangeStart"
+    | "selectedBlockFilters"
+    | "selectedItemIds"
+    | "showLateFilterButton"
+    | "showPostponeFilterButton"
+    | "spaceGroupingEnabled"
+    | "visibleItems"
+  >;
+  readonly map: Pick<
+    AppMainContentFields,
+    | "cellSelectionMode"
+    | "currentHallRouteSettings"
+    | "currentHalls"
+    | "currentMapData"
+    | "currentMapExecuteItemIds"
+    | "currentMapTabName"
+    | "currentMapTabRotationState"
+    | "currentMapTabViewport"
+    | "getHallOrderForDate"
+    | "getHallsForDate"
+    | "getMapDataForDate"
+    | "hallDefinitions"
+    | "hallRouteSettings"
+    | "highlightedItemId"
+    | "highlightedMapCell"
+    | "mapData"
+    | "mapIsHallOrderOpen"
+    | "mapIsRouteVisible"
+    | "mapSelectedHallId"
+    | "mapSmartInsertEnabled"
+    | "mapSmartInsertMode"
+    | "vertexGuideOptions"
+    | "vertexSelectionMode"
+    | "visitListPanelOpen"
+  >;
+  readonly focus: Pick<
+    AppMainContentFields,
+    | "currentFocusMapRotationState"
+    | "currentFocusResumeState"
+    | "currentFocusSessionKey"
+  >;
+  readonly ui: Pick<
+    AppMainContentFields,
+    | "disableLimitedPurchaseQuantityCheck"
+    | "disablePriceUndefinedCheck"
+    | "layoutMode"
+    | "numberCellOutlineStyle"
+    | "postEventDistributionCheckEnabled"
+    | "purchaseStatusControlMode"
+    | "skipLimitedPurchaseForSingleQuantity"
+    | "zoomLevel"
+  >;
+};
+
+export type AppMainContentActions = {
+  readonly events: Pick<
+    AppMainContentFields,
+    | "handleBackupExport"
+    | "handleBackupRestoreRequest"
+    | "handleBulkAdd"
+    | "handleDeleteEvent"
+    | "handleExportEvent"
+    | "handleImportMapData"
+    | "handleRenameEvent"
+    | "handleSelectEvent"
+    | "handleUpdateEvent"
+  >;
+  readonly list: Pick<
+    AppMainContentFields,
+    | "handleActivateLateFilter"
+    | "handleActivatePostponeFilter"
+    | "handleBulkStatusChange"
+    | "handleCandidateNumberSort"
+    | "handleClearBlockFilters"
+    | "handleClearNewItemDefaults"
+    | "handleClearRangeSelection"
+    | "handleCollapseAndOpenNext"
+    | "handleDeleteRequest"
+    | "handleDoneEditing"
+    | "handleEditRequest"
+    | "handleExecuteItemUpdate"
+    | "handleExecuteSpaceGroupOrderChange"
+    | "handleExecuteToggleAllSpaceCollapse"
+    | "handleExecuteToggleSpaceCollapse"
+    | "handleMoveItem"
+    | "handleMoveItemDown"
+    | "handleMoveItemUp"
+    | "handleMoveToExecuteColumn"
+    | "handleRemoveFromExecuteColumn"
+    | "handleSelectItem"
+    | "handleSelectSpaceGroupForRange"
+    | "handleSetSpaceGroupDragItemIds"
+    | "handleToggleAllSpaceCollapse"
+    | "handleToggleBlockFilter"
+    | "handleToggleRangeSelection"
+    | "handleToggleSpaceCollapse"
+    | "handleUpdateItem"
+    | "setCollapsedSpaces"
+    | "setSpaceGroupingEnabled"
+  >;
+  readonly map: Pick<
+    AppMainContentFields,
+    | "handleAddNewItemFromMap"
+    | "handleAddToExecuteListFromMap"
+    | "handleAddToExecuteListFromMapAtPosition"
+    | "handleBatchAddToExecuteListFromMap"
+    | "handleBatchAddToExecuteListFromMapAtPosition"
+    | "handleBatchRemoveFromExecuteListFromMap"
+    | "handleDeleteItemFromMap"
+    | "handleMapTabRotationAngleChange"
+    | "handleMapViewportChange"
+    | "handleMoveToFirstFromMap"
+    | "handleMoveToLastFromMap"
+    | "handleRemoveFromExecuteListFromMap"
+    | "handleReorderExecuteListByHallOrder"
+    | "handleUpdateHallRouteSettings"
+    | "handleUpdateItemPriorityFromEdit"
+    | "setMapIsHallOrderOpen"
+    | "setMapIsRouteVisible"
+    | "setMapSelectedHallId"
+  >;
+  readonly focus: Pick<
+    AppMainContentFields,
+    | "handleAddItemFromFocusMode"
+    | "handleFocusMapRotationAngleChange"
+    | "handleFocusSessionStateChange"
+    | "handleModeChangeFromFocus"
+    | "setFocusModeMapVisible"
+  >;
+  readonly ui: Pick<AppMainContentFields, "setLayoutMode">;
+};
+
+export type AppMainContentProps = {
+  readonly model: AppMainContentModel;
+  readonly actions: AppMainContentActions;
+};
+
+const AppMainContent: React.FC<AppMainContentProps> = ({ model, actions }) => {
   const {
-    activeEventDate,
-    activeEventName,
-    activeTab,
-    availableBlocks,
-    blocksWithPriorityRemarks,
-    candidateColumnItems,
-    candidateNumberSortDirection,
-    cellSelectionMode,
-    collapsedSpaces,
-    currentFocusMapRotationState,
-    currentFocusResumeState,
-    currentFocusSessionKey,
-    currentHallRouteSettings,
-    currentHalls,
-    currentMapData,
-    currentMapExecuteItemIds,
-    currentMapTabName,
-    currentMapTabRotationState,
-    currentMapTabViewport,
-    currentMode,
-    disablePriceUndefinedCheck,
-    disableLimitedPurchaseQuantityCheck,
-    skipLimitedPurchaseForSingleQuantity,
-    postEventDistributionCheckEnabled,
-    duplicateCircleItemIds,
-    eventDates,
-    eventLists,
-    executeCollapsedSpaces,
-    executeColumnItems,
-    executeModeItems,
-    executeSpaceGroupingEnabled,
-    exportFileInputRef,
-    getHallOrderForDate,
-    getHallsForDate,
-    getMapDataForDate,
-    hallDefinitions,
-    hallRouteSettings,
-    handleActivateLateFilter,
-    handleActivatePostponeFilter,
-    handleAddItemFromFocusMode,
-    handleAddNewItemFromMap,
-    handleAddToExecuteListFromMap,
-    handleAddToExecuteListFromMapAtPosition,
-    handleBatchAddToExecuteListFromMap,
-    handleBatchAddToExecuteListFromMapAtPosition,
-    handleBatchRemoveFromExecuteListFromMap,
-    handleBulkAdd,
-    handleBulkStatusChange,
-    handleCandidateNumberSort,
-    handleClearBlockFilters,
-    handleClearNewItemDefaults,
-    handleClearRangeSelection,
-    handleCollapseAndOpenNext,
-    handleBackupExport,
-    handleBackupRestoreRequest,
-    handleDeleteEvent,
-    handleDeleteItemFromMap,
-    handleDeleteRequest,
-    handleDoneEditing,
-    handleEditRequest,
-    handleExecuteItemUpdate,
-    handleExecuteSpaceGroupOrderChange,
-    handleExecuteToggleAllSpaceCollapse,
-    handleExecuteToggleSpaceCollapse,
-    handleExportEvent,
-    handleFocusMapRotationAngleChange,
-    handleFocusSessionStateChange,
-    handleImportMapData,
-    handleMapTabRotationAngleChange,
-    handleMapViewportChange,
-    handleModeChangeFromFocus,
-    handleMoveItem,
-    handleMoveItemDown,
-    handleMoveItemUp,
-    handleMoveToExecuteColumn,
-    handleMoveToFirstFromMap,
-    handleMoveToLastFromMap,
-    handleRemoveFromExecuteColumn,
-    handleRemoveFromExecuteListFromMap,
-    handleRenameEvent,
-    handleReorderExecuteListByHallOrder,
-    handleSelectEvent,
-    handleSelectItem,
-    handleSelectSpaceGroupForRange,
-    handleSetSpaceGroupDragItemIds,
-    handleToggleAllSpaceCollapse,
-    handleToggleBlockFilter,
-    handleToggleRangeSelection,
-    handleToggleSpaceCollapse,
-    handleUpdateEvent,
-    handleUpdateHallRouteSettings,
-    handleUpdateItem,
-    handleUpdateItemPriorityFromEdit,
-    highlightedItemId,
-    highlightedMapCell,
-    isMapTab,
-    items,
-    itemToEdit,
-    layoutMode,
-    mainContentVisible,
-    mapData,
-    mapIsHallOrderOpen,
-    mapIsRouteVisible,
-    mapSelectedHallId,
-    mapSmartInsertEnabled,
-    mapSmartInsertMode,
-    newItemDefaults,
-    numberCellOutlineStyle,
-    purchaseStatusControlMode,
-    rangeEnd,
-    rangeStart,
-    selectedBlockFilters,
-    selectedItemIds,
-    setCollapsedSpaces,
-    setFocusModeMapVisible,
-    setLayoutMode,
-    setMapIsHallOrderOpen,
-    setMapIsRouteVisible,
-    setMapSelectedHallId,
-    setSpaceGroupingEnabled,
-    showLateFilterButton,
-    showPostponeFilterButton,
-    spaceGroupingEnabled,
-    vertexGuideOptions,
-    vertexSelectionMode,
-    visibleItems,
-    visitListPanelOpen,
-    zoomLevel,
-  } = props;
+    navigation: {
+      activeEventDate,
+      activeEventName,
+      activeTab,
+      currentMode,
+      eventDates,
+      isMapTab,
+      mainContentVisible,
+    },
+    events: { eventLists, exportFileInputRef },
+    list: {
+      availableBlocks,
+      blocksWithPriorityRemarks,
+      candidateColumnItems,
+      candidateNumberSortDirection,
+      collapsedSpaces,
+      duplicateCircleItemIds,
+      executeCollapsedSpaces,
+      executeColumnItems,
+      executeModeItems,
+      executeSpaceGroupingEnabled,
+      items,
+      itemToEdit,
+      newItemDefaults,
+      rangeEnd,
+      rangeStart,
+      selectedBlockFilters,
+      selectedItemIds,
+      showLateFilterButton,
+      showPostponeFilterButton,
+      spaceGroupingEnabled,
+      visibleItems,
+    },
+    map: {
+      cellSelectionMode,
+      currentHallRouteSettings,
+      currentHalls,
+      currentMapData,
+      currentMapExecuteItemIds,
+      currentMapTabName,
+      currentMapTabRotationState,
+      currentMapTabViewport,
+      getHallOrderForDate,
+      getHallsForDate,
+      getMapDataForDate,
+      hallDefinitions,
+      hallRouteSettings,
+      highlightedItemId,
+      highlightedMapCell,
+      mapData,
+      mapIsHallOrderOpen,
+      mapIsRouteVisible,
+      mapSelectedHallId,
+      mapSmartInsertEnabled,
+      mapSmartInsertMode,
+      vertexGuideOptions,
+      vertexSelectionMode,
+      visitListPanelOpen,
+    },
+    focus: {
+      currentFocusMapRotationState,
+      currentFocusResumeState,
+      currentFocusSessionKey,
+    },
+    ui: {
+      disableLimitedPurchaseQuantityCheck,
+      disablePriceUndefinedCheck,
+      layoutMode,
+      numberCellOutlineStyle,
+      postEventDistributionCheckEnabled,
+      purchaseStatusControlMode,
+      skipLimitedPurchaseForSingleQuantity,
+      zoomLevel,
+    },
+  } = model;
+  const {
+    events: {
+      handleBackupExport,
+      handleBackupRestoreRequest,
+      handleBulkAdd,
+      handleDeleteEvent,
+      handleExportEvent,
+      handleImportMapData,
+      handleRenameEvent,
+      handleSelectEvent,
+      handleUpdateEvent,
+    },
+    list: {
+      handleActivateLateFilter,
+      handleActivatePostponeFilter,
+      handleBulkStatusChange,
+      handleCandidateNumberSort,
+      handleClearBlockFilters,
+      handleClearNewItemDefaults,
+      handleClearRangeSelection,
+      handleCollapseAndOpenNext,
+      handleDeleteRequest,
+      handleDoneEditing,
+      handleEditRequest,
+      handleExecuteItemUpdate,
+      handleExecuteSpaceGroupOrderChange,
+      handleExecuteToggleAllSpaceCollapse,
+      handleExecuteToggleSpaceCollapse,
+      handleMoveItem,
+      handleMoveItemDown,
+      handleMoveItemUp,
+      handleMoveToExecuteColumn,
+      handleRemoveFromExecuteColumn,
+      handleSelectItem,
+      handleSelectSpaceGroupForRange,
+      handleSetSpaceGroupDragItemIds,
+      handleToggleAllSpaceCollapse,
+      handleToggleBlockFilter,
+      handleToggleRangeSelection,
+      handleToggleSpaceCollapse,
+      handleUpdateItem,
+      setCollapsedSpaces,
+      setSpaceGroupingEnabled,
+    },
+    map: {
+      handleAddNewItemFromMap,
+      handleAddToExecuteListFromMap,
+      handleAddToExecuteListFromMapAtPosition,
+      handleBatchAddToExecuteListFromMap,
+      handleBatchAddToExecuteListFromMapAtPosition,
+      handleBatchRemoveFromExecuteListFromMap,
+      handleDeleteItemFromMap,
+      handleMapTabRotationAngleChange,
+      handleMapViewportChange,
+      handleMoveToFirstFromMap,
+      handleMoveToLastFromMap,
+      handleRemoveFromExecuteListFromMap,
+      handleReorderExecuteListByHallOrder,
+      handleUpdateHallRouteSettings,
+      handleUpdateItemPriorityFromEdit,
+      setMapIsHallOrderOpen,
+      setMapIsRouteVisible,
+      setMapSelectedHallId,
+    },
+    focus: {
+      handleAddItemFromFocusMode,
+      handleFocusMapRotationAngleChange,
+      handleFocusSessionStateChange,
+      handleModeChangeFromFocus,
+      setFocusModeMapVisible,
+    },
+    ui: { setLayoutMode },
+  } = actions;
 
   const currentMapRouteHallOrder = React.useMemo(
     () => (activeEventDate ? getHallOrderForDate(activeEventDate) : []),

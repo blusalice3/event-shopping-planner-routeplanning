@@ -49,6 +49,7 @@ const providerPolicy = {
   gitProductionAutoDeploy: false,
   allowedPreviewBranches: [],
   requiredEnvironmentNames: ["VERCEL_DEPLOYMENT_ID"],
+  cspReportEnvironmentNames: [],
   forbiddenEnvironmentNames: [],
   rawRequestByteCeilings: {
     persistenceReleaseAMetrics: 1024,
@@ -157,6 +158,8 @@ const binding = ({
   providerProjectId: PROJECT_ID,
   providerDeploymentId: deploymentId,
   deploymentUrl,
+  artifactArchive: reference(role === "standard" ? "a" : "b"),
+  artifactArchiveAvailability: reference(role === "standard" ? "c" : "d"),
   packageIndex: reference("1"),
   artifactManifest: reference(role === "standard" ? "2" : "3"),
   providerEvidence: reference(role === "standard" ? "4" : "5"),

@@ -41,6 +41,7 @@ const configuredPolicy = {
   expectedProjectId: "prj_test",
   ownedProductionDomains: ["example.test"],
   requiredEnvironmentNames: ["REQUIRED_ENV"],
+  cspReportEnvironmentNames: [],
   forbiddenEnvironmentNames: ["FORBIDDEN_ENV"],
   wafRules: {
     metricsRoute: wafRule("rule_metrics", "/api/persistence-release-a-metrics"),

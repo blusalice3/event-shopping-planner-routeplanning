@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "event-workbook-worker-roundtrip-v1",
+  "goldenVersion": 1,
+  "payloadSha256": "1161357d2abc066b63f462068d49fe5bd91050bfa4131ee88def6c71d69921be",
+  "input": {
+    "schemaVersion": 1,
+    "eventName": "固定ゴールデン即売会",
+    "items": [
+      {
+        "id": "golden-item-limited",
+        "circle": "固定サークルα",
+        "eventDate": "1日目",
+        "block": "東A",
+        "number": "01a",
+        "title": "日本語タイトル／限定本",
+        "price": 1500,
+        "catalogPrice": 1200,
+        "purchaseStatus": "LimitedPurchase",
+        "quantity": 3,
+        "limitedPurchasedQuantity": 2,
+        "remarks": "当日メモ",
+        "sheetRemarks": "原本備考",
+        "url": "https://example.invalid/circle-alpha",
+        "priorityLevel": "highest",
+        "protectionLevel": "full",
+        "source": "spreadsheet",
+        "manualHallId": "east-hall"
+      },
+      {
+        "id": "golden-item-purchased",
+        "circle": "固定サークルβ",
+        "eventDate": "2日目",
+        "block": "西B",
+        "number": "12b",
+        "title": "通常新刊",
+        "price": null,
+        "purchaseStatus": "Purchased",
+        "quantity": 1,
+        "remarks": "",
+        "sheetRemarks": "アプリ入力備考",
+        "url": "",
+        "priorityLevel": "priority",
+        "protectionLevel": "deletable",
+        "source": "app",
+        "manualHallId": "west-hall"
+      }
+    ],
+    "options": {
+      "includeItems": true,
+      "includeLayoutInfo": true,
+      "includeMapData": false,
+      "includeRouteInfo": false,
+      "format": "full"
+    },
+    "additionalData": {
+      "metadata": {
+        "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/golden",
+        "spreadsheetSheetName": "購入リスト",
+        "lastImportDate": "2026-08-08T00:00:00.000Z"
+      },
+      "executeModeItems": {
+        "固定ゴールデン即売会": {
+          "1日目": ["golden-item-limited"],
+          "2日目": ["golden-item-purchased"]
+        }
+      },
+      "dayModes": {
+        "固定ゴールデン即売会": {
+          "1日目": "focus",
+          "2日目": "execute"
+        }
+      }
+    }
+  },
+  "expectedImport": {
+    "kind": "event-import",
+    "value": {
+      "success": true,
+      "eventName": "固定ゴールデン即売会",
+      "items": [
+        {
+          "id": "golden-item-limited",
+          "circle": "固定サークルα",
+          "eventDate": "1日目",
+          "block": "東A",
+          "number": "01a",
+          "title": "日本語タイトル／限定本",
+          "price": 1500,
+          "catalogPrice": 1200,
+          "quantity": 3,
+          "purchaseStatus": "LimitedPurchase",
+          "remarks": "当日メモ",
+          "sheetRemarks": "原本備考",
+          "url": "https://example.invalid/circle-alpha",
+          "priorityLevel": "highest",
+          "protectionLevel": "full",
+          "source": "spreadsheet",
+          "manualHallId": "east-hall",
+          "limitedPurchasedQuantity": 2
+        },
+        {
+          "id": "golden-item-purchased",
+          "circle": "固定サークルβ",
+          "eventDate": "2日目",
+          "block": "西B",
+          "number": "12b",
+          "title": "通常新刊",
+          "price": null,
+          "quantity": 1,
+          "purchaseStatus": "Purchased",
+          "remarks": "",
+          "sheetRemarks": "アプリ入力備考",
+          "url": "",
+          "priorityLevel": "priority",
+          "protectionLevel": "deletable",
+          "source": "app",
+          "manualHallId": "west-hall"
+        }
+      ],
+      "metadata": {
+        "spreadsheetUrl": "https://docs.google.com/spreadsheets/d/golden",
+        "spreadsheetSheetName": "購入リスト",
+        "lastImportDate": "2026-08-08T00:00:00.000Z"
+      },
+      "layoutInfo": {
+        "executeModeItems": {
+          "1日目": ["golden-item-limited"],
+          "2日目": ["golden-item-purchased"]
+        },
+        "dayModes": {
+          "1日目": "focus",
+          "2日目": "execute"
+        }
+      },
+      "errors": []
+    }
+  }
+}

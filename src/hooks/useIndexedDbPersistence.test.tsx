@@ -27,6 +27,13 @@ const dbMock = vi.hoisted(() => ({
 }));
 
 const persistenceCommandMock = vi.hoisted(() => ({
+  loadPreference: vi.fn(),
+  savePreference: vi.fn(),
+  readBlockDetectionSettings: vi.fn(),
+  readBlockDetectionSettingsForBackup: vi.fn(),
+  saveBlockDetectionSettings: vi.fn(),
+  removeBlockDetectionSettingsForEvent: vi.fn(),
+  renameBlockDetectionSettingsForEvent: vi.fn(),
   migrateFromLocalStorage: vi.fn(),
   adoptRecoveryCandidate: vi.fn(),
   saveEventLists: vi.fn(),
@@ -40,6 +47,10 @@ const persistenceCommandMock = vi.hoisted(() => ({
   saveHallRouteSettings: vi.fn(),
   saveMapViewportSettings: vi.fn(),
   restoreAppDataAtomically: vi.fn(),
+  commitApplicationSnapshotAtomically: vi.fn(),
+  deleteEventAtomically: vi.fn(),
+  renameEventAtomically: vi.fn(),
+  restoreAppDataWithBlockDetectionSettings: vi.fn(),
 }));
 
 vi.mock("../utils/indexedDB", () => ({

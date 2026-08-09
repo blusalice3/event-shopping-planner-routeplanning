@@ -13,6 +13,7 @@ import {
   contentAddressedObjectPath,
   writeContentAddressedObject,
 } from "../lib/content-addressed-store.mjs";
+import { POLICY_ACTIVATION_QA_BUILD_PURPOSE } from "../lib/release-build-input.mjs";
 import { createDeterministicZip } from "../deterministic-zip.mjs";
 import {
   deployVerifiedPrebuilt,
@@ -32,6 +33,11 @@ const TOKEN = "test-token-must-never-leak";
 const DEPLOYMENT_URL = "https://immutable-test.vercel.app";
 const PROVIDER_RESPONSE_HASH = "f".repeat(64);
 const FIXED_NOW = Date.parse("Thu, 06 Aug 2026 00:01:00 GMT");
+const BUILD_AUTHORITY_SHA = "6".repeat(64);
+const BUILD_AUTHORITY = Object.freeze({
+  uri: `release-state://foundation-test/evidence/${BUILD_AUTHORITY_SHA}`,
+  sha256: BUILD_AUTHORITY_SHA,
+});
 
 const replaceAllBytes = (bytes, before, after) => {
   assert.equal(before.length, after.length);
@@ -139,6 +145,10 @@ const fixture = async ({
     packageKind: "source-hardened-pair",
     sourceSha: SOURCE_SHA,
     buildId: SOURCE_SHA,
+    buildAuthority: BUILD_AUTHORITY,
+    targetGate: "P0-RELEASE",
+    buildPurpose: "production",
+    promotable: true,
     toolchainPolicyHash: manifest.toolchainPolicyHash,
     providerConfigurationHash: manifest.providerConfigurationHash,
     providerPolicyHash: manifest.providerPolicyHash,
@@ -290,6 +300,27 @@ test("deploys only the verified prebuilt command and writes a canonical receipt"
       result.receipt.idempotencyKey,
       context.baseOptions.idempotencyKey,
     );
+  } finally {
+    await rm(context.root, { recursive: true, force: true });
+  }
+});
+
+test("production prebuilt deployment rejects a policy QA package index", async () => {
+  const context = await fixture();
+  try {
+    const indexPath = path.join(
+      context.packageRoot,
+      "release-package-index.json",
+    );
+    const index = parseJsonStrict(await readFile(indexPath, "utf8"));
+    index.buildPurpose = POLICY_ACTIVATION_QA_BUILD_PURPOSE;
+    index.promotable = false;
+    await writeFile(indexPath, canonicalJsonBytes(index));
+    await assert.rejects(
+      deployVerifiedPrebuilt(context.baseOptions),
+      /purpose\/promotable binding is invalid/,
+    );
+    assert.equal(context.invocations.length, 0);
   } finally {
     await rm(context.root, { recursive: true, force: true });
   }

@@ -4,6 +4,12 @@ import { renderHook, act } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useDisableLimitedPurchaseQuantityCheck } from "./useDisableLimitedPurchaseQuantityCheck";
 
+const preferences = {
+  loadPreference: (key: string) => localStorage.getItem(key),
+  savePreference: (key: string, value: string) =>
+    localStorage.setItem(key, value),
+};
+
 describe("useDisableLimitedPurchaseQuantityCheck", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -11,7 +17,7 @@ describe("useDisableLimitedPurchaseQuantityCheck", () => {
 
   it("defaults to false", () => {
     const { result } = renderHook(() =>
-      useDisableLimitedPurchaseQuantityCheck(),
+      useDisableLimitedPurchaseQuantityCheck(preferences),
     );
 
     expect(result.current.disableLimitedPurchaseQuantityCheck).toBe(false);
@@ -21,7 +27,7 @@ describe("useDisableLimitedPurchaseQuantityCheck", () => {
     localStorage.setItem("disableLimitedPurchaseQuantityCheck", "true");
 
     const { result } = renderHook(() =>
-      useDisableLimitedPurchaseQuantityCheck(),
+      useDisableLimitedPurchaseQuantityCheck(preferences),
     );
 
     expect(result.current.disableLimitedPurchaseQuantityCheck).toBe(true);
@@ -29,7 +35,7 @@ describe("useDisableLimitedPurchaseQuantityCheck", () => {
 
   it("persists changes to localStorage", () => {
     const { result } = renderHook(() =>
-      useDisableLimitedPurchaseQuantityCheck(),
+      useDisableLimitedPurchaseQuantityCheck(preferences),
     );
 
     act(() => {

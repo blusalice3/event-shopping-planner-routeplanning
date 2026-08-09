@@ -15,16 +15,15 @@ import type {
   MapViewportSettingsStore,
   RouteSettingsStore,
 } from "../../types/map";
-import type { PendingEventUpdate } from "../../features/events/updateFlow";
+import type {
+  PersistenceCommandPort,
+  PersistenceSnapshot,
+} from "../ports/PersistenceCommandPort";
 import {
   removeRecordKey,
   renameRecordKey,
 } from "../../features/events/recordOps";
 import { resolveEventListTab } from "../../features/events/uiOrchestration";
-import {
-  removeBlockDetectionSettingsForEvent,
-  renameBlockDetectionSettingsForEvent,
-} from "../../utils/blockDetectionSettingsStorage";
 
 type StateSetter<T> = Dispatch<SetStateAction<T>>;
 
@@ -68,14 +67,28 @@ export const renameFocusModeSessionKeys = (
 };
 
 export interface EventLifecycleCommandPorts {
+  persistenceCommands: Pick<
+    PersistenceCommandPort,
+    "deleteEventAtomically" | "renameEventAtomically"
+  >;
+  flushPendingSave(): Promise<void>;
   activeEventName: string | null;
   eventToRename: string | null;
   eventLists: Record<string, ShoppingItem[]>;
+  eventMetadata: Record<string, EventMetadata>;
+  executeModeItems: Record<string, ExecuteModeItems>;
+  dayModes: Record<string, DayModeState>;
+  mapData: MapDataStore;
+  mapRotationSettings: MapRotationSettingsStore;
+  routeSettings: RouteSettingsStore;
+  hallDefinitions: HallDefinitionsStore;
+  hallRouteSettings: HallRouteSettingsStore;
+  mapViewportSettings: MapViewportSettingsStore;
   navigation: AppNavigationCommands;
   notify(message: string): void;
   clearSelection(): void;
   setSelectedBlockFilters: StateSetter<Set<string>>;
-  setPendingEventUpdate: StateSetter<PendingEventUpdate | null>;
+  closeEventUpdateForEvent(eventName: string): void;
   setEventLists: StateSetter<Record<string, ShoppingItem[]>>;
   setEventMetadata: StateSetter<Record<string, EventMetadata>>;
   updateExecuteModeItems(
@@ -91,26 +104,53 @@ export interface EventLifecycleCommandPorts {
   setHallRouteSettings: StateSetter<HallRouteSettingsStore>;
   setMapViewportSettings: StateSetter<MapViewportSettingsStore>;
   setFocusModeSessions: StateSetter<Record<string, FocusModeSessionState>>;
-  setEventToRename: StateSetter<string | null>;
-  setShowRenameDialog: StateSetter<boolean>;
+  openRename(eventName: string): void;
+  confirmEventOverlay(): void;
 }
 
 export interface EventLifecycleCommands {
   selectEvent(eventName: string): void;
-  deleteEvent(eventName: string): void;
+  deleteEvent(eventName: string): Promise<void>;
   requestRename(eventName: string): void;
-  confirmRename(newName: string): void;
+  confirmRename(newName: string): Promise<void>;
 }
 
+const toPersistenceSnapshot = (
+  ports: Pick<
+    EventLifecycleCommandPorts,
+    | "eventLists"
+    | "eventMetadata"
+    | "executeModeItems"
+    | "dayModes"
+    | "mapData"
+    | "mapRotationSettings"
+    | "routeSettings"
+    | "hallDefinitions"
+    | "hallRouteSettings"
+    | "mapViewportSettings"
+  >,
+): PersistenceSnapshot => ports as unknown as PersistenceSnapshot;
+
 export const useEventLifecycleCommands = ({
+  persistenceCommands,
+  flushPendingSave,
   activeEventName,
   eventToRename,
   eventLists,
+  eventMetadata,
+  executeModeItems,
+  dayModes,
+  mapData,
+  mapRotationSettings,
+  routeSettings,
+  hallDefinitions,
+  hallRouteSettings,
+  mapViewportSettings,
   navigation,
   notify,
   clearSelection,
   setSelectedBlockFilters,
-  setPendingEventUpdate,
+  closeEventUpdateForEvent,
   setEventLists,
   setEventMetadata,
   updateExecuteModeItems,
@@ -122,8 +162,8 @@ export const useEventLifecycleCommands = ({
   setHallRouteSettings,
   setMapViewportSettings,
   setFocusModeSessions,
-  setEventToRename,
-  setShowRenameDialog,
+  openRename,
+  confirmEventOverlay,
 }: EventLifecycleCommandPorts): EventLifecycleCommands => {
   const selectEvent = useCallback(
     (eventName: string) => {
@@ -141,10 +181,31 @@ export const useEventLifecycleCommands = ({
   );
 
   const deleteEvent = useCallback(
-    (eventName: string) => {
-      setPendingEventUpdate((pending) =>
-        pending?.eventName === eventName ? null : pending,
-      );
+    async (eventName: string): Promise<void> => {
+      try {
+        await flushPendingSave();
+        await persistenceCommands.deleteEventAtomically(
+          toPersistenceSnapshot({
+            eventLists,
+            eventMetadata,
+            executeModeItems,
+            dayModes,
+            mapData,
+            mapRotationSettings,
+            routeSettings,
+            hallDefinitions,
+            hallRouteSettings,
+            mapViewportSettings,
+          }),
+          eventName,
+        );
+      } catch {
+        notify(
+          "イベントを削除できませんでした。保存状態は変更されていません。",
+        );
+        return;
+      }
+      closeEventUpdateForEvent(eventName);
       setEventLists((current) => removeRecordKey(current, eventName));
       setEventMetadata((current) => removeRecordKey(current, eventName));
       updateExecuteModeItems((current) => removeRecordKey(current, eventName));
@@ -155,7 +216,6 @@ export const useEventLifecycleCommands = ({
       setHallDefinitions((current) => removeRecordKey(current, eventName));
       setHallRouteSettings((current) => removeRecordKey(current, eventName));
       setMapViewportSettings((current) => removeRecordKey(current, eventName));
-      removeBlockDetectionSettingsForEvent(eventName);
       setFocusModeSessions((current) =>
         removeFocusModeSessionByEvent(current, eventName),
       );
@@ -163,6 +223,19 @@ export const useEventLifecycleCommands = ({
     },
     [
       navigation,
+      dayModes,
+      eventLists,
+      eventMetadata,
+      executeModeItems,
+      flushPendingSave,
+      hallDefinitions,
+      hallRouteSettings,
+      mapData,
+      mapRotationSettings,
+      mapViewportSettings,
+      notify,
+      persistenceCommands,
+      routeSettings,
       setDayModes,
       setEventLists,
       setEventMetadata,
@@ -172,7 +245,7 @@ export const useEventLifecycleCommands = ({
       setMapData,
       setMapRotationSettings,
       setMapViewportSettings,
-      setPendingEventUpdate,
+      closeEventUpdateForEvent,
       setRouteSettings,
       updateExecuteModeItems,
     ],
@@ -180,24 +253,47 @@ export const useEventLifecycleCommands = ({
 
   const requestRename = useCallback(
     (eventName: string) => {
-      setEventToRename(eventName);
-      setShowRenameDialog(true);
+      openRename(eventName);
     },
-    [setEventToRename, setShowRenameDialog],
+    [openRename],
   );
 
   const confirmRename = useCallback(
-    (newName: string) => {
+    async (newName: string): Promise<void> => {
       if (!eventToRename) return;
 
       if (eventToRename === newName) {
-        setShowRenameDialog(false);
-        setEventToRename(null);
+        confirmEventOverlay();
         return;
       }
 
       if (eventLists[newName]) {
         notify("同名のイベントが既に存在します。別の名前を指定してください。");
+        return;
+      }
+
+      try {
+        await flushPendingSave();
+        await persistenceCommands.renameEventAtomically(
+          toPersistenceSnapshot({
+            eventLists,
+            eventMetadata,
+            executeModeItems,
+            dayModes,
+            mapData,
+            mapRotationSettings,
+            routeSettings,
+            hallDefinitions,
+            hallRouteSettings,
+            mapViewportSettings,
+          }),
+          eventToRename,
+          newName,
+        );
+      } catch {
+        notify(
+          "イベント名を変更できませんでした。保存状態は変更されていません。",
+        );
         return;
       }
 
@@ -229,7 +325,6 @@ export const useEventLifecycleCommands = ({
       setMapViewportSettings((current) =>
         renameRecordKey(current, eventToRename, newName),
       );
-      renameBlockDetectionSettingsForEvent(eventToRename, newName);
       setFocusModeSessions((current) =>
         renameFocusModeSessionKeys(current, eventToRename, newName),
       );
@@ -238,19 +333,29 @@ export const useEventLifecycleCommands = ({
         navigation.renameActiveEvent(eventToRename, newName);
       }
 
-      setShowRenameDialog(false);
-      setEventToRename(null);
+      confirmEventOverlay();
     },
     [
       activeEventName,
+      dayModes,
       eventLists,
+      eventMetadata,
       eventToRename,
+      executeModeItems,
+      flushPendingSave,
+      hallDefinitions,
+      hallRouteSettings,
+      mapData,
+      mapRotationSettings,
+      mapViewportSettings,
+      confirmEventOverlay,
       navigation,
       notify,
+      persistenceCommands,
+      routeSettings,
       setDayModes,
       setEventLists,
       setEventMetadata,
-      setEventToRename,
       setFocusModeSessions,
       setHallDefinitions,
       setHallRouteSettings,
@@ -258,7 +363,6 @@ export const useEventLifecycleCommands = ({
       setMapRotationSettings,
       setMapViewportSettings,
       setRouteSettings,
-      setShowRenameDialog,
       updateExecuteModeItems,
     ],
   );

@@ -10,13 +10,17 @@
   "operation": {
     "kind": "event-import",
     "execution": "worker",
-    "transferInput": true
+    "transferInput": true,
+    "minimumDeferredItemCount": 10000,
+    "expectedPostCommitView": "event-list"
   },
   "requiredAssertions": [
     "worker-execution-observed",
     "ui-heartbeat-observed",
     "progress-observed",
     "single-terminal-result",
+    "single-import-completion-dialog",
+    "large-restore-deferred-to-event-list",
     "atomic-domain-commit"
   ],
   "requiredTelemetry": [
