@@ -146,6 +146,36 @@ test("forward transition waits for one target worker to activate naturally", () 
     verifierSource,
     /forwardInstrumentation\.controllerChangeCount\s*>=\s*1/,
   );
+  assert.match(
+    verifierSource,
+    /const STAGE_FORWARD_UPDATE_AFTER_BASELINE =\s*TRANSITION_MODE === "forward" && PROMPT_CLOSE_DRILL_MODE === "disabled";/,
+  );
+  const offlineStageIndex = verifierSource.indexOf(
+    "await setNetworkOffline(primary.client, true)",
+  );
+  const forwardActivationIndex = verifierSource.indexOf(
+    "const naturalActivation = await waitForNaturalServiceWorkerActivation(",
+    forwardStart,
+  );
+  const onlineRestoreIndex = verifierSource.indexOf(
+    "await setNetworkOffline(primary.client, false)",
+    forwardActivationIndex,
+  );
+  const requestedUpdateIndex = verifierSource.indexOf(
+    "return await requestTargetServiceWorkerUpdate(primary.client)",
+    onlineRestoreIndex,
+  );
+  assert.ok(
+    offlineStageIndex >= 0 &&
+      offlineStageIndex < forwardActivationIndex &&
+      onlineRestoreIndex > forwardActivationIndex &&
+      requestedUpdateIndex > onlineRestoreIndex,
+    "Historical forward navigation must remain offline until the tracker freezes its baseline.",
+  );
+  assert.match(
+    verifierSource.slice(offlineStageIndex, forwardActivationIndex),
+    /activeState === "activated"[\s\S]*controlled[\s\S]*!stagedRegistration\.installing[\s\S]*stagedRegistration\.offline[\s\S]*!stagedRegistration\.waiting/,
+  );
 
   const promptPrepareStart = verifierSource.indexOf(
     "async ({ waitingVersionId })",

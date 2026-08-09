@@ -41,6 +41,8 @@ const ROLLBACK_ACTIVATION_MODE = resolveRollbackActivationMode({
   transitionMode: TRANSITION_MODE,
   configuredMode: process.env.ESP_ROLLBACK_ACTIVATION,
 });
+const STAGE_FORWARD_UPDATE_AFTER_BASELINE =
+  TRANSITION_MODE === "forward" && PROMPT_CLOSE_DRILL_MODE === "disabled";
 const ALLOW_DIRTY_BUILD = process.env.ESP_ALLOW_DIRTY_BUILD === "true";
 const REQUESTED_PROFILE_DIRECTORY =
   process.env.ESP_BROWSER_PROFILE_DIR?.trim() || null;
@@ -1764,14 +1766,18 @@ const assertFixtureUnchanged = (before, after, label) => {
   assert(after.rendered, `${label}: application did not render.`);
 };
 
-const collectOfflineControllerBuildIdentity = async (client, buildId) => {
+const setNetworkOffline = async (client, offline) => {
   await client.send("Network.emulateNetworkConditions", {
-    offline: true,
+    offline,
     latency: 0,
-    downloadThroughput: 0,
-    uploadThroughput: 0,
-    connectionType: "none",
+    downloadThroughput: offline ? 0 : -1,
+    uploadThroughput: offline ? 0 : -1,
+    connectionType: offline ? "none" : "wifi",
   });
+};
+
+const collectOfflineControllerBuildIdentity = async (client, buildId) => {
+  await setNetworkOffline(client, true);
   try {
     return await evaluate(
       client,
@@ -1793,13 +1799,7 @@ const collectOfflineControllerBuildIdentity = async (client, buildId) => {
         }))`,
     );
   } finally {
-    await client.send("Network.emulateNetworkConditions", {
-      offline: false,
-      latency: 0,
-      downloadThroughput: -1,
-      uploadThroughput: -1,
-      connectionType: "wifi",
-    });
+    await setNetworkOffline(client, false);
   }
 };
 
@@ -1984,8 +1984,33 @@ try {
     primary.client,
     PROMPT_CLOSE_DRILL_MODE === "required" ? "save-blocker" : "none",
   );
+  if (STAGE_FORWARD_UPDATE_AFTER_BASELINE) {
+    await setNetworkOffline(primary.client, true);
+  }
   await navigate(primary.client, PREVIEW_URL);
   await ensureControlledApplication(primary.client);
+  if (STAGE_FORWARD_UPDATE_AFTER_BASELINE) {
+    const stagedRegistration = await evaluate(
+      primary.client,
+      `navigator.serviceWorker.getRegistration().then((registration) => ({
+        activeState: registration?.active?.state ?? null,
+        controlled: Boolean(navigator.serviceWorker.controller),
+        installing: Boolean(registration?.installing),
+        offline: navigator.onLine === false,
+        waiting: Boolean(registration?.waiting),
+      }))`,
+    );
+    assert(
+      stagedRegistration.activeState === "activated" &&
+        stagedRegistration.controlled &&
+        !stagedRegistration.installing &&
+        stagedRegistration.offline &&
+        !stagedRegistration.waiting,
+      `Historical forward staging differs: ${JSON.stringify(
+        stagedRegistration,
+      )}`,
+    );
+  }
   if (TRANSITION_MODE === "rollback") {
     assert(
       (await readArtifactMarker()) === EXPECTED_FROM_ARTIFACT_ID,
@@ -2404,7 +2429,20 @@ try {
     const naturalActivation = await waitForNaturalServiceWorkerActivation(
       primary.client,
       new URL("/sw.js", PREVIEW_URL).href,
-      () => requestTargetServiceWorkerUpdate(primary.client),
+      async () => {
+        if (STAGE_FORWARD_UPDATE_AFTER_BASELINE) {
+          await setNetworkOffline(primary.client, false);
+          const restoredOnline = await evaluate(
+            primary.client,
+            "navigator.onLine === true",
+          );
+          assert(
+            restoredOnline,
+            "Historical forward staging did not restore network access.",
+          );
+        }
+        return await requestTargetServiceWorkerUpdate(primary.client);
+      },
       PROMPT_CLOSE_DRILL_MODE === "required"
         ? async ({ waitingVersionId }) => {
             const preflush = await waitForPromptCloseAllPhase(
