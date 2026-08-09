@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "formalAuthorities": [
+    "backup-restore-rehearsal",
+    "idb-device-compatibility",
+    "pwa-multiclient-drill"
+  ],
+  "activationStatus": "unconfigured",
+  "blockerCodes": [
+    "backup-api-origin-unconfigured",
+    "backup-owner-unconfigured",
+    "backup-provider-unconfigured",
+    "backup-restore-target-unconfigured",
+    "backup-source-project-unconfigured",
+    "device-attestation-key-unconfigured",
+    "device-browser-binary-unconfigured",
+    "device-browser-enrollment-hash-unconfigured",
+    "device-browser-version-unconfigured",
+    "device-profile-authority-unconfigured",
+    "device-runner-group-unconfigured",
+    "installed-pwa-launch-authority-unconfigured"
+  ],
+  "backupRestore": {
+    "bindingStatus": "unconfigured",
+    "provider": null,
+    "apiOrigin": null,
+    "sourceProjectRef": null,
+    "restoreTarget": {
+      "environment": "nonproduction",
+      "projectRef": null,
+      "namespacePrefix": "phase-exit-backup-restore"
+    },
+    "recoveryPointObjectiveSeconds": 300,
+    "recoveryTimeObjectiveSeconds": 120,
+    "owner": null,
+    "credentialEnvironmentAllowlist": [
+      "FOUNDATION_BACKUP_API_TOKEN",
+      "FOUNDATION_BACKUP_RESTORE_DATABASE_CA_PEM",
+      "FOUNDATION_BACKUP_RESTORE_DATABASE_URL",
+      "FOUNDATION_BACKUP_SOURCE_DATABASE_CA_PEM",
+      "FOUNDATION_BACKUP_SOURCE_DATABASE_URL"
+    ]
+  },
+  "managedDeviceExecution": {
+    "bindingStatus": "unconfigured",
+    "runnerGroup": null,
+    "requiredLabels": [
+      "Windows",
+      "X64",
+      "foundation-device",
+      "managed",
+      "self-hosted"
+    ],
+    "operatingSystem": {
+      "family": "windows",
+      "release": "11",
+      "architecture": "x64"
+    },
+    "browser": {
+      "family": "chromium",
+      "binaryPath": null,
+      "exactVersion": null,
+      "managedEnrollmentIdSha256": null
+    },
+    "deviceProfiles": [
+      {
+        "id": "browser-tab",
+        "clientKind": "browser-tab",
+        "installedMode": false,
+        "profileName": "foundation-browser-tab",
+        "profileRoot": null,
+        "profilePath": null
+      },
+      {
+        "id": "installed-pwa",
+        "clientKind": "installed-pwa",
+        "installedMode": true,
+        "profileName": "foundation-installed-pwa",
+        "profileRoot": null,
+        "profilePath": null
+      }
+    ],
+    "attestation": {
+      "algorithm": "ed25519",
+      "publicKeyFingerprintSha256": null
+    },
+    "installedPwaLaunchAuthority": {
+      "bindingStatus": "unconfigured",
+      "kind": "managed-os-pwa",
+      "forceInstallPolicyName": "WebAppInstallForceList",
+      "forceInstallPolicyValueSha256": null,
+      "installUrl": null,
+      "applicationId": null,
+      "requiredPolicyStatus": "OK"
+    }
+  }
+}

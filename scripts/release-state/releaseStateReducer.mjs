@@ -8,7 +8,12 @@ import {
   assertBindingPolicyEligible,
   assertPolicyCompatibilityEntries,
 } from "./policyCompatibility.mjs";
-import { RELEASE_PHASE_GATES, nextReleasePhaseGate } from "./phaseGates.mjs";
+import {
+  FORMAL_PHASE_EXIT_GATES,
+  PHASE_EXIT_SUBJECT_KIND_BY_GATE,
+  RELEASE_PHASE_GATES,
+  nextReleasePhaseGate,
+} from "./phaseGates.mjs";
 
 const EVENT_TYPES = new Set([
   "state-initialized",
@@ -19,6 +24,7 @@ const EVENT_TYPES = new Set([
   "assignment-validated",
   "observation-started",
   "release-accepted",
+  "phase-exit-attested",
   "operation-aborted",
   "temporary-containment-activated",
   "containment-activated",
@@ -357,12 +363,19 @@ const initialize = (event) => {
       "activeReleasePolicy",
       "bootstrapRecovery",
       "currentDbCompatibility",
+      "executorSourceSha",
       "legacyObservedProduction",
       "minimumSafetyFloors",
+      "phaseExitAttestationSeed",
     ]),
     "State initialization payload has unknown or missing fields",
   );
   assertBindingRole(payload.bootstrapRecovery, "containment");
+  invariant(
+    typeof payload.executorSourceSha === "string" &&
+      /^[0-9a-f]{40}$/u.test(payload.executorSourceSha),
+    "State initialization executor source SHA is invalid",
+  );
   invariant(
     payload.bootstrapRecovery.publicIdentityKind === "legacy-bootstrap-v1",
     "Initial bootstrap recovery must use legacy bootstrap identity",
@@ -389,6 +402,44 @@ const initialize = (event) => {
     event.approvalRefs.length === 0,
     "State initialization must not synthesize protected approvals",
   );
+  invariant(
+    Array.isArray(payload.phaseExitAttestationSeed) &&
+      payload.phaseExitAttestationSeed.length === 3,
+    "State initialization requires three pre-initialization phase exits",
+  );
+  for (
+    let index = 0;
+    index < payload.phaseExitAttestationSeed.length;
+    index += 1
+  ) {
+    const seed = payload.phaseExitAttestationSeed[index];
+    invariant(
+      hasExactKeys(seed, [
+        "attestation",
+        "gate",
+        "predecessor",
+        "sourceSha",
+        "subjectKind",
+      ]) &&
+        seed.gate === FORMAL_PHASE_EXIT_GATES[index] &&
+        seed.subjectKind === PHASE_EXIT_SUBJECT_KIND_BY_GATE[seed.gate] &&
+        typeof seed.sourceSha === "string" &&
+        /^[0-9a-f]{40}$/u.test(seed.sourceSha),
+      "State initialization phase exit seed identity differs",
+    );
+    assertImmutableRef(seed.attestation, event.namespace);
+    const predecessor =
+      index === 0
+        ? null
+        : payload.phaseExitAttestationSeed[index - 1].attestation;
+    invariant(
+      sameValue(seed.predecessor, predecessor) &&
+        event.evidenceRefs.some((reference) =>
+          sameValue(reference, seed.attestation),
+        ),
+      "State initialization phase exit seed chain differs",
+    );
+  }
   return {
     sequence: event.sequence,
     eventHash: hashReleaseEvent(event),
@@ -405,11 +456,59 @@ const initialize = (event) => {
     standardRecovery: null,
     rollbackInventory: [],
     activePolicyCompatibility: [],
+    phaseExitAttestations: structuredClone(payload.phaseExitAttestationSeed),
     minimumSafetyFloors: payload.minimumSafetyFloors,
     acceptedStandardFloors: {},
     currentDbCompatibility: payload.currentDbCompatibility,
     activeReleasePolicy: payload.activeReleasePolicy,
   };
+};
+
+const applyPhaseExitAttested = (snapshot, event) => {
+  const payload = event.payload;
+  invariant(
+    hasExactKeys(payload, [
+      "attestation",
+      "gate",
+      "predecessor",
+      "sourceSha",
+      "subjectKind",
+    ]),
+    "Phase exit attestation payload has unknown or missing fields",
+  );
+  const expectedGate =
+    FORMAL_PHASE_EXIT_GATES[snapshot.phaseExitAttestations.length];
+  invariant(
+    payload.gate === expectedGate &&
+      PHASE_EXIT_SUBJECT_KIND_BY_GATE[payload.gate] === payload.subjectKind &&
+      typeof payload.sourceSha === "string" &&
+      /^[0-9a-f]{40}$/u.test(payload.sourceSha),
+    "Phase exit attestation does not extend the formal gate sequence",
+  );
+  assertImmutableRef(payload.attestation, event.namespace);
+  const prior = snapshot.phaseExitAttestations.at(-1)?.attestation ?? null;
+  invariant(
+    sameValue(payload.predecessor, prior),
+    "Phase exit attestation predecessor differs from the formal ledger",
+  );
+  if (payload.predecessor !== null) {
+    assertImmutableRef(payload.predecessor, event.namespace);
+  }
+  const expectedEvidence = [
+    payload.attestation,
+    ...(payload.predecessor === null ? [] : [payload.predecessor]),
+  ];
+  invariant(
+    event.approvalRefs.length === 0 &&
+      sameValue(event.evidenceRefs, expectedEvidence),
+    "Phase exit attestation event evidence differs from its chain links",
+  );
+  return finalize(snapshot, event, {
+    phaseExitAttestations: [
+      ...snapshot.phaseExitAttestations,
+      structuredClone(payload),
+    ],
+  });
 };
 
 const applyPolicyActivated = (snapshot, event) => {
@@ -1317,6 +1416,8 @@ export const reduceReleaseState = (snapshot, event) => {
       return applyObservationStarted(snapshot, event);
     case "release-accepted":
       return applyReleaseAccepted(snapshot, event);
+    case "phase-exit-attested":
+      return applyPhaseExitAttested(snapshot, event);
     case "operation-aborted":
       assertPendingOperation(snapshot, event);
       invariant(

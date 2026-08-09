@@ -25,8 +25,14 @@ const stepBody = (name, nextName) => {
 };
 
 test("separates archive recovery subject production from reviewed mutation", () => {
-  assert.match(workflow, /- produce-archive-recovery-subject/);
-  assert.match(workflow, /- execute-reviewed-archive-recovery/);
+  assert.match(
+    workflow,
+    /inputs\.operation == 'produce-archive-recovery-subject'/,
+  );
+  assert.match(
+    workflow,
+    /inputs\.operation == 'execute-reviewed-archive-recovery'/,
+  );
   assert.doesNotMatch(workflow, /- execute-archive-recovery\s*$/m);
 
   const producer = stepBody(
@@ -72,7 +78,7 @@ test("downloads the exact prior subject artifact and rejects same-run review", (
     download,
     /name: foundation-archive-recovery-subject-\$\{\{ inputs\.source_sha \}\}/,
   );
-  assert.match(download, /run-id: \$\{\{ inputs\.subject_run_id \}\}/);
+  assert.match(download, /run-id: \$\{\{ env\.REQUESTED_SUBJECT_RUN_ID \}\}/);
 
   assert.match(workflow, /REQUESTED_SUBJECT_RUN_ID -eq \$env:GITHUB_RUN_ID/);
   assert.match(

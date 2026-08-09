@@ -13,6 +13,8 @@
   "statementTimeoutMilliseconds": 15000,
   "maximumEvidenceObjectBytes": 268435456,
   "credentialRotationDays": 90,
+  "backupOwner": null,
+  "restoreOwner": null,
   "productionCaSha256": null,
   "localContainerImage": null,
   "migrations": [
@@ -23,9 +25,13 @@
     {
       "path": "ops/release-state/migrations/0002_acceptance_evidence_chains.sql",
       "sha256": "2fdd3fc7ac461fc3c68036acc2cf24873726869982a102f5116eb244726bf1c4"
+    },
+    {
+      "path": "ops/release-state/migrations/0003_phase_exit_attestations.sql",
+      "sha256": "e24ca925ffa0d378df1d78b7eac595cc7458ab742977291d8023f684362ba61a"
     }
   ],
-  "migrationSetSha256": "de2c488eb4f20f4ca167bb91728bb04b147388df25b69b94f0e082a79443d21b",
+  "migrationSetSha256": "af1087801f3546215b950cc0ac9458e0cdecde0974a7b91893f06eb6f6aec179",
   "blockerCodes": [
     "control-database-host-unconfigured",
     "control-database-name-unconfigured",

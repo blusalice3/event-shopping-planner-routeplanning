@@ -12,6 +12,9 @@ import {
   sha256Json,
 } from "../lib/canonical-json.mjs";
 
+export const VERCEL_PROVIDER_OBSERVATION_MEDIA_TYPE =
+  "application/vnd.event-shopping-planner.vercel-provider-observation+json;version=1";
+
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",

@@ -8,6 +8,10 @@ import {
   sha256Json,
 } from "./lib/canonical-json.mjs";
 import { readStaticApplicationStylesheetContract } from "./lib/application-stylesheet-contract.mjs";
+import {
+  ARTIFACT_DRILL_BUILD_PURPOSE,
+  RELEASE_BUILD_PURPOSE_ENV,
+} from "./lib/release-build-input.mjs";
 
 const projectRoot = process.cwd();
 const distDirectory = path.join(projectRoot, "dist");
@@ -21,6 +25,17 @@ const capability = await readJson(capabilityPath);
 const isNonPromotableQa =
   capability?.nonPromotable === true &&
   ["qa-xlsx-main", "qa-list-force-full"].includes(capability?.buildPurpose);
+const isArtifactDrill =
+  capability?.nonPromotable === true &&
+  capability?.buildPurpose === ARTIFACT_DRILL_BUILD_PURPOSE;
+const isClosedArtifactDrillBuild =
+  isArtifactDrill &&
+  process.env[RELEASE_BUILD_PURPOSE_ENV] === ARTIFACT_DRILL_BUILD_PURPOSE &&
+  /^[0-9a-f]{64}$/.test(
+    process.env.FOUNDATION_ARTIFACT_BUILD_REQUIREMENTS_SHA256 ?? "",
+  );
+const isAcceptedNonPromotableBuild =
+  isNonPromotableQa || isClosedArtifactDrillBuild;
 
 if (isNonPromotableQa && !allowNonPromotableQa) {
   throw new Error("Production verifier rejects a nonpromotable QA capability");
@@ -40,7 +55,7 @@ if (
   ) ||
   capability?.releaseChannel !== "release-a" ||
   capability?.legacyLocalStorageCleanup !== "forced-off" ||
-  (!isNonPromotableQa &&
+  (!isAcceptedNonPromotableBuild &&
     (capability?.nonPromotable !== undefined ||
       capability?.buildPurpose !== undefined))
 ) {
@@ -89,7 +104,7 @@ if (hasPromptCloseAllIdentity) {
     identity.schemaVersion !== 1 ||
     identity.sourceSha !== capability.sourceSha ||
     identity.buildId !== capability.buildId ||
-    (identity.nonPromotable === true) !== isNonPromotableQa ||
+    (identity.nonPromotable === true) !== isAcceptedNonPromotableBuild ||
     (identity.buildPurpose ?? "production") !==
       (capability.buildPurpose ?? "production") ||
     !["legacy-auto-update-v1", "prompt-close-all-v1"].includes(

@@ -552,7 +552,7 @@ test("dedicated workflow is a protected create-only physical collector with no c
   );
   assert.match(
     collection.run,
-    /performance:own-gate-samples:collect -- --namespace \$env:RELEASE_STATE_NAMESPACE --output \$outputPath/,
+    /performance:own-gate-samples:collect -- -- --namespace \$env:RELEASE_STATE_NAMESPACE --output \$outputPath/,
   );
   assert.match(
     collection.run,
@@ -585,7 +585,11 @@ test("dedicated workflow is a protected create-only physical collector with no c
       next: lines[index + 1]?.trim(),
     }))
     .filter(({ line }) => line.startsWith("npm "));
-  assert.equal(nativeCommandLines.length, 3);
+  assert.equal(nativeCommandLines.length, 4);
+  assert.match(
+    workflow,
+    /npm exec --yes --package=npm@11\.19\.0 -- npm run verify:toolchain/,
+  );
   assert.equal(
     nativeCommandLines.every(({ next }) =>
       next?.startsWith("if ($LASTEXITCODE -ne 0)"),
@@ -620,7 +624,7 @@ test("raw artifact has exactly one upload producer and release reviews its prior
   assert.equal(rawUploadProducers[0].fileName, "performance-evidence.yml");
   assert.equal(
     rawUploadProducers[0].step.with.name,
-    "foundation-performance-raw-samples-${{ github.sha }}",
+    "foundation-performance-raw-samples-${{ github.sha }}-${{ github.run_attempt }}",
   );
   assert.equal(
     rawUploadProducers[0].step.with.path,
@@ -634,7 +638,7 @@ test("raw artifact has exactly one upload producer and release reviews its prior
   );
   assert.match(
     releaseWorkflow,
-    /name: foundation-performance-raw-samples-\$\{\{ inputs\.source_sha \}\}[\s\S]*?run-id: \$\{\{ inputs\.performance_raw_samples_run_id \}\}/,
+    /name: foundation-performance-raw-samples-\$\{\{ inputs\.source_sha \}\}-\$\{\{ env\.REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ATTEMPT \}\}[\s\S]*?run-id: \$\{\{ env\.REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ID \}\}/,
   );
   assert.match(
     releaseWorkflow,

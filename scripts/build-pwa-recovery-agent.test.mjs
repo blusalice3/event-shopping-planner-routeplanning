@@ -318,6 +318,41 @@ test("marks policy-activation identities as nonpromotable for either release rol
   }
 });
 
+test("marks artifact-drill identities as nonpromotable for either release role", async () => {
+  const policy = await readJsonStrict(
+    new URL("../config/release-variants.json", import.meta.url),
+  );
+  const dimensionsByRole = [
+    policy.initialStandard,
+    projectContainmentDimensions(policy, policy.initialStandard),
+  ];
+  for (const dimensions of dimensionsByRole) {
+    const variantId = computeVariantId(policy, dimensions);
+    const root = await createOutput(
+      `const identityUrl="/release-identity.${sourceSha}.${variantId}.json";`,
+    );
+    try {
+      const result = await buildPwaRecoveryIdentity({
+        distDirectory: root,
+        sourceSha,
+        releaseRole: dimensions.releaseRole,
+        dimensions,
+        dbFingerprint,
+        buildPurpose: "non-promotable-artifact-drill",
+        nonPromotable: true,
+      });
+      assert.equal(
+        result.identity.buildPurpose,
+        "non-promotable-artifact-drill",
+      );
+      assert.equal(result.identity.nonPromotable, true);
+      assert.equal(result.identity.releaseRole, dimensions.releaseRole);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("rejects malformed hashes, roles, and QA purpose bindings", async () => {
   const base = {
     distDirectory: "not-read",

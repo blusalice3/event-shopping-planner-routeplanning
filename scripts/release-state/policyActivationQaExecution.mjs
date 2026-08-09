@@ -21,6 +21,7 @@ import {
   repositoryRoot,
 } from "../provider/prebuiltDeployment.mjs";
 import { resolvePinnedVercelCli } from "../provider/preparedPromotion.mjs";
+import { buildClosedVercelCommandEnvironment } from "../provider/vercel-command-environment.mjs";
 import {
   assertVerifiedGitHubOidcResult,
   requestGitHubOidcToken,
@@ -794,6 +795,9 @@ const defaultPolicyQaCommandRunner = ({
     windowsHide: true,
   });
 
+export const buildPolicyQaVercelCommandEnvironment = (environment) =>
+  buildClosedVercelCommandEnvironment(environment);
+
 const selectQaArtifact = (index, role) => {
   const candidates = index.artifacts.filter(
     (artifact) => artifact.releaseRole === role,
@@ -989,7 +993,7 @@ export const deployPolicyActivationQaArtifact = async ({
       executable: process.execPath,
       arguments: arguments_,
       cwd: deployRoot,
-      environment,
+      environment: buildPolicyQaVercelCommandEnvironment(environment),
     });
     if (result?.error !== undefined) throw result.error;
     assertNoSecretBytes(

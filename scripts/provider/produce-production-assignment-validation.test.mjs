@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   link,
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -409,6 +410,141 @@ test("writes the staged assignment authority create-only before route validation
       }),
       /already exists/,
     );
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects an assignment authority path swap after descriptor verification", async () => {
+  const temporaryRoot = await createTemporaryDirectory();
+  try {
+    const assignmentAuthorityPath = path.join(
+      temporaryRoot,
+      "assignment-authority.json",
+    );
+    const assignmentAuthorityBytes = canonicalJsonBytes({
+      assignment: "descriptor-bound",
+    });
+    let metadataReads = 0;
+    await assert.rejects(
+      writeProductionAssignmentAuthorityCreateOnly(
+        { assignmentAuthorityPath, assignmentAuthorityBytes },
+        {
+          readCommittedFile: async () => assignmentAuthorityBytes,
+          readOutputMetadata: async (filePath, options) => {
+            metadataReads += 1;
+            if (metadataReads === 3) {
+              return {
+                isFile: () => false,
+                isSymbolicLink: () => true,
+              };
+            }
+            return lstat(filePath, options);
+          },
+        },
+      ),
+      /path changed after commit/,
+    );
+    assert.equal(metadataReads, 3);
+    await assert.rejects(
+      lstat(assignmentAuthorityPath),
+      (error) => error?.code === "ENOENT",
+    );
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects same-inode authority bytes changed by the final path metadata check", async () => {
+  const temporaryRoot = await createTemporaryDirectory();
+  try {
+    const assignmentAuthorityPath = path.join(
+      temporaryRoot,
+      "assignment-authority.json",
+    );
+    const assignmentAuthorityBytes = canonicalJsonBytes({
+      assignment: "expected-value",
+    });
+    const replacementBytes = canonicalJsonBytes({
+      assignment: "replaced-value",
+    });
+    assert.equal(replacementBytes.length, assignmentAuthorityBytes.length);
+    let metadataReads = 0;
+    await assert.rejects(
+      writeProductionAssignmentAuthorityCreateOnly(
+        { assignmentAuthorityPath, assignmentAuthorityBytes },
+        {
+          readOutputMetadata: async (filePath, options) => {
+            metadataReads += 1;
+            if (metadataReads === 4) {
+              await writeFile(filePath, replacementBytes);
+            }
+            return lstat(filePath, options);
+          },
+        },
+      ),
+      /Finalized assignment authority output settled bytes differ/,
+    );
+    assert.equal(metadataReads, 4);
+    await assert.rejects(
+      lstat(assignmentAuthorityPath),
+      (error) => error?.code === "ENOENT",
+    );
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects same-inode pair bytes changed by a final path metadata check", async () => {
+  const temporaryRoot = await createTemporaryDirectory();
+  try {
+    const assignmentValidationPath = path.join(
+      temporaryRoot,
+      "assignment-validation.json",
+    );
+    const productionProbePath = path.join(
+      temporaryRoot,
+      "production-probe.json",
+    );
+    const assignmentValidationBytes = canonicalJsonBytes({
+      assignment: "expected-value",
+    });
+    const replacementBytes = canonicalJsonBytes({
+      assignment: "replaced-value",
+    });
+    const productionProbeBytes = canonicalJsonBytes({
+      probe: "expected-value",
+    });
+    assert.equal(replacementBytes.length, assignmentValidationBytes.length);
+    const metadataReads = new Map();
+    await assert.rejects(
+      writeProductionAssignmentValidationPairCreateOnly(
+        {
+          assignmentValidationPath,
+          assignmentValidationBytes,
+          productionProbePath,
+          productionProbeBytes,
+        },
+        {
+          readOutputMetadata: async (filePath, options) => {
+            const reads = (metadataReads.get(filePath) ?? 0) + 1;
+            metadataReads.set(filePath, reads);
+            if (filePath === assignmentValidationPath && reads === 4) {
+              await writeFile(filePath, replacementBytes);
+            }
+            return lstat(filePath, options);
+          },
+        },
+      ),
+      /Finalized assignment validation output settled bytes differ/,
+    );
+    assert.equal(metadataReads.get(assignmentValidationPath), 4);
+    for (const outputPath of [assignmentValidationPath, productionProbePath]) {
+      await assert.rejects(
+        lstat(outputPath),
+        (error) => error?.code === "ENOENT",
+      );
+    }
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }

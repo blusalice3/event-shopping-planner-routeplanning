@@ -247,11 +247,15 @@ export const buildPwaRecoveryIdentity = async ({
       "qa-xlsx-main",
       "qa-list-force-full",
       "non-promotable-policy-activation-qa",
+      "non-promotable-artifact-drill",
     ].includes(buildPurpose) ||
     typeof nonPromotable !== "boolean" ||
     nonPromotable !== (buildPurpose !== "production") ||
     (nonPromotable &&
-      buildPurpose !== "non-promotable-policy-activation-qa" &&
+      ![
+        "non-promotable-policy-activation-qa",
+        "non-promotable-artifact-drill",
+      ].includes(buildPurpose) &&
       releaseRole !== "standard")
   ) {
     throw new Error("Release identity build purpose is invalid");

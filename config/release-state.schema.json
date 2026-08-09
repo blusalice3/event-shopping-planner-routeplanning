@@ -562,12 +562,35 @@
         "P8-CLEAN"
       ]
     },
+    "formalPhaseExitGate": {
+      "enum": [
+        "P0-BASELINE",
+        "P0-TOOLCHAIN",
+        "P0-ARTIFACT",
+        "P0-DATA",
+        "P0-PROMOTE",
+        "P0-RELEASE",
+        "P1-PWA",
+        "P2A-LOCAL",
+        "P2B-REPORT",
+        "P3-XLSX",
+        "P4-CSP",
+        "P5-DUAL",
+        "P5-LIST",
+        "P6-APP",
+        "P7-IDB",
+        "P8-CLEAN"
+      ]
+    },
     "stateInitializedPayload": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "acceptedGate": {
           "type": "null"
+        },
+        "executorSourceSha": {
+          "$ref": "#/$defs/sourceSha"
         },
         "legacyObservedProduction": {
           "$ref": "#/$defs/legacyProductionObservation"
@@ -583,15 +606,25 @@
         },
         "activeReleasePolicy": {
           "$ref": "#/$defs/immutableObjectRef"
+        },
+        "phaseExitAttestationSeed": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/phaseExitAttestedPayload"
+          }
         }
       },
       "required": [
         "acceptedGate",
+        "executorSourceSha",
         "legacyObservedProduction",
         "bootstrapRecovery",
         "minimumSafetyFloors",
         "currentDbCompatibility",
-        "activeReleasePolicy"
+        "activeReleasePolicy",
+        "phaseExitAttestationSeed"
       ]
     },
     "policyActivatedPayload": {
@@ -856,6 +889,46 @@
         "clearBootstrapRecovery"
       ]
     },
+    "phaseExitAttestedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "gate": {
+          "$ref": "#/$defs/formalPhaseExitGate"
+        },
+        "sourceSha": {
+          "$ref": "#/$defs/sourceSha"
+        },
+        "subjectKind": {
+          "enum": [
+            "repository-phase-subject/v1",
+            "disposable-drill-subject/v1",
+            "state-initialized-bootstrap-subject/v1",
+            "release-state-subject/v1"
+          ]
+        },
+        "attestation": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "predecessor": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/immutableObjectRef"
+            }
+          ]
+        }
+      },
+      "required": [
+        "gate",
+        "sourceSha",
+        "subjectKind",
+        "attestation",
+        "predecessor"
+      ]
+    },
     "operationAbortedPayload": {
       "type": "object",
       "additionalProperties": false,
@@ -1106,6 +1179,16 @@
             {
               "properties": {
                 "eventType": {
+                  "const": "phase-exit-attested"
+                },
+                "payload": {
+                  "$ref": "#/$defs/phaseExitAttestedPayload"
+                }
+              }
+            },
+            {
+              "properties": {
+                "eventType": {
                   "const": "operation-aborted"
                 },
                 "payload": {
@@ -1188,6 +1271,7 @@
             "assignment-validated",
             "observation-started",
             "release-accepted",
+            "phase-exit-attested",
             "operation-aborted",
             "temporary-containment-activated",
             "containment-activated",
@@ -1394,6 +1478,13 @@
           "items": {
             "$ref": "#/$defs/policyCompatibilityEntry"
           }
+        },
+        "phaseExitAttestations": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/phaseExitAttestedPayload"
+          }
         }
       },
       "required": [
@@ -1415,7 +1506,8 @@
         "acceptedStandardFloors",
         "currentDbCompatibility",
         "activeReleasePolicy",
-        "activePolicyCompatibility"
+        "activePolicyCompatibility",
+        "phaseExitAttestations"
       ]
     }
   }

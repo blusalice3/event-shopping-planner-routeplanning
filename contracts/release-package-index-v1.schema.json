@@ -46,6 +46,9 @@
         "P7-IDB"
       ]
     },
+    "artifactDrillGate": {
+      "const": "P0-ARTIFACT"
+    },
     "releaseStateEvidenceRef": {
       "type": "object",
       "additionalProperties": false,
@@ -53,6 +56,20 @@
         "uri": {
           "type": "string",
           "pattern": "^release-state://[a-z0-9][a-z0-9-]{2,62}/evidence/[0-9a-f]{64}$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": ["uri", "sha256"]
+    },
+    "artifactDrillAuthorityRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "pattern": "^artifact://sha256/[0-9a-f]{64}/artifact-drill-build-authority\\.json$"
         },
         "sha256": {
           "$ref": "#/$defs/sha256"
@@ -126,6 +143,9 @@
             },
             {
               "$ref": "#/$defs/releaseStateEvidenceRef"
+            },
+            {
+              "$ref": "#/$defs/artifactDrillAuthorityRef"
             }
           ]
         },
@@ -136,6 +156,9 @@
             },
             {
               "$ref": "#/$defs/releasePhaseGate"
+            },
+            {
+              "$ref": "#/$defs/artifactDrillGate"
             }
           ]
         },
@@ -143,6 +166,7 @@
           "enum": [
             "production",
             "non-promotable-policy-activation-qa",
+            "non-promotable-artifact-drill",
             "legacy-bootstrap"
           ]
         },
@@ -192,10 +216,24 @@
               "const": "source-hardened-pair"
             },
             "buildAuthority": {
-              "$ref": "#/$defs/releaseStateEvidenceRef"
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/releaseStateEvidenceRef"
+                },
+                {
+                  "$ref": "#/$defs/artifactDrillAuthorityRef"
+                }
+              ]
             },
             "targetGate": {
-              "$ref": "#/$defs/releasePhaseGate"
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/releasePhaseGate"
+                },
+                {
+                  "$ref": "#/$defs/artifactDrillGate"
+                }
+              ]
             },
             "artifacts": {
               "type": "array",
@@ -258,6 +296,22 @@
                 },
                 "targetGate": {
                   "$ref": "#/$defs/policyActivationGate"
+                },
+                "promotable": {
+                  "const": false
+                }
+              }
+            },
+            {
+              "properties": {
+                "buildAuthority": {
+                  "$ref": "#/$defs/artifactDrillAuthorityRef"
+                },
+                "buildPurpose": {
+                  "const": "non-promotable-artifact-drill"
+                },
+                "targetGate": {
+                  "$ref": "#/$defs/artifactDrillGate"
                 },
                 "promotable": {
                   "const": false

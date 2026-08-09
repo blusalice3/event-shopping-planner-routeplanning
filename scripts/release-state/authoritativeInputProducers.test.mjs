@@ -25,6 +25,33 @@ import { readFile } from "node:fs/promises";
 const namespace = "producer-test";
 const sourceSha = "a".repeat(40);
 const fixedTime = "2026-08-06T00:00:00.000Z";
+const phaseExitAttestationReferences = ["1", "2", "3"].map((character) => ({
+  uri: `release-state://${namespace}/evidence/${character.repeat(64)}`,
+  sha256: character.repeat(64),
+}));
+const phaseExitAttestationSeed = [
+  {
+    gate: "P0-BASELINE",
+    sourceSha,
+    subjectKind: "repository-phase-subject/v1",
+    attestation: phaseExitAttestationReferences[0],
+    predecessor: null,
+  },
+  {
+    gate: "P0-TOOLCHAIN",
+    sourceSha,
+    subjectKind: "repository-phase-subject/v1",
+    attestation: phaseExitAttestationReferences[1],
+    predecessor: phaseExitAttestationReferences[0],
+  },
+  {
+    gate: "P0-ARTIFACT",
+    sourceSha,
+    subjectKind: "disposable-drill-subject/v1",
+    attestation: phaseExitAttestationReferences[2],
+    predecessor: phaseExitAttestationReferences[1],
+  },
+];
 const dbCompatibility = {
   contractUri: "urn:test:db:v1",
   fingerprint: "d".repeat(64),
@@ -282,6 +309,7 @@ const initializeFixture = async () => {
       previousEventHash: null,
       payload: {
         acceptedGate: null,
+        executorSourceSha: sourceSha,
         legacyObservedProduction: {
           observationUri: initialEvidence.uri,
           observationSha256: initialEvidence.sha256,
@@ -290,8 +318,9 @@ const initializeFixture = async () => {
         minimumSafetyFloors: { releaseChannel: "release-a" },
         currentDbCompatibility: dbCompatibility,
         activeReleasePolicy: releasePolicy,
+        phaseExitAttestationSeed,
       },
-      evidenceRefs: [initialEvidence],
+      evidenceRefs: [initialEvidence, ...phaseExitAttestationReferences],
     }),
   );
   const standard = prePromotion.standard;

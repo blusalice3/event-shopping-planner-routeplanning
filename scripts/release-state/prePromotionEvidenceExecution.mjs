@@ -50,6 +50,8 @@ const referenceFor = (namespace, sha256) => ({
 });
 
 const npmExecutable = () => (process.platform === "win32" ? "npm.cmd" : "npm");
+const npmArgumentSeparator = () =>
+  process.platform === "win32" ? ["--", "--"] : ["--"];
 
 const defaultRunCommand = ({
   executable,
@@ -388,7 +390,7 @@ const runArtifactBuild = async ({
         arguments: [
           "run",
           "artifact:build",
-          "--",
+          ...npmArgumentSeparator(),
           "--output",
           output,
           "--provider-observation",
@@ -430,7 +432,7 @@ const runVerifierCategory = async ({
         : [
             "run",
             "artifact:verify",
-            "--",
+            ...npmArgumentSeparator(),
             "--package",
             buildOutputPaths[targetBuildOrdinal - 1],
           ];

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildPolicyQaVercelCommandEnvironment,
   POLICY_QA_EXECUTION_SUBJECT_KIND,
   assertPolicyActivationQaDeploymentOutsideProductionDomains,
   assertPolicyActivationQaExecutionSubject,
@@ -31,6 +32,35 @@ const reference = (suffix) => ({
 
 const binding = (bindingId) => ({ bindingId });
 const manifest = (releaseRole) => ({ releaseRole });
+
+test("Policy QA passes only provider and operating-system bindings to Vercel", () => {
+  const environment = buildPolicyQaVercelCommandEnvironment({
+    PATH: "C:\\tools",
+    SystemRoot: "C:\\Windows",
+    VERCEL_ORG_ID: "team_foundation",
+    VERCEL_PROJECT_ID: "prj_foundation",
+    VERCEL_TOKEN: "provider-token-secret",
+    RELEASE_STATE_DATABASE_URL: "postgresql://control-store-secret",
+    RELEASE_STATE_DATABASE_CA_PEM: "control-store-ca-secret",
+    GITHUB_TOKEN: "github-token-secret",
+    ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-request-secret",
+  });
+  assert.deepEqual(Object.keys(environment).sort(), [
+    "PATH",
+    "SystemRoot",
+    "VERCEL_ORG_ID",
+    "VERCEL_PROJECT_ID",
+    "VERCEL_TOKEN",
+  ]);
+  for (const forbidden of [
+    "RELEASE_STATE_DATABASE_URL",
+    "RELEASE_STATE_DATABASE_CA_PEM",
+    "GITHUB_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+  ]) {
+    assert.equal(Object.hasOwn(environment, forbidden), false);
+  }
+});
 
 test("derives a deterministic operation-bound non-production alias", () => {
   const first = derivePolicyActivationQaDrillDomain({

@@ -24,10 +24,12 @@ import {
   manifestTreeHash,
 } from "./file-manifest.mjs";
 import {
+  assertDimensionObject,
   computeVariantId,
   projectContainmentDimensions,
 } from "./release-policy.mjs";
 import { writeContentAddressedObject } from "./content-addressed-store.mjs";
+import { hasFinalRemoteDbAuthority } from "./db-compatibility-authority.mjs";
 import {
   createDeterministicZip,
   verifyDeterministicZip,
@@ -200,12 +202,7 @@ export const assertProductionProviderContext = (
 };
 
 export const assertProductionDbContract = (dbContract) => {
-  if (
-    !["verified", "remote-verified"].includes(dbContract.contractStatus) ||
-    dbContract.remote?.observationStatus !== "verified" ||
-    !Array.isArray(dbContract.blockerCodes) ||
-    dbContract.blockerCodes.length !== 0
-  ) {
+  if (!hasFinalRemoteDbAuthority(dbContract)) {
     throw new Error(
       `Production DB compatibility is unavailable: ${(dbContract.blockerCodes ?? []).join(", ")}`,
     );
@@ -260,6 +257,39 @@ export const buildReleaseContext = ({
   return {
     ...providerContext,
     requiredDbCompatibility,
+    toolchainPolicyHash: sha256Json(toolchainPolicy),
+    providerPolicyHash: sha256Json(providerPolicy),
+    releasePolicyHash: sha256Json(releasePolicy),
+  };
+};
+
+export const buildArtifactDrillReleaseContext = ({
+  releasePolicy,
+  toolchainPolicy,
+  providerPolicy,
+  providerObservation,
+  dbContract,
+}) => {
+  const standardDimensions = { ...releasePolicy.initialStandard };
+  assertDimensionObject(releasePolicy, standardDimensions);
+  const providerContext = assertProductionProviderContext(
+    providerPolicy,
+    providerObservation,
+    { cspMode: standardDimensions.cspMode },
+  );
+  if (!isRecord(dbContract)) {
+    throw new Error("Artifact drill DB compatibility contract is required");
+  }
+  assertNoCriticalPlaceholder(
+    dbContract.contractUri,
+    "dbCompatibility.contractUri",
+  );
+  return {
+    ...providerContext,
+    requiredDbCompatibility: {
+      contractUri: dbContract.contractUri,
+      fingerprint: sha256Json(dbContract),
+    },
     toolchainPolicyHash: sha256Json(toolchainPolicy),
     providerPolicyHash: sha256Json(providerPolicy),
     releasePolicyHash: sha256Json(releasePolicy),

@@ -131,6 +131,9 @@ const policyActivationClosureArgv = [
   "--output",
   "policy-activation-closure.json",
 ];
+const p8FloorClosureArgv = policyActivationClosureArgv.filter(
+  (_value, index) => ![7, 8].includes(index),
+);
 const prepromotionSourceBytes = canonicalJsonBytes({ source: "reviewed" });
 const prepromotionArgv = [
   "prepromotion-evidence-set",
@@ -225,6 +228,10 @@ test("parses only the closed command-specific flag sets", () => {
   assert.equal(
     parseAuthoritativeInputProducerArguments(policyActivationClosureArgv)
       .command,
+    "policy-activation-closure",
+  );
+  assert.equal(
+    parseAuthoritativeInputProducerArguments(p8FloorClosureArgv).command,
     "policy-activation-closure",
   );
   assert.throws(
@@ -451,6 +458,33 @@ test("builds policy closure from only the reviewed QA execution reference", asyn
   }
   assert.equal(result.bundleSha256, sha256Bytes(bundleBytes));
   assert.ok(harness.writes[0].bytes.equals(bundleBytes));
+  assert.equal(harness.store.closed, true);
+});
+
+test("selects the P8 floor closure without a caller QA result", async () => {
+  const harness = createHarness();
+  const bundleBytes = canonicalJsonBytes({
+    bundleKind: "p8-floor-activation-closure/v1",
+  });
+  let received;
+  await runAuthoritativeInputProducerCli(
+    { ...harness.runtime, argv: p8FloorClosureArgv },
+    {
+      ...harness.dependencies,
+      buildPolicyActivationClosure: async (options) => {
+        received = options;
+        return {
+          bundleBytes,
+          bundleSha256: sha256Bytes(bundleBytes),
+        };
+      },
+    },
+  );
+  assert.equal(received.operationId, "activate-p1-policy");
+  assert.equal(received.executorSourceSha, "a".repeat(40));
+  assert.equal(received.qaExecutionReference, null);
+  assert.equal(Object.hasOwn(received, "acceptedGate"), false);
+  assert.equal(Object.hasOwn(received, "minimumSafetyFloors"), false);
   assert.equal(harness.store.closed, true);
 });
 

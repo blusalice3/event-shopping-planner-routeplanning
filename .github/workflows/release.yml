@@ -10,343 +10,12 @@ on:
       operation:
         description: Protected release operation
         required: true
-        type: choice
-        options:
-          - produce-artifact-build-requirements
-          - build-and-verify
-          - produce-policy-activation-qa-build-requirements
-          - build-policy-activation-qa
-          - deploy-prebuilt
-          - collect-prepromotion-evidence-source
-          - produce-prepromotion-evidence
-          - produce-promotion-subject
-          - prepare-and-promote
-          - record-promotion
-          - reconcile
-          - initialize-acceptance-collector
-          - collect-continuous-sample
-          - finalize-acceptance-evidence
-          - publish-acceptance-evidence
-          - produce-own-gate-performance-evidence
-          - produce-performance-inherited-closure
-          - produce-acceptance-requirements
-          - produce-acceptance-inputs
-          - accept-standard
-          - produce-policy-activation-qa-package
-          - produce-policy-activation-qa-execution-subject
-          - execute-policy-activation-qa
-          - produce-policy-activation-closure
-          - produce-policy-activation-subject
-          - activate-policy
-          - activate-policy-floor
-          - plan-archive-recovery
-          - produce-archive-recovery-subject
-          - execute-reviewed-archive-recovery
-          - produce-state-initialization-subject
-          - initialize-release-state
-          - produce-db-contract-activation-subject
-          - activate-db-contract
-          - produce-operation-abort-subject
-          - abort-pending-operation
-      release_role:
-        description: Prebuilt package role for deploy-prebuilt
+        type: string
+      request_json:
+        description: Canonical closed JSON object for the selected operation
         required: true
-        default: standard
-        type: choice
-        options:
-          - standard
-          - containment
-      archive_recovery_action:
-        description: Action using a verified Release State artifact archive
-        required: false
-        default: rollback
-        type: choice
-        options:
-          - rollback
-          - redeploy-standard
-          - redeploy-containment
-          - activate-containment
-      archive_recovery_binding_id:
-        description: Exact DeploymentBinding ID selected for recovery
-        required: false
-        default: ""
+        default: "{}"
         type: string
-      archive_recovery_source_sha:
-        description: Exact source SHA bound to the archived deployment
-        required: false
-        default: ""
-        type: string
-      artifact_run_id:
-        description: build-and-verify run containing the immutable package
-        required: false
-        default: ""
-        type: string
-      artifact_build_requirements_run_id:
-        description: Prior protected run containing reviewed artifact build requirements
-        required: false
-        default: ""
-        type: string
-      artifact_build_requirements_sha256:
-        description: Reviewed authoritative artifact build requirements SHA-256
-        required: false
-        default: ""
-        type: string
-      replay_receipt_run_id:
-        description: deploy-prebuilt run whose exact receipt must be replayed
-        required: false
-        default: ""
-        type: string
-      standard_deployment_run_id:
-        description: deploy-prebuilt run containing the standard binding
-        required: false
-        default: ""
-        type: string
-      containment_deployment_run_id:
-        description: deploy-prebuilt run containing the containment binding
-        required: false
-        default: ""
-        type: string
-      standard_deployment_binding_sha256:
-        description: Reviewed standard DeploymentBinding SHA-256 for pre-promotion collection
-        required: false
-        default: ""
-        type: string
-      containment_deployment_binding_sha256:
-        description: Reviewed containment DeploymentBinding SHA-256 for pre-promotion collection
-        required: false
-        default: ""
-        type: string
-      prepromotion_evidence_run_id:
-        description: Trusted run containing the stored pre-promotion evidence set
-        required: false
-        default: ""
-        type: string
-      prepromotion_evidence_source_run_id:
-        description: Trusted collector run containing pre-promotion evidence references
-        required: false
-        default: ""
-        type: string
-      prepromotion_evidence_source_sha256:
-        description: Reviewed pre-promotion evidence source SHA-256
-        required: false
-        default: ""
-        type: string
-      operation_id:
-        description: Stable promotion operation id
-        required: false
-        default: ""
-        type: string
-      subject_run_id:
-        description: Trusted producer run containing the reviewed operation subject
-        required: false
-        default: ""
-        type: string
-      subject_sha256:
-        description: Reviewed canonical operation subject SHA-256
-        required: false
-        default: ""
-        type: string
-      bootstrap_recovery_sha256:
-        description: Immutable bootstrap DeploymentBinding evidence SHA-256
-        required: false
-        default: ""
-        type: string
-      db_contract_sha256:
-        description: Immutable DB compatibility contract evidence SHA-256
-        required: false
-        default: ""
-        type: string
-      legacy_observation_sha256:
-        description: Immutable legacy production observation evidence SHA-256
-        required: false
-        default: ""
-        type: string
-      release_policy_sha256:
-        description: Immutable active release policy evidence SHA-256
-        required: false
-        default: ""
-        type: string
-      policy_activation_gate:
-        description: Exact policy phase gate reviewed for activation
-        required: false
-        default: P1-PWA
-        type: choice
-        options:
-          - P1-PWA
-          - P2A-LOCAL
-          - P2B-REPORT
-          - P3-XLSX
-          - P4-CSP
-          - P5-DUAL
-          - P5-LIST
-          - P7-IDB
-          - P8-CLEAN
-      policy_target_source_sha:
-        description: Candidate source SHA bound to the nonproduction QA pair
-        required: false
-        default: ""
-        type: string
-      proposed_release_policy_sha256:
-        description: Immutable proposed release policy SHA-256
-        required: false
-        default: ""
-        type: string
-      active_release_policy_sha256:
-        description: Immutable target active release policy SHA-256
-        required: false
-        default: ""
-        type: string
-      approval_policy_sha256:
-        description: Immutable configured approval policy SHA-256
-        required: false
-        default: ""
-        type: string
-      policy_closure_bundle_sha256:
-        description: Immutable authoritative policy activation closure SHA-256
-        required: false
-        default: ""
-        type: string
-      policy_qa_package_sha256:
-        description: Immutable nonpromotable policy QA package SHA-256
-        required: false
-        default: ""
-        type: string
-      policy_qa_execution_subject_run_id:
-        description: Prior protected run containing the reviewed Policy QA execution subject
-        required: false
-        default: ""
-        type: string
-      policy_qa_execution_subject_sha256:
-        description: Reviewed canonical Policy QA execution subject SHA-256
-        required: false
-        default: ""
-        type: string
-      policy_qa_execution_run_id:
-        description: Prior protected run containing the reviewed Policy QA execution bundle
-        required: false
-        default: ""
-        type: string
-      policy_qa_execution_sha256:
-        description: Reviewed canonical Policy QA execution bundle SHA-256
-        required: false
-        default: ""
-        type: string
-      promotion_run_id:
-        description: prepare-and-promote run to resume after a partial lifecycle failure
-        required: false
-        default: ""
-        type: string
-      acceptance_evidence_run_id:
-        description: Trusted run containing release evidence and raw acceptance sources
-        required: false
-        default: ""
-        type: string
-      acceptance_evidence_source_run_id:
-        description: Prior protected collector/finalizer run containing exact acceptance sources
-        required: false
-        default: ""
-        type: string
-      acceptance_collector_receipt_sha256:
-        description: Reviewed immutable acceptance collector receipt SHA-256
-        required: false
-        default: ""
-        type: string
-      acceptance_inputs_run_id:
-        description: produce-acceptance-inputs run containing canonical acceptance inputs
-        required: false
-        default: ""
-        type: string
-      acceptance_requirements_run_id:
-        description: Prior producer run containing canonical authoritative acceptance requirements
-        required: false
-        default: ""
-        type: string
-      acceptance_requirements_sha256:
-        description: Reviewed canonical authoritative acceptance requirements SHA-256
-        required: false
-        default: ""
-        type: string
-      performance_evidence_run_id:
-        description: Trusted run containing reviewed canonical performance evidence or closure
-        required: false
-        default: ""
-        type: string
-      performance_evidence_sha256:
-        description: Reviewed canonical performance evidence or closure SHA-256
-        required: false
-        default: ""
-        type: string
-      performance_raw_samples_run_id:
-        description: Prior trusted run containing reviewed canonical raw performance samples
-        required: false
-        default: ""
-        type: string
-      performance_raw_samples_sha256:
-        description: Reviewed canonical raw performance samples SHA-256
-        required: false
-        default: ""
-        type: string
-      p0_accepted_event_sha256:
-        description: Immutable P0-RELEASE accepted event SHA-256 for the P8 performance closure
-        required: false
-        default: ""
-        type: string
-      p3_accepted_event_sha256:
-        description: Immutable P3-XLSX accepted event SHA-256 for the P8 performance closure
-        required: false
-        default: ""
-        type: string
-      p5d_accepted_event_sha256:
-        description: Immutable P5-DUAL accepted event SHA-256 for the P8 performance closure
-        required: false
-        default: ""
-        type: string
-      p5e_accepted_event_sha256:
-        description: Immutable P5-LIST accepted event SHA-256 for the P8 performance closure
-        required: false
-        default: ""
-        type: string
-      evidence_sha256:
-        description: Reviewed canonical acceptance evidence SHA-256
-        required: false
-        default: ""
-        type: string
-      continuous_probe_source_sha256:
-        description: Reviewed raw continuous production probe source SHA-256
-        required: false
-        default: ""
-        type: string
-      companion_recovery_source_sha256:
-        description: Reviewed raw companion recovery drill source SHA-256 when required
-        required: false
-        default: ""
-        type: string
-      companion_terminal_event_sha256:
-        description: Exact package-redeploy-activated Release State event hash, or empty
-        required: false
-        default: ""
-        type: string
-      continuous_probe_sha256:
-        description: Reviewed canonical continuous production probe SHA-256
-        required: false
-        default: ""
-        type: string
-      companion_recovery_drill_sha256:
-        description: Reviewed canonical companion recovery drill SHA-256 when required
-        required: false
-        default: ""
-        type: string
-      terminal_bundle_sha256:
-        description: Reviewed acceptance-final release evidence bundle SHA-256
-        required: false
-        default: ""
-        type: string
-      terminal_object_set_sha256:
-        description: Reviewed acceptance-final immutable object-set SHA-256
-        required: false
-        default: ""
-        type: string
-
 permissions:
   actions: read
   contents: read
@@ -358,72 +27,55 @@ concurrency:
 
 jobs:
   release:
+    if: ${{ github.ref == 'refs/heads/main' && github.ref_protected == true && github.sha == inputs.source_sha && inputs.operation != 'collect-production-request-graph' && inputs.operation != 'collect-csp-report-observation' && inputs.operation != 'collect-deployed-csp-flow' && inputs.operation != 'collect-startup-waf-observation' && inputs.operation != 'collect-managed-device-live-stage' }}
     runs-on: ubuntu-latest
     environment: foundation-release-state
     timeout-minutes: 60
     env:
       REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
       REQUESTED_OPERATION: ${{ inputs.operation }}
-      REQUESTED_RELEASE_ROLE: ${{ inputs.release_role }}
-      REQUESTED_ARCHIVE_RECOVERY_ACTION: ${{ inputs.archive_recovery_action }}
-      REQUESTED_ARCHIVE_RECOVERY_BINDING_ID: ${{ inputs.archive_recovery_binding_id }}
-      REQUESTED_ARCHIVE_RECOVERY_SOURCE_SHA: ${{ inputs.archive_recovery_source_sha }}
-      REQUESTED_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
-      REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_RUN_ID: ${{ inputs.artifact_build_requirements_run_id }}
-      REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256: ${{ inputs.artifact_build_requirements_sha256 }}
-      REQUESTED_REPLAY_RECEIPT_RUN_ID: ${{ inputs.replay_receipt_run_id }}
-      REQUESTED_STANDARD_DEPLOYMENT_RUN_ID: ${{ inputs.standard_deployment_run_id }}
-      REQUESTED_CONTAINMENT_DEPLOYMENT_RUN_ID: ${{ inputs.containment_deployment_run_id }}
-      REQUESTED_STANDARD_DEPLOYMENT_BINDING_SHA256: ${{ inputs.standard_deployment_binding_sha256 }}
-      REQUESTED_CONTAINMENT_DEPLOYMENT_BINDING_SHA256: ${{ inputs.containment_deployment_binding_sha256 }}
-      REQUESTED_PREPROMOTION_EVIDENCE_RUN_ID: ${{ inputs.prepromotion_evidence_run_id }}
-      REQUESTED_PREPROMOTION_EVIDENCE_SOURCE_RUN_ID: ${{ inputs.prepromotion_evidence_source_run_id }}
-      REQUESTED_PREPROMOTION_EVIDENCE_SOURCE_SHA256: ${{ inputs.prepromotion_evidence_source_sha256 }}
-      REQUESTED_OPERATION_ID: ${{ inputs.operation_id }}
-      REQUESTED_SUBJECT_RUN_ID: ${{ inputs.subject_run_id }}
-      REQUESTED_SUBJECT_SHA256: ${{ inputs.subject_sha256 }}
-      REQUESTED_BOOTSTRAP_RECOVERY_SHA256: ${{ inputs.bootstrap_recovery_sha256 }}
-      REQUESTED_DB_CONTRACT_SHA256: ${{ inputs.db_contract_sha256 }}
-      REQUESTED_LEGACY_OBSERVATION_SHA256: ${{ inputs.legacy_observation_sha256 }}
-      REQUESTED_RELEASE_POLICY_SHA256: ${{ inputs.release_policy_sha256 }}
-      REQUESTED_POLICY_ACTIVATION_GATE: ${{ inputs.policy_activation_gate }}
-      REQUESTED_POLICY_TARGET_SOURCE_SHA: ${{ inputs.policy_target_source_sha }}
-      REQUESTED_PROPOSED_RELEASE_POLICY_SHA256: ${{ inputs.proposed_release_policy_sha256 }}
-      REQUESTED_ACTIVE_RELEASE_POLICY_SHA256: ${{ inputs.active_release_policy_sha256 }}
-      REQUESTED_APPROVAL_POLICY_SHA256: ${{ inputs.approval_policy_sha256 }}
-      REQUESTED_POLICY_CLOSURE_BUNDLE_SHA256: ${{ inputs.policy_closure_bundle_sha256 }}
-      REQUESTED_POLICY_QA_PACKAGE_SHA256: ${{ inputs.policy_qa_package_sha256 }}
-      REQUESTED_POLICY_QA_EXECUTION_SUBJECT_RUN_ID: ${{ inputs.policy_qa_execution_subject_run_id }}
-      REQUESTED_POLICY_QA_EXECUTION_SUBJECT_SHA256: ${{ inputs.policy_qa_execution_subject_sha256 }}
-      REQUESTED_POLICY_QA_EXECUTION_RUN_ID: ${{ inputs.policy_qa_execution_run_id }}
-      REQUESTED_POLICY_QA_EXECUTION_SHA256: ${{ inputs.policy_qa_execution_sha256 }}
-      REQUESTED_PROMOTION_RUN_ID: ${{ inputs.promotion_run_id }}
-      REQUESTED_ACCEPTANCE_EVIDENCE_RUN_ID: ${{ inputs.acceptance_evidence_run_id }}
-      REQUESTED_ACCEPTANCE_EVIDENCE_SOURCE_RUN_ID: ${{ inputs.acceptance_evidence_source_run_id }}
-      REQUESTED_ACCEPTANCE_COLLECTOR_RECEIPT_SHA256: ${{ inputs.acceptance_collector_receipt_sha256 }}
-      REQUESTED_ACCEPTANCE_INPUTS_RUN_ID: ${{ inputs.acceptance_inputs_run_id }}
-      REQUESTED_ACCEPTANCE_REQUIREMENTS_RUN_ID: ${{ inputs.acceptance_requirements_run_id }}
-      REQUESTED_ACCEPTANCE_REQUIREMENTS_SHA256: ${{ inputs.acceptance_requirements_sha256 }}
-      REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID: ${{ inputs.performance_evidence_run_id }}
-      REQUESTED_PERFORMANCE_EVIDENCE_SHA256: ${{ inputs.performance_evidence_sha256 }}
-      REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ID: ${{ inputs.performance_raw_samples_run_id }}
-      REQUESTED_PERFORMANCE_RAW_SAMPLES_SHA256: ${{ inputs.performance_raw_samples_sha256 }}
-      REQUESTED_P0_ACCEPTED_EVENT_SHA256: ${{ inputs.p0_accepted_event_sha256 }}
-      REQUESTED_P3_ACCEPTED_EVENT_SHA256: ${{ inputs.p3_accepted_event_sha256 }}
-      REQUESTED_P5D_ACCEPTED_EVENT_SHA256: ${{ inputs.p5d_accepted_event_sha256 }}
-      REQUESTED_P5E_ACCEPTED_EVENT_SHA256: ${{ inputs.p5e_accepted_event_sha256 }}
-      REQUESTED_EVIDENCE_SHA256: ${{ inputs.evidence_sha256 }}
-      REQUESTED_CONTINUOUS_PROBE_SOURCE_SHA256: ${{ inputs.continuous_probe_source_sha256 }}
-      REQUESTED_COMPANION_RECOVERY_SOURCE_SHA256: ${{ inputs.companion_recovery_source_sha256 }}
-      REQUESTED_COMPANION_TERMINAL_EVENT_SHA256: ${{ inputs.companion_terminal_event_sha256 }}
-      REQUESTED_CONTINUOUS_PROBE_SHA256: ${{ inputs.continuous_probe_sha256 }}
-      REQUESTED_COMPANION_RECOVERY_DRILL_SHA256: ${{ inputs.companion_recovery_drill_sha256 }}
-      REQUESTED_TERMINAL_BUNDLE_SHA256: ${{ inputs.terminal_bundle_sha256 }}
-      REQUESTED_TERMINAL_OBJECT_SET_SHA256: ${{ inputs.terminal_object_set_sha256 }}
+      INPUT_REQUEST_JSON: ${{ inputs.request_json }}
       RELEASE_STATE_NAMESPACE: ${{ vars.RELEASE_STATE_NAMESPACE }}
-      RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
-      RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+
+      - name: Guard protected source before repository code
+        shell: pwsh
+        run: |
+          if (
+            $env:GITHUB_REF -ne 'refs/heads/main' -or
+            $env:GITHUB_REF_PROTECTED -ne 'true' -or
+            $env:GITHUB_SHA -ne $env:REQUESTED_SOURCE_SHA
+          ) {
+            throw "release source is not the protected exact main commit"
+          }
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) {
+            throw "git rev-parse failed with exit code $LASTEXITCODE"
+          }
+          $actual = $actual.Trim()
+          if ($actual -ne $env:REQUESTED_SOURCE_SHA) {
+            throw "checked out release source differs"
+          }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+
+      - name: Normalize closed release dispatch request
+        shell: pwsh
+        env:
+          INPUT_OPERATION: ${{ inputs.operation }}
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
+          INPUT_REQUEST_JSON: ${{ inputs.request_json }}
+        run: |
+          node scripts/release-state/release-dispatch-request.mjs validate
+          if ($LASTEXITCODE -ne 0) {
+            throw "release dispatch normalization failed with exit code $LASTEXITCODE"
+          }
       - name: Validate reviewed dispatch inputs
         shell: pwsh
         run: |
@@ -442,13 +94,15 @@ jobs:
             throw "replay_receipt_run_id must identify a prior trusted workflow run"
           }
           $hasPerformanceRun = -not [string]::IsNullOrEmpty($env:REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID)
+          $hasPerformanceAttempt = -not [string]::IsNullOrEmpty($env:REQUESTED_PERFORMANCE_EVIDENCE_RUN_ATTEMPT)
           $hasPerformanceHash = -not [string]::IsNullOrEmpty($env:REQUESTED_PERFORMANCE_EVIDENCE_SHA256)
-          if ($hasPerformanceRun -ne $hasPerformanceHash) {
-            throw "performance evidence run and reviewed SHA-256 must be supplied together"
+          if ($hasPerformanceRun -ne $hasPerformanceHash -or $hasPerformanceRun -ne $hasPerformanceAttempt) {
+            throw "performance evidence run, attempt, and reviewed SHA-256 must be supplied together"
           }
           if (
             $hasPerformanceRun -and (
               $env:REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID -notmatch $runIdPattern -or
+              $env:REQUESTED_PERFORMANCE_EVIDENCE_RUN_ATTEMPT -notmatch $runIdPattern -or
               $env:REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID -eq $env:GITHUB_RUN_ID -or
               $env:REQUESTED_PERFORMANCE_EVIDENCE_SHA256 -notmatch $sha256Pattern
             )
@@ -456,13 +110,15 @@ jobs:
             throw "performance evidence must identify an exact prior trusted run and reviewed SHA-256"
           }
           $hasPerformanceRawRun = -not [string]::IsNullOrEmpty($env:REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ID)
+          $hasPerformanceRawAttempt = -not [string]::IsNullOrEmpty($env:REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ATTEMPT)
           $hasPerformanceRawHash = -not [string]::IsNullOrEmpty($env:REQUESTED_PERFORMANCE_RAW_SAMPLES_SHA256)
-          if ($hasPerformanceRawRun -ne $hasPerformanceRawHash) {
-            throw "raw performance samples run and reviewed SHA-256 must be supplied together"
+          if ($hasPerformanceRawRun -ne $hasPerformanceRawHash -or $hasPerformanceRawRun -ne $hasPerformanceRawAttempt) {
+            throw "raw performance samples run, attempt, and reviewed SHA-256 must be supplied together"
           }
           if (
             $hasPerformanceRawRun -and (
               $env:REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ID -notmatch $runIdPattern -or
+              $env:REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ATTEMPT -notmatch $runIdPattern -or
               $env:REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ID -eq $env:GITHUB_RUN_ID -or
               $env:REQUESTED_PERFORMANCE_RAW_SAMPLES_SHA256 -notmatch $sha256Pattern
             )
@@ -471,7 +127,7 @@ jobs:
           }
           if (
             $env:REQUESTED_OPERATION -ne 'produce-own-gate-performance-evidence' -and
-            ($hasPerformanceRawRun -or $hasPerformanceRawHash)
+            ($hasPerformanceRawRun -or $hasPerformanceRawAttempt -or $hasPerformanceRawHash)
           ) {
             throw "raw performance sample inputs are forbidden for this operation"
           }
@@ -482,6 +138,83 @@ jobs:
             ($hasStandardDeploymentBindingHash -or $hasContainmentDeploymentBindingHash)
           ) {
             throw "reviewed deployment binding hashes are forbidden for this operation"
+          }
+          $usesReviewedDbObservation = @(
+            'produce-state-initialization-subject',
+            'produce-db-contract-activation-subject'
+          ) -contains $env:REQUESTED_OPERATION
+          if (
+            $env:REQUESTED_OPERATION -eq 'produce-phase-exit-authority-bundle' -and
+            $env:REQUESTED_TARGET_GATE -eq 'P0-DATA'
+          ) {
+            $usesReviewedDbObservation = $true
+          }
+          $hasDbObservationHash = -not [string]::IsNullOrEmpty($env:REQUESTED_DB_OBSERVATION_SHA256)
+          $hasDbObservationProductionHash = -not [string]::IsNullOrEmpty($env:REQUESTED_DB_OBSERVATION_PRODUCTION_SHA256)
+          $hasDbObservationRun = -not [string]::IsNullOrEmpty($env:REQUESTED_DB_OBSERVATION_RUN_ID)
+          $hasDbObservationAttempt = -not [string]::IsNullOrEmpty($env:REQUESTED_DB_OBSERVATION_RUN_ATTEMPT)
+          if ($usesReviewedDbObservation) {
+            if (
+              -not $hasDbObservationHash -or
+              -not $hasDbObservationProductionHash -or
+              -not $hasDbObservationRun -or
+              -not $hasDbObservationAttempt -or
+              $env:REQUESTED_DB_OBSERVATION_SHA256 -notmatch $sha256Pattern -or
+              $env:REQUESTED_DB_OBSERVATION_PRODUCTION_SHA256 -notmatch $sha256Pattern -or
+              $env:REQUESTED_DB_OBSERVATION_RUN_ID -notmatch $runIdPattern -or
+              $env:REQUESTED_DB_OBSERVATION_RUN_ATTEMPT -notmatch $runIdPattern -or
+              $env:REQUESTED_DB_OBSERVATION_RUN_ID -eq $env:GITHUB_RUN_ID
+            ) {
+              throw "remote DB observation authority must identify an exact distinct prior protected run"
+            }
+          } elseif ($hasDbObservationHash -or $hasDbObservationProductionHash -or $hasDbObservationRun -or $hasDbObservationAttempt) {
+            throw "remote DB observation authority inputs are forbidden for this operation"
+          }
+          $phaseAuthorityOperations = @(
+            'produce-phase-exit-authority-bundle',
+            'publish-phase-exit-authority-bundle',
+            'attest-phase-exit'
+          )
+          $hasPhaseAuthorityInput = @(
+            $env:REQUESTED_TARGET_GATE,
+            $env:REQUESTED_PHASE_AUTHORITY_BUNDLE_RUN_ID,
+            $env:REQUESTED_PHASE_AUTHORITY_BUNDLE_RUN_ATTEMPT,
+            $env:REQUESTED_PHASE_AUTHORITY_BUNDLE_SHA256,
+            $env:REQUESTED_PHASE_AUTHORITY_REVIEW_SHA256,
+            $env:REQUESTED_PHASE_AUTHORITY_EXTERNAL_BINDINGS_RUN_ID,
+            $env:REQUESTED_PHASE_AUTHORITY_EXTERNAL_BINDINGS_RUN_ATTEMPT,
+            $env:REQUESTED_PHASE_AUTHORITY_BOOTSTRAP_RECOVERY_RUN_ID,
+            $env:REQUESTED_PHASE_AUTHORITY_BOOTSTRAP_RECOVERY_RUN_ATTEMPT,
+            $env:REQUESTED_PHASE_AUTHORITY_ARTIFACT_DRILL_RUN_ID,
+            $env:REQUESTED_PHASE_AUTHORITY_ARTIFACT_DRILL_RUN_ATTEMPT,
+            $env:REQUESTED_PHASE_AUTHORITY_QUALITY_RUN_ID,
+            $env:REQUESTED_PHASE_AUTHORITY_QUALITY_RUN_ATTEMPT,
+            $env:REQUESTED_PHASE_AUTHORITY_PERFORMANCE_RUN_ID,
+            $env:REQUESTED_PHASE_AUTHORITY_PERFORMANCE_RUN_ATTEMPT,
+            $env:REQUESTED_PHASE_AUTHORITY_RETENTION_RUN_ID,
+            $env:REQUESTED_PHASE_AUTHORITY_RETENTION_RUN_ATTEMPT,
+            $env:REQUESTED_PHASE_AUTHORITY_BACKUP_RESTORE_RUN_ID,
+            $env:REQUESTED_PHASE_AUTHORITY_BACKUP_RESTORE_RUN_ATTEMPT,
+            $env:REQUESTED_PHASE_AUTHORITY_STARTUP_WAF_RUN_ID,
+            $env:REQUESTED_PHASE_AUTHORITY_STARTUP_WAF_RUN_ATTEMPT,
+            $env:REQUESTED_PHASE_AUTHORITY_REQUEST_GRAPH_RUN_ID,
+            $env:REQUESTED_PHASE_AUTHORITY_REQUEST_GRAPH_RUN_ATTEMPT,
+            $env:REQUESTED_PHASE_AUTHORITY_CSP_REPORT_RUN_ID,
+            $env:REQUESTED_PHASE_AUTHORITY_CSP_REPORT_RUN_ATTEMPT,
+            $env:REQUESTED_PHASE_AUTHORITY_DEPLOYED_CSP_RUN_ID,
+            $env:REQUESTED_PHASE_AUTHORITY_DEPLOYED_CSP_RUN_ATTEMPT,
+            $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_1_ID,
+            $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_1_ATTEMPT,
+            $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_2_ID,
+            $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_2_ATTEMPT,
+            $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_3_ID,
+            $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_3_ATTEMPT
+          ) | Where-Object { -not [string]::IsNullOrEmpty($_) }
+          if (
+            $phaseAuthorityOperations -notcontains $env:REQUESTED_OPERATION -and
+            @($hasPhaseAuthorityInput).Count -ne 0
+          ) {
+            throw "phase authority inputs are forbidden for this operation"
           }
 
           switch ($env:REQUESTED_OPERATION) {
@@ -613,23 +346,39 @@ jobs:
                 throw "archive recovery subject must come from a prior workflow run"
               }
             }
+            'collect-production-request-graph' {}
+            'collect-csp-report-observation' {}
+            'collect-deployed-csp-flow' {}
+            'collect-startup-waf-observation' {}
+            'collect-remote-db-observation' {}
+            'collect-foundation-external-bindings' {}
+            'collect-foundation-bootstrap-recovery' {}
+            'collect-artifact-control-store-drill' {}
+            'collect-backup-restore-rehearsal' {}
             'produce-state-initialization-subject' {
               if (
                 $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' -or
                 $env:REQUESTED_BOOTSTRAP_RECOVERY_SHA256 -notmatch $sha256Pattern -or
                 $env:REQUESTED_DB_CONTRACT_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_DB_OBSERVATION_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_DB_OBSERVATION_PRODUCTION_SHA256 -notmatch $sha256Pattern -or
                 $env:REQUESTED_LEGACY_OBSERVATION_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_P0_BASELINE_ATTESTATION_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_P0_TOOLCHAIN_ATTESTATION_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_P0_ARTIFACT_ATTESTATION_SHA256 -notmatch $sha256Pattern -or
                 $env:REQUESTED_RELEASE_POLICY_SHA256 -notmatch $sha256Pattern
               ) {
-                throw "state initialization subject requires an operation id and four reviewed evidence hashes"
+                throw "state initialization subject requires an operation id, reviewed bootstrap/data authorities, and three pre-initialization phase exits"
               }
             }
             'produce-db-contract-activation-subject' {
               if (
                 $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' -or
-                $env:REQUESTED_DB_CONTRACT_SHA256 -notmatch $sha256Pattern
+                $env:REQUESTED_DB_CONTRACT_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_DB_OBSERVATION_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_DB_OBSERVATION_PRODUCTION_SHA256 -notmatch $sha256Pattern
               ) {
-                throw "DB contract activation subject requires an operation id and reviewed contract hash"
+                throw "DB contract activation subject requires an operation id and reviewed contract and observation hashes"
               }
             }
             'produce-operation-abort-subject' {
@@ -840,13 +589,21 @@ jobs:
               }
             }
             'produce-policy-activation-closure' {
+              $hasQaRun = -not [string]::IsNullOrEmpty($env:REQUESTED_POLICY_QA_EXECUTION_RUN_ID)
+              $hasQaHash = -not [string]::IsNullOrEmpty($env:REQUESTED_POLICY_QA_EXECUTION_SHA256)
               if (
                 $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' -or
-                $env:REQUESTED_POLICY_QA_EXECUTION_RUN_ID -notmatch $runIdPattern -or
-                $env:REQUESTED_POLICY_QA_EXECUTION_RUN_ID -eq $env:GITHUB_RUN_ID -or
-                $env:REQUESTED_POLICY_QA_EXECUTION_SHA256 -notmatch $sha256Pattern
+                $hasQaRun -ne $hasQaHash -or
+                (
+                  $hasQaRun -and
+                  (
+                    $env:REQUESTED_POLICY_QA_EXECUTION_RUN_ID -notmatch $runIdPattern -or
+                    $env:REQUESTED_POLICY_QA_EXECUTION_RUN_ID -eq $env:GITHUB_RUN_ID -or
+                    $env:REQUESTED_POLICY_QA_EXECUTION_SHA256 -notmatch $sha256Pattern
+                  )
+                )
               ) {
-                throw "policy closure requires one reviewed QA execution bundle from a distinct prior run"
+                throw "policy closure requires either one reviewed QA execution selector or the live P8 floor-only branch"
               }
             }
             'produce-policy-activation-subject' {
@@ -877,20 +634,71 @@ jobs:
                 throw "subject_run_id and reviewed subject_sha256 are required for policy activation"
               }
             }
+            'produce-phase-exit-authority-bundle' {
+              if (
+                [string]::IsNullOrEmpty($env:REQUESTED_TARGET_GATE) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_BUNDLE_RUN_ID) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_BUNDLE_RUN_ATTEMPT) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_BUNDLE_SHA256) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_REVIEW_SHA256)
+              ) {
+                throw "phase authority production requires one exact target-gate collector set"
+              }
+            }
+            'publish-phase-exit-authority-bundle' {
+              if (
+                [string]::IsNullOrEmpty($env:REQUESTED_TARGET_GATE) -or
+                $env:REQUESTED_PHASE_AUTHORITY_BUNDLE_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_PHASE_AUTHORITY_BUNDLE_RUN_ID -eq $env:GITHUB_RUN_ID -or
+                $env:REQUESTED_PHASE_AUTHORITY_BUNDLE_RUN_ATTEMPT -notmatch $runIdPattern -or
+                $env:REQUESTED_PHASE_AUTHORITY_BUNDLE_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_PHASE_AUTHORITY_REVIEW_SHA256 -notmatch $sha256Pattern -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_EXTERNAL_BINDINGS_RUN_ID) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_EXTERNAL_BINDINGS_RUN_ATTEMPT) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_BOOTSTRAP_RECOVERY_RUN_ID) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_BOOTSTRAP_RECOVERY_RUN_ATTEMPT) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_ARTIFACT_DRILL_RUN_ID) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_ARTIFACT_DRILL_RUN_ATTEMPT) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_QUALITY_RUN_ID) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_QUALITY_RUN_ATTEMPT) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_PERFORMANCE_RUN_ID) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_PERFORMANCE_RUN_ATTEMPT) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_RETENTION_RUN_ID) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_RETENTION_RUN_ATTEMPT) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_STARTUP_WAF_RUN_ID) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_STARTUP_WAF_RUN_ATTEMPT) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_CSP_REPORT_RUN_ID) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_CSP_REPORT_RUN_ATTEMPT) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_1_ID) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_1_ATTEMPT) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_2_ID) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_2_ATTEMPT) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_3_ID) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_3_ATTEMPT)
+              ) {
+                throw "phase authority publication requires an exact reviewed package from a distinct protected producer run"
+              }
+            }
+            'attest-phase-exit' {
+              $requiresPredecessor = $env:REQUESTED_TARGET_GATE -in @('P0-TOOLCHAIN', 'P0-ARTIFACT')
+              $hasPredecessor = -not [string]::IsNullOrEmpty($env:REQUESTED_PREDECESSOR_ATTESTATION_SHA256)
+              if (
+                $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' -or
+                [string]::IsNullOrEmpty($env:REQUESTED_TARGET_GATE) -or
+                $requiresPredecessor -ne $hasPredecessor -or
+                ($hasPredecessor -and $env:REQUESTED_PREDECESSOR_ATTESTATION_SHA256 -notmatch $sha256Pattern) -or
+                (
+                  -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_BUNDLE_SHA256) -and
+                  $env:REQUESTED_PHASE_AUTHORITY_BUNDLE_SHA256 -notmatch $sha256Pattern
+                )
+              ) {
+                throw "phase exit attestation requires an operation id, target gate, exact pre-initialization predecessor, and optional exact bundle"
+              }
+            }
             default {
               throw "unknown release operation"
             }
           }
-
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.source_sha }}
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.19.0
-          cache: npm
 
       - name: Pin npm
         shell: pwsh
@@ -906,6 +714,21 @@ jobs:
           npm ci
           if ($LASTEXITCODE -ne 0) {
             throw "dependency installation failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Require immutable formal predecessor exit
+        if: inputs.operation == 'produce-artifact-build-requirements' || inputs.operation == 'build-and-verify' || inputs.operation == 'produce-policy-activation-qa-build-requirements' || inputs.operation == 'build-policy-activation-qa' || inputs.operation == 'deploy-prebuilt' || inputs.operation == 'produce-prepromotion-evidence' || inputs.operation == 'produce-promotion-subject' || inputs.operation == 'prepare-and-promote' || inputs.operation == 'record-promotion' || inputs.operation == 'produce-own-gate-performance-evidence' || inputs.operation == 'produce-performance-inherited-closure' || inputs.operation == 'produce-acceptance-requirements' || inputs.operation == 'produce-acceptance-inputs' || inputs.operation == 'accept-standard' || inputs.operation == 'produce-policy-activation-qa-package' || inputs.operation == 'produce-policy-activation-qa-execution-subject' || inputs.operation == 'execute-policy-activation-qa' || inputs.operation == 'produce-policy-activation-closure' || inputs.operation == 'produce-policy-activation-subject' || inputs.operation == 'activate-policy' || inputs.operation == 'activate-policy-floor'
+        shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+        run: |
+          npm run release:verify-operation-predecessor -- `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --source-sha $env:REQUESTED_SOURCE_SHA `
+            --operation $env:REQUESTED_OPERATION
+          if ($LASTEXITCODE -ne 0) {
+            throw "formal predecessor verification failed with exit code $LASTEXITCODE"
           }
 
       - name: Verify protected source identity
@@ -947,6 +770,9 @@ jobs:
       - name: Produce authoritative artifact build requirements
         if: inputs.operation == 'produce-artifact-build-requirements' || inputs.operation == 'produce-policy-activation-qa-build-requirements'
         shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
         run: |
           $outputPath = Join-Path $env:RUNNER_TEMP 'artifact-build-requirements-output'
           New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
@@ -990,7 +816,7 @@ jobs:
         if: inputs.operation == 'produce-policy-activation-qa-build-requirements'
         uses: actions/upload-artifact@v4
         with:
-          name: foundation-policy-qa-build-requirements-${{ inputs.policy_target_source_sha }}
+          name: foundation-policy-qa-build-requirements-${{ env.REQUESTED_POLICY_TARGET_SOURCE_SHA }}
           path: ${{ runner.temp }}/artifact-build-requirements-output/artifact-build-requirements.json
           if-no-files-found: error
           retention-days: 30
@@ -1002,7 +828,7 @@ jobs:
           name: foundation-artifact-build-requirements-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/artifact-build-requirements
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.artifact_build_requirements_run_id }}
+          run-id: ${{ env.REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_RUN_ID }}
 
       - name: Download reviewed standard deployment for pre-promotion collection
         if: inputs.operation == 'collect-prepromotion-evidence-source'
@@ -1011,7 +837,7 @@ jobs:
           name: foundation-deployment-${{ inputs.source_sha }}-standard
           path: ${{ runner.temp }}/prepromotion-standard-deployment
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.standard_deployment_run_id }}
+          run-id: ${{ env.REQUESTED_STANDARD_DEPLOYMENT_RUN_ID }}
 
       - name: Download reviewed containment deployment for pre-promotion collection
         if: inputs.operation == 'collect-prepromotion-evidence-source'
@@ -1020,19 +846,19 @@ jobs:
           name: foundation-deployment-${{ inputs.source_sha }}-containment
           path: ${{ runner.temp }}/prepromotion-containment-deployment
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.containment_deployment_run_id }}
+          run-id: ${{ env.REQUESTED_CONTAINMENT_DEPLOYMENT_RUN_ID }}
 
       - name: Download reviewed Policy QA artifact build requirements
         if: inputs.operation == 'build-policy-activation-qa'
         uses: actions/download-artifact@v4
         with:
-          name: foundation-policy-qa-build-requirements-${{ inputs.policy_target_source_sha }}
+          name: foundation-policy-qa-build-requirements-${{ env.REQUESTED_POLICY_TARGET_SOURCE_SHA }}
           path: ${{ runner.temp }}/artifact-build-requirements
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.artifact_build_requirements_run_id }}
+          run-id: ${{ env.REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_RUN_ID }}
 
       - name: Collect authoritative provider configuration
-        if: inputs.operation == 'build-and-verify' || inputs.operation == 'build-policy-activation-qa' || inputs.operation == 'deploy-prebuilt' || inputs.operation == 'collect-prepromotion-evidence-source' || inputs.operation == 'produce-archive-recovery-subject'
+        if: inputs.operation == 'build-and-verify' || inputs.operation == 'build-policy-activation-qa' || inputs.operation == 'deploy-prebuilt' || inputs.operation == 'collect-prepromotion-evidence-source' || inputs.operation == 'produce-archive-recovery-subject' || inputs.operation == 'collect-remote-db-observation'
         shell: pwsh
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -1063,7 +889,8 @@ jobs:
             $env:REQUESTED_OPERATION -eq 'build-policy-activation-qa' -or
             $env:REQUESTED_OPERATION -eq 'deploy-prebuilt' -or
             $env:REQUESTED_OPERATION -eq 'collect-prepromotion-evidence-source' -or
-            $env:REQUESTED_OPERATION -eq 'produce-archive-recovery-subject'
+            $env:REQUESTED_OPERATION -eq 'produce-archive-recovery-subject' -or
+            $env:REQUESTED_OPERATION -eq 'collect-remote-db-observation'
           ) {
             $observationPath = Join-Path $env:RUNNER_TEMP 'provider-observation.json'
             npm run verify:provider-policy -- --require-configured --observation $observationPath
@@ -1072,10 +899,418 @@ jobs:
             }
           }
 
+      - name: Collect and store protected remote DB observation
+        if: inputs.operation == 'collect-remote-db-observation'
+        shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+          DB_COMPATIBILITY_OBSERVER_DATABASE_URL: ${{ secrets.DB_COMPATIBILITY_OBSERVER_DATABASE_URL }}
+          DB_COMPATIBILITY_OBSERVER_CA_PEM: ${{ secrets.DB_COMPATIBILITY_OBSERVER_CA_PEM }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'remote-db-observation-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $providerObservationPath = Join-Path $env:RUNNER_TEMP 'provider-observation.json'
+          $observationPath = Join-Path $outputPath 'remote-db-observation.json'
+          $authorityPath = Join-Path $outputPath 'remote-db-observation-authority.json'
+          npm run db:observe:protected -- --namespace $env:RELEASE_STATE_NAMESPACE `
+            --source-sha $env:REQUESTED_SOURCE_SHA `
+            --run-id $env:GITHUB_RUN_ID `
+            --provider-observation $providerObservationPath `
+            --authority-output $authorityPath `
+            --output $observationPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "protected remote DB observation failed with exit code $LASTEXITCODE"
+          }
+          $observationHash = (Get-FileHash -LiteralPath $observationPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $authority = Get-Content -LiteralPath $authorityPath -Raw -Encoding utf8 | ConvertFrom-Json -Depth 20
+          if (
+            $authority.schemaVersion -ne 1 -or
+            $authority.resultKind -ne 'remote-db-observation-stored/v1' -or
+            $authority.namespace -ne $env:RELEASE_STATE_NAMESPACE -or
+            $authority.sourceSha -ne $env:REQUESTED_SOURCE_SHA -or
+            $authority.workflowRunId -ne $env:GITHUB_RUN_ID -or
+            $authority.runAttempt -ne $env:GITHUB_RUN_ATTEMPT -or
+            $authority.observation.sha256 -ne $observationHash -or
+            $authority.mediaTypes.observation -ne 'application/vnd.event-shopping-planner.remote-db-observation+json;version=1' -or
+            $authority.mediaTypes.providerObservation -ne 'application/vnd.event-shopping-planner.vercel-provider-observation+json;version=1' -or
+            $authority.mediaTypes.providerPolicy -ne 'application/vnd.event-shopping-planner.provider-policy+json;version=1' -or
+            $authority.mediaTypes.producerOidc -ne 'application/vnd.event-shopping-planner.github-oidc-receipt+json;version=1' -or
+            $authority.mediaTypes.production -ne 'application/vnd.event-shopping-planner.remote-db-observation-production+json;version=1'
+          ) {
+            throw "protected remote DB production authority output differs"
+          }
+          foreach ($referenceName in @('observation', 'providerObservation', 'providerPolicy', 'producerOidc', 'production')) {
+            $reference = $authority.$referenceName
+            if (
+              $reference.sha256 -notmatch '^[0-9a-f]{64}$' -or
+              $reference.uri -ne "release-state://$env:RELEASE_STATE_NAMESPACE/evidence/$($reference.sha256)"
+            ) {
+              throw "protected remote DB authority reference differs: $referenceName"
+            }
+          }
+          $observationReference = "release-state://$env:RELEASE_STATE_NAMESPACE/evidence/$observationHash"
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Remote DB observation SHA-256: ``$observationHash``" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Remote DB production authority SHA-256: ``$($authority.production.sha256)``" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Immutable reference: ``$observationReference``" -Encoding utf8
+
+      - name: Upload protected remote DB observation
+        if: inputs.operation == 'collect-remote-db-observation'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-remote-db-observation-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/remote-db-observation-output
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Collect pre-initialization external bindings authority
+        if: inputs.operation == 'collect-foundation-external-bindings'
+        shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+          DB_COMPATIBILITY_OBSERVER_DATABASE_URL: ${{ secrets.DB_COMPATIBILITY_OBSERVER_DATABASE_URL }}
+          DB_COMPATIBILITY_OBSERVER_CA_PEM: ${{ secrets.DB_COMPATIBILITY_OBSERVER_CA_PEM }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'foundation-external-bindings.json'
+          npm run provider:foundation-external-bindings:collect -- `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --output $outputPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "foundation external bindings collection failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload exact pre-initialization external bindings authority
+        if: inputs.operation == 'collect-foundation-external-bindings'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-external-bindings-${{ inputs.source_sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/foundation-external-bindings.json
+          if-no-files-found: error
+          compression-level: 9
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 90
+
+      - name: Collect pre-initialization bootstrap recovery authority
+        if: inputs.operation == 'collect-foundation-bootstrap-recovery'
+        shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'foundation-bootstrap-recovery.json'
+          npm run provider:foundation-bootstrap-recovery:collect -- `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --output $outputPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "foundation bootstrap recovery collection failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload exact pre-initialization bootstrap recovery authority
+        if: inputs.operation == 'collect-foundation-bootstrap-recovery'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-bootstrap-recovery-${{ inputs.source_sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/foundation-bootstrap-recovery.json
+          if-no-files-found: error
+          compression-level: 9
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 90
+
+      - name: Collect non-promotable artifact/provider/control-store drill
+        if: inputs.operation == 'collect-artifact-control-store-drill'
+        shell: pwsh
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          ARTIFACT_DRILL_DATABASE_CA_PEM: ${{ secrets.ARTIFACT_DRILL_DATABASE_CA_PEM }}
+          ARTIFACT_DRILL_ADMIN_DATABASE_URL: ${{ secrets.ARTIFACT_DRILL_ADMIN_DATABASE_URL }}
+          ARTIFACT_DRILL_EXECUTOR_DATABASE_URL: ${{ secrets.ARTIFACT_DRILL_EXECUTOR_DATABASE_URL }}
+          ARTIFACT_DRILL_PRODUCTION_READER_DATABASE_URL: ${{ secrets.ARTIFACT_DRILL_PRODUCTION_READER_DATABASE_URL }}
+          ARTIFACT_DRILL_BOOTSTRAP_RAW_DIST_ROOT: ${{ vars.ARTIFACT_DRILL_BOOTSTRAP_RAW_DIST_ROOT }}
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'artifact-provider-control-store-drill-closure.json'
+          npm run provider:artifact-control-store:drill -- `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --source-sha $env:REQUESTED_SOURCE_SHA `
+            --output $outputPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "artifact/provider/control-store drill failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload exact artifact/provider/control-store drill closure
+        if: inputs.operation == 'collect-artifact-control-store-drill'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-artifact-provider-control-store-drill-${{ inputs.source_sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/artifact-provider-control-store-drill-closure.json
+          if-no-files-found: error
+          compression-level: 9
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 30
+
+      - name: Collect protected backup/restore rehearsal
+        if: inputs.operation == 'collect-backup-restore-rehearsal'
+        shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+          FOUNDATION_BACKUP_API_TOKEN: ${{ secrets.FOUNDATION_BACKUP_API_TOKEN }}
+          FOUNDATION_BACKUP_SOURCE_DATABASE_URL: ${{ secrets.FOUNDATION_BACKUP_SOURCE_DATABASE_URL }}
+          FOUNDATION_BACKUP_SOURCE_DATABASE_CA_PEM: ${{ secrets.FOUNDATION_BACKUP_SOURCE_DATABASE_CA_PEM }}
+          FOUNDATION_BACKUP_RESTORE_DATABASE_URL: ${{ secrets.FOUNDATION_BACKUP_RESTORE_DATABASE_URL }}
+          FOUNDATION_BACKUP_RESTORE_DATABASE_CA_PEM: ${{ secrets.FOUNDATION_BACKUP_RESTORE_DATABASE_CA_PEM }}
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'backup-restore-rehearsal.json'
+          npm run provider:backup-restore:collect -- `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --output $outputPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "backup/restore rehearsal failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload exact backup/restore rehearsal
+        if: inputs.operation == 'collect-backup-restore-rehearsal'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-backup-restore-rehearsal-${{ inputs.source_sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/backup-restore-rehearsal.json
+          if-no-files-found: error
+          compression-level: 9
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 90
+
+      - name: Produce reviewed phase authority package from fixed collector artifacts
+        if: inputs.operation == 'produce-phase-exit-authority-bundle'
+        shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'phase-exit-authority-produced'
+          $packagePath = Join-Path $outputPath 'phase-exit-authority-package.json'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $phaseArguments = @(
+            '--namespace', $env:RELEASE_STATE_NAMESPACE,
+            '--source-sha', $env:REQUESTED_SOURCE_SHA,
+            '--target-gate', $env:REQUESTED_TARGET_GATE,
+            '--output', $packagePath
+          )
+          switch ($env:REQUESTED_TARGET_GATE) {
+            'P0-BASELINE' {
+              $phaseArguments += @(
+                '--external-bindings-run-id', $env:REQUESTED_PHASE_AUTHORITY_EXTERNAL_BINDINGS_RUN_ID,
+                '--external-bindings-run-attempt', $env:REQUESTED_PHASE_AUTHORITY_EXTERNAL_BINDINGS_RUN_ATTEMPT,
+                '--bootstrap-recovery-run-id', $env:REQUESTED_PHASE_AUTHORITY_BOOTSTRAP_RECOVERY_RUN_ID,
+                '--bootstrap-recovery-run-attempt', $env:REQUESTED_PHASE_AUTHORITY_BOOTSTRAP_RECOVERY_RUN_ATTEMPT
+              )
+            }
+            'P0-ARTIFACT' {
+              $phaseArguments += @('--artifact-drill-run-id', $env:REQUESTED_PHASE_AUTHORITY_ARTIFACT_DRILL_RUN_ID, '--artifact-drill-run-attempt', $env:REQUESTED_PHASE_AUTHORITY_ARTIFACT_DRILL_RUN_ATTEMPT)
+            }
+            'P0-TOOLCHAIN' {
+              $phaseArguments += @('--quality-run-id', $env:REQUESTED_PHASE_AUTHORITY_QUALITY_RUN_ID, '--quality-run-attempt', $env:REQUESTED_PHASE_AUTHORITY_QUALITY_RUN_ATTEMPT)
+            }
+            'P0-RELEASE' {
+              $phaseArguments += @('--performance-run-id', $env:REQUESTED_PHASE_AUTHORITY_PERFORMANCE_RUN_ID, '--performance-run-attempt', $env:REQUESTED_PHASE_AUTHORITY_PERFORMANCE_RUN_ATTEMPT)
+            }
+            'P0-DATA' {
+              $phaseArguments += @(
+                '--retention-run-id', $env:REQUESTED_PHASE_AUTHORITY_RETENTION_RUN_ID,
+                '--retention-run-attempt', $env:REQUESTED_PHASE_AUTHORITY_RETENTION_RUN_ATTEMPT,
+                '--backup-restore-run-id', $env:REQUESTED_PHASE_AUTHORITY_BACKUP_RESTORE_RUN_ID,
+                '--backup-restore-run-attempt', $env:REQUESTED_PHASE_AUTHORITY_BACKUP_RESTORE_RUN_ATTEMPT,
+                '--startup-waf-run-id', $env:REQUESTED_PHASE_AUTHORITY_STARTUP_WAF_RUN_ID,
+                '--startup-waf-run-attempt', $env:REQUESTED_PHASE_AUTHORITY_STARTUP_WAF_RUN_ATTEMPT,
+                '--remote-db-observation-sha256', $env:REQUESTED_DB_OBSERVATION_SHA256,
+                '--remote-db-production-sha256', $env:REQUESTED_DB_OBSERVATION_PRODUCTION_SHA256,
+                '--remote-db-run-id', $env:REQUESTED_DB_OBSERVATION_RUN_ID,
+                '--remote-db-run-attempt', $env:REQUESTED_DB_OBSERVATION_RUN_ATTEMPT
+              )
+            }
+            'P1-PWA' {
+              $phaseArguments += @(
+                '--managed-device-run-1-id', $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_1_ID,
+                '--managed-device-run-1-attempt', $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_1_ATTEMPT,
+                '--managed-device-run-2-id', $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_2_ID,
+                '--managed-device-run-2-attempt', $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_2_ATTEMPT,
+                '--managed-device-run-3-id', $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_3_ID,
+                '--managed-device-run-3-attempt', $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_3_ATTEMPT
+              )
+            }
+            'P2A-LOCAL' {
+              $phaseArguments += @('--request-graph-run-id', $env:REQUESTED_PHASE_AUTHORITY_REQUEST_GRAPH_RUN_ID, '--request-graph-run-attempt', $env:REQUESTED_PHASE_AUTHORITY_REQUEST_GRAPH_RUN_ATTEMPT)
+            }
+            'P2B-REPORT' {
+              $phaseArguments += @('--csp-report-run-id', $env:REQUESTED_PHASE_AUTHORITY_CSP_REPORT_RUN_ID, '--csp-report-run-attempt', $env:REQUESTED_PHASE_AUTHORITY_CSP_REPORT_RUN_ATTEMPT)
+            }
+            'P4-CSP' {
+              $phaseArguments += @('--deployed-csp-run-id', $env:REQUESTED_PHASE_AUTHORITY_DEPLOYED_CSP_RUN_ID, '--deployed-csp-run-attempt', $env:REQUESTED_PHASE_AUTHORITY_DEPLOYED_CSP_RUN_ATTEMPT)
+            }
+            'P7-IDB' {
+              $phaseArguments += @(
+                '--managed-device-run-1-id', $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_1_ID,
+                '--managed-device-run-1-attempt', $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_1_ATTEMPT,
+                '--managed-device-run-2-id', $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_2_ID,
+                '--managed-device-run-2-attempt', $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_2_ATTEMPT,
+                '--managed-device-run-3-id', $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_3_ID,
+                '--managed-device-run-3-attempt', $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_3_ATTEMPT
+              )
+            }
+            default { throw "target gate has no exact implemented authority collector set" }
+          }
+          npm run release:produce-phase-authorities -- @phaseArguments
+          if ($LASTEXITCODE -ne 0) {
+            throw "phase authority package production failed with exit code $LASTEXITCODE"
+          }
+          $package = Get-Content -LiteralPath $packagePath -Raw -Encoding utf8 | ConvertFrom-Json -Depth 100
+          if (
+            $package.kind -ne 'phase-exit-authority-package/v1' -or
+            $package.namespace -ne $env:RELEASE_STATE_NAMESPACE -or
+            $package.sourceSha -ne $env:REQUESTED_SOURCE_SHA -or
+            $package.targetGate -ne $env:REQUESTED_TARGET_GATE -or
+            $package.producerRunId -ne $env:GITHUB_RUN_ID -or
+            $package.producerRunAttempt -ne $env:GITHUB_RUN_ATTEMPT -or
+            $package.bundleSha256 -notmatch '^[0-9a-f]{64}$' -or
+            $package.reviewReceiptSha256 -notmatch '^[0-9a-f]{64}$'
+          ) {
+            throw "phase authority package output identity differs"
+          }
+          $packageHash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Phase authority package SHA-256: ``$packageHash``" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Phase authority bundle SHA-256: ``$($package.bundleSha256)``" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Phase authority review SHA-256: ``$($package.reviewReceiptSha256)``" -Encoding utf8
+
+      - name: Upload reviewed phase authority package
+        if: inputs.operation == 'produce-phase-exit-authority-bundle'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-phase-exit-authority-package-${{ inputs.source_sha }}-${{ env.REQUESTED_TARGET_GATE }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/phase-exit-authority-produced/phase-exit-authority-package.json
+          if-no-files-found: error
+          compression-level: 9
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 30
+
+      - name: Publish reviewed phase authority package
+        if: inputs.operation == 'publish-phase-exit-authority-bundle'
+        shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'phase-exit-authority-publication'
+          $publicationPath = Join-Path $outputPath 'phase-exit-authority-publication.json'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          npm run release:publish-phase-authorities -- `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --source-sha $env:REQUESTED_SOURCE_SHA `
+            --target-gate $env:REQUESTED_TARGET_GATE `
+            --package-run-id $env:REQUESTED_PHASE_AUTHORITY_BUNDLE_RUN_ID `
+            --package-run-attempt $env:REQUESTED_PHASE_AUTHORITY_BUNDLE_RUN_ATTEMPT `
+            --package-sha256 $env:REQUESTED_PHASE_AUTHORITY_BUNDLE_SHA256 `
+            --review-receipt-sha256 $env:REQUESTED_PHASE_AUTHORITY_REVIEW_SHA256 `
+            --output $publicationPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "phase authority bundle publication failed with exit code $LASTEXITCODE"
+          }
+          $publication = Get-Content -LiteralPath $publicationPath -Raw -Encoding utf8 | ConvertFrom-Json -Depth 20
+          if (
+            $publication.kind -ne 'phase-exit-authority-publication-result/v2' -or
+            $publication.namespace -ne $env:RELEASE_STATE_NAMESPACE -or
+            $publication.sourceSha -ne $env:REQUESTED_SOURCE_SHA -or
+            $publication.targetGate -ne $env:REQUESTED_TARGET_GATE -or
+            $publication.workflowRunId -ne $env:GITHUB_RUN_ID -or
+            $publication.bundle.sha256 -notmatch '^[0-9a-f]{64}$' -or
+            $publication.bundle.uri -ne "release-state://$env:RELEASE_STATE_NAMESPACE/evidence/$($publication.bundle.sha256)" -or
+            $publication.publicationAuthority.sha256 -notmatch '^[0-9a-f]{64}$' -or
+            $publication.publicationAuthority.uri -ne "release-state://$env:RELEASE_STATE_NAMESPACE/evidence/$($publication.publicationAuthority.sha256)"
+          ) {
+            throw "phase authority publication reference output differs"
+          }
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Phase authority publication: ``$($publication.publicationAuthority.uri)``" -Encoding utf8
+
+      - name: Upload phase authority publication reference
+        if: inputs.operation == 'publish-phase-exit-authority-bundle'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-phase-exit-authority-publication-${{ env.REQUESTED_TARGET_GATE }}-${{ inputs.source_sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/phase-exit-authority-publication/phase-exit-authority-publication.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Append immutable formal phase exit attestation
+        if: inputs.operation == 'attest-phase-exit'
+        shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+        run: |
+          $outputRoot = Join-Path $env:RUNNER_TEMP 'phase-exit-attestation'
+          $outputPath = Join-Path $outputRoot 'phase-exit-attestation-result.json'
+          New-Item -ItemType Directory -Path $outputRoot -ErrorAction Stop | Out-Null
+          $attestationArguments = @(
+            '--namespace', $env:RELEASE_STATE_NAMESPACE,
+            '--source-sha', $env:REQUESTED_SOURCE_SHA,
+            '--target-gate', $env:REQUESTED_TARGET_GATE,
+            '--operation-id', $env:REQUESTED_OPERATION_ID,
+            '--output', $outputPath
+          )
+          if (-not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_BUNDLE_SHA256)) {
+            $attestationArguments += @('--external-authority-bundle-sha256', $env:REQUESTED_PHASE_AUTHORITY_BUNDLE_SHA256)
+          }
+          if (-not [string]::IsNullOrEmpty($env:REQUESTED_PREDECESSOR_ATTESTATION_SHA256)) {
+            $attestationArguments += @('--predecessor-attestation-sha256', $env:REQUESTED_PREDECESSOR_ATTESTATION_SHA256)
+          }
+          npm run release:attest-phase-exit -- @attestationArguments
+          if ($LASTEXITCODE -ne 0) {
+            throw "phase exit attestation failed with exit code $LASTEXITCODE"
+          }
+          $result = Get-Content -LiteralPath $outputPath -Raw -Encoding utf8 | ConvertFrom-Json -Depth 30
+          if (
+            $result.kind -ne 'phase-exit-attestation-committed/v1' -or
+            $result.namespace -ne $env:RELEASE_STATE_NAMESPACE -or
+            $result.gate -ne $env:REQUESTED_TARGET_GATE -or
+            $result.sourceSha -ne $env:REQUESTED_SOURCE_SHA -or
+            $result.attestation.sha256 -notmatch '^[0-9a-f]{64}$'
+          ) {
+            throw "phase exit attestation result identity differs"
+          }
+
+      - name: Upload formal phase exit attestation result
+        if: inputs.operation == 'attest-phase-exit'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-phase-exit-attestation-${{ env.REQUESTED_TARGET_GATE }}-${{ inputs.source_sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/phase-exit-attestation/phase-exit-attestation-result.json
+          if-no-files-found: error
+          compression-level: 9
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 90
+
       - name: Collect protected pre-promotion evidence source
         if: inputs.operation == 'collect-prepromotion-evidence-source'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -1155,6 +1390,8 @@ jobs:
       - name: Build and verify reviewed immutable package
         if: inputs.operation == 'build-and-verify' || inputs.operation == 'build-policy-activation-qa'
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -1184,7 +1421,7 @@ jobs:
         if: inputs.operation == 'build-and-verify'
         uses: actions/upload-artifact@v4
         with:
-          name: foundation-release-${{ inputs.source_sha }}-${{ inputs.artifact_build_requirements_sha256 }}
+          name: foundation-release-${{ inputs.source_sha }}-${{ env.REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256 }}
           path: ${{ runner.temp }}/foundation-release-package
           if-no-files-found: error
           retention-days: 30
@@ -1193,7 +1430,7 @@ jobs:
         if: inputs.operation == 'build-policy-activation-qa'
         uses: actions/upload-artifact@v4
         with:
-          name: foundation-policy-qa-build-${{ inputs.policy_target_source_sha }}-${{ inputs.artifact_build_requirements_sha256 }}
+          name: foundation-policy-qa-build-${{ env.REQUESTED_POLICY_TARGET_SOURCE_SHA }}-${{ env.REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256 }}
           path: ${{ runner.temp }}/foundation-policy-qa-build-package
           if-no-files-found: error
           retention-days: 30
@@ -1202,24 +1439,26 @@ jobs:
         if: inputs.operation == 'deploy-prebuilt'
         uses: actions/download-artifact@v4
         with:
-          name: foundation-release-${{ inputs.source_sha }}-${{ inputs.artifact_build_requirements_sha256 }}
+          name: foundation-release-${{ inputs.source_sha }}-${{ env.REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256 }}
           path: ${{ runner.temp }}/foundation-release-package
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.artifact_run_id }}
+          run-id: ${{ env.REQUESTED_ARTIFACT_RUN_ID }}
 
       - name: Download exact replay receipt
-        if: inputs.operation == 'deploy-prebuilt' && inputs.replay_receipt_run_id != ''
+        if: inputs.operation == 'deploy-prebuilt' && env.REQUESTED_REPLAY_RECEIPT_RUN_ID != ''
         uses: actions/download-artifact@v4
         with:
-          name: foundation-deployment-${{ inputs.source_sha }}-${{ inputs.release_role }}
+          name: foundation-deployment-${{ inputs.source_sha }}-${{ env.REQUESTED_RELEASE_ROLE }}
           path: ${{ runner.temp }}/deployment-replay
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.replay_receipt_run_id }}
+          run-id: ${{ env.REQUESTED_REPLAY_RECEIPT_RUN_ID }}
 
       - name: Deploy and bind selected verified prebuilt role
         if: inputs.operation == 'deploy-prebuilt'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -1264,7 +1503,7 @@ jobs:
         if: inputs.operation == 'deploy-prebuilt'
         uses: actions/upload-artifact@v4
         with:
-          name: foundation-deployment-${{ inputs.source_sha }}-${{ inputs.release_role }}
+          name: foundation-deployment-${{ inputs.source_sha }}-${{ env.REQUESTED_RELEASE_ROLE }}
           path: ${{ runner.temp }}/deployment-output
           if-no-files-found: error
           retention-days: 30
@@ -1276,12 +1515,14 @@ jobs:
           name: foundation-prepromotion-evidence-source-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/prepromotion-evidence-source
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.prepromotion_evidence_source_run_id }}
+          run-id: ${{ env.REQUESTED_PREPROMOTION_EVIDENCE_SOURCE_RUN_ID }}
 
       - name: Produce canonical pre-promotion evidence set
         if: inputs.operation == 'produce-prepromotion-evidence'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $sourcePath = Join-Path $env:RUNNER_TEMP 'prepromotion-evidence-source/pre-promotion-evidence-source.json'
@@ -1320,7 +1561,7 @@ jobs:
           name: foundation-deployment-${{ inputs.source_sha }}-standard
           path: ${{ runner.temp }}/standard-deployment
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.standard_deployment_run_id }}
+          run-id: ${{ env.REQUESTED_STANDARD_DEPLOYMENT_RUN_ID }}
 
       - name: Download containment deployment binding
         if: inputs.operation == 'produce-promotion-subject'
@@ -1329,7 +1570,7 @@ jobs:
           name: foundation-deployment-${{ inputs.source_sha }}-containment
           path: ${{ runner.temp }}/containment-deployment
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.containment_deployment_run_id }}
+          run-id: ${{ env.REQUESTED_CONTAINMENT_DEPLOYMENT_RUN_ID }}
 
       - name: Download stored pre-promotion evidence set
         if: inputs.operation == 'produce-promotion-subject'
@@ -1338,11 +1579,14 @@ jobs:
           name: foundation-prepromotion-evidence-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/prepromotion-evidence
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.prepromotion_evidence_run_id }}
+          run-id: ${{ env.REQUESTED_PREPROMOTION_EVIDENCE_RUN_ID }}
 
       - name: Produce authoritative promotion subject
         if: inputs.operation == 'produce-promotion-subject'
         shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
         run: |
           $outputPath = Join-Path $env:RUNNER_TEMP 'promotion-subject-output'
           New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
@@ -1376,12 +1620,14 @@ jobs:
           name: foundation-promotion-subject-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/promotion-subject-input
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.subject_run_id }}
+          run-id: ${{ env.REQUESTED_SUBJECT_RUN_ID }}
 
       - name: Prepare, promote, stage, validate, and record the exact subject
         if: inputs.operation == 'prepare-and-promote'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -1472,12 +1718,14 @@ jobs:
           name: foundation-promotion-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/promotion-input
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.promotion_run_id }}
+          run-id: ${{ env.REQUESTED_PROMOTION_RUN_ID }}
 
       - name: Revalidate and record a partial promotion
         if: inputs.operation == 'record-promotion'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -1547,6 +1795,8 @@ jobs:
         if: inputs.operation == 'reconcile'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
@@ -1580,6 +1830,9 @@ jobs:
       - name: Produce authoritative acceptance requirements
         if: inputs.operation == 'produce-acceptance-requirements'
         shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
         run: |
           $outputPath = Join-Path $env:RUNNER_TEMP 'acceptance-requirements-output'
           New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
@@ -1606,15 +1859,17 @@ jobs:
         if: inputs.operation == 'produce-own-gate-performance-evidence'
         uses: actions/download-artifact@v4
         with:
-          name: foundation-performance-raw-samples-${{ inputs.source_sha }}
+          name: foundation-performance-raw-samples-${{ inputs.source_sha }}-${{ env.REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ATTEMPT }}
           path: ${{ runner.temp }}/performance-raw-input
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.performance_raw_samples_run_id }}
+          run-id: ${{ env.REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ID }}
 
       - name: Produce authoritative own-gate performance evidence
         if: inputs.operation == 'produce-own-gate-performance-evidence'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $rawInputPath = Join-Path $env:RUNNER_TEMP 'performance-raw-input'
@@ -1641,6 +1896,7 @@ jobs:
             --raw-samples $rawSamplesPath `
             --raw-samples-sha256 $env:REQUESTED_PERFORMANCE_RAW_SAMPLES_SHA256 `
             --raw-samples-run-id $env:REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ID `
+            --raw-samples-run-attempt $env:REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ATTEMPT `
             --output $evidencePath `
             --receipt-output $receiptPath
           if ($LASTEXITCODE -ne 0) {
@@ -1667,7 +1923,7 @@ jobs:
         if: inputs.operation == 'produce-own-gate-performance-evidence'
         uses: actions/upload-artifact@v4
         with:
-          name: foundation-performance-own-gate-evidence-${{ inputs.source_sha }}
+          name: foundation-performance-own-gate-evidence-${{ inputs.source_sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/performance-own-gate-output/performance-evidence.json
           if-no-files-found: error
           retention-days: 30
@@ -1675,6 +1931,9 @@ jobs:
       - name: Build authoritative inherited performance closure
         if: inputs.operation == 'produce-performance-inherited-closure'
         shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
         run: |
           $outputPath = Join-Path $env:RUNNER_TEMP 'performance-closure-output'
           New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
@@ -1709,12 +1968,14 @@ jobs:
           name: foundation-acceptance-collector-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/acceptance-collector-prior
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.acceptance_evidence_source_run_id }}
+          run-id: ${{ env.REQUESTED_ACCEPTANCE_EVIDENCE_SOURCE_RUN_ID }}
 
       - name: Collect immutable acceptance authority and production samples
         if: inputs.operation == 'initialize-acceptance-collector' || inputs.operation == 'collect-continuous-sample' || inputs.operation == 'finalize-acceptance-evidence'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           RELEASE_A_EVIDENCE_URL: ${{ secrets.RELEASE_A_EVIDENCE_URL }}
@@ -1825,11 +2086,14 @@ jobs:
           name: foundation-acceptance-evidence-source-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/acceptance-evidence-source
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.acceptance_evidence_source_run_id }}
+          run-id: ${{ env.REQUESTED_ACCEPTANCE_EVIDENCE_SOURCE_RUN_ID }}
 
       - name: Validate and publish exact acceptance evidence sources
         if: inputs.operation == 'publish-acceptance-evidence'
         shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
         run: |
           $sourcePath = Join-Path $env:RUNNER_TEMP 'acceptance-evidence-source'
           $evidencePath = Join-Path $sourcePath 'release-a-acceptance-evidence.json'
@@ -1905,12 +2169,15 @@ jobs:
           name: foundation-acceptance-requirements-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/acceptance-requirements-reviewed
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.acceptance_requirements_run_id }}
+          run-id: ${{ env.REQUESTED_ACCEPTANCE_REQUIREMENTS_RUN_ID }}
 
       - name: Verify reviewed authoritative acceptance requirements
         id: acceptance_requirements
         if: inputs.operation == 'produce-acceptance-inputs' || inputs.operation == 'accept-standard'
         shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
         run: |
           $reviewedRequirementsPath = Join-Path $env:RUNNER_TEMP 'acceptance-requirements-reviewed/acceptance-requirements.json'
           $reviewedRequirementsHash = (Get-FileHash -LiteralPath $reviewedRequirementsPath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -1961,16 +2228,16 @@ jobs:
           name: foundation-acceptance-evidence-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/acceptance-input
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.acceptance_evidence_run_id }}
+          run-id: ${{ env.REQUESTED_ACCEPTANCE_EVIDENCE_RUN_ID }}
 
       - name: Download reviewed own-gate performance evidence
         if: (inputs.operation == 'produce-acceptance-inputs' || inputs.operation == 'accept-standard') && steps.acceptance_requirements.outputs.performance_kind == 'own-gate-performance-evidence/v1'
         uses: actions/download-artifact@v4
         with:
-          name: foundation-performance-own-gate-evidence-${{ inputs.source_sha }}
+          name: foundation-performance-own-gate-evidence-${{ inputs.source_sha }}-${{ env.REQUESTED_PERFORMANCE_EVIDENCE_RUN_ATTEMPT }}
           path: ${{ runner.temp }}/performance-input
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.performance_evidence_run_id }}
+          run-id: ${{ env.REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID }}
 
       - name: Download reviewed inherited performance closure
         if: (inputs.operation == 'produce-acceptance-inputs' || inputs.operation == 'accept-standard') && steps.acceptance_requirements.outputs.performance_kind == 'performance-inherited-closure/v1'
@@ -1979,12 +2246,14 @@ jobs:
           name: foundation-performance-inherited-closure-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/performance-input
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.performance_evidence_run_id }}
+          run-id: ${{ env.REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID }}
 
       - name: Produce canonical acceptance inputs from reviewed sources
         if: inputs.operation == 'produce-acceptance-inputs'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REQUIRED_PERFORMANCE_KIND: ${{ steps.acceptance_requirements.outputs.performance_kind }}
         run: |
@@ -2137,12 +2406,14 @@ jobs:
           name: foundation-acceptance-inputs-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/acceptance-inputs
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.acceptance_inputs_run_id }}
+          run-id: ${{ env.REQUESTED_ACCEPTANCE_INPUTS_RUN_ID }}
 
       - name: Accept the standard release after fresh observation
         if: inputs.operation == 'accept-standard'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REQUIRED_PERFORMANCE_KIND: ${{ steps.acceptance_requirements.outputs.performance_kind }}
         run: |
@@ -2264,14 +2535,17 @@ jobs:
         if: inputs.operation == 'produce-policy-activation-qa-package'
         uses: actions/download-artifact@v4
         with:
-          name: foundation-policy-qa-build-${{ inputs.policy_target_source_sha }}-${{ inputs.artifact_build_requirements_sha256 }}
+          name: foundation-policy-qa-build-${{ env.REQUESTED_POLICY_TARGET_SOURCE_SHA }}-${{ env.REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256 }}
           path: ${{ runner.temp }}/policy-qa-candidate-package
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.artifact_run_id }}
+          run-id: ${{ env.REQUESTED_ARTIFACT_RUN_ID }}
 
       - name: Build immutable nonpromotable policy QA package
         if: inputs.operation == 'produce-policy-activation-qa-package'
         shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
         run: |
           $packagePath = Join-Path $env:RUNNER_TEMP 'policy-qa-candidate-package'
           $indexPath = Join-Path $packagePath 'release-package-index.json'
@@ -2345,6 +2619,9 @@ jobs:
       - name: Produce authoritative Policy QA execution subject
         if: inputs.operation == 'produce-policy-activation-qa-execution-subject'
         shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
         run: |
           $outputPath = Join-Path $env:RUNNER_TEMP 'policy-qa-execution-subject-output'
           New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
@@ -2381,12 +2658,14 @@ jobs:
           name: foundation-policy-qa-execution-subject-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/policy-qa-reviewed-subject
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.policy_qa_execution_subject_run_id }}
+          run-id: ${{ env.REQUESTED_POLICY_QA_EXECUTION_SUBJECT_RUN_ID }}
 
       - name: Execute reviewed nonproduction Policy QA and recovery drills
         if: inputs.operation == 'execute-policy-activation-qa'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -2423,32 +2702,43 @@ jobs:
           retention-days: 30
 
       - name: Download reviewed Policy QA execution bundle
-        if: inputs.operation == 'produce-policy-activation-closure'
+        if: inputs.operation == 'produce-policy-activation-closure' && env.REQUESTED_POLICY_QA_EXECUTION_RUN_ID != ''
         uses: actions/download-artifact@v4
         with:
           name: foundation-policy-qa-execution-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/policy-qa-reviewed-execution
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.policy_qa_execution_run_id }}
+          run-id: ${{ env.REQUESTED_POLICY_QA_EXECUTION_RUN_ID }}
 
       - name: Produce authoritative policy activation closure
         if: inputs.operation == 'produce-policy-activation-closure'
         shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
         run: |
           $outputPath = Join-Path $env:RUNNER_TEMP 'policy-activation-closure-output'
           New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
           $closurePath = Join-Path $outputPath 'policy-activation-closure.json'
-          $executionPath = Join-Path $env:RUNNER_TEMP 'policy-qa-reviewed-execution/policy-qa-execution.json'
-          $actualExecutionHash = (Get-FileHash -LiteralPath $executionPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actualExecutionHash -ne $env:REQUESTED_POLICY_QA_EXECUTION_SHA256) {
-            throw "Policy QA execution bundle differs from reviewed SHA-256"
+          $producerArguments = @(
+            'run', 'release:produce-input', '--', 'policy-activation-closure',
+            '--namespace', $env:RELEASE_STATE_NAMESPACE,
+            '--operation-id', $env:REQUESTED_OPERATION_ID,
+            '--source-sha', $env:REQUESTED_SOURCE_SHA
+          )
+          if (-not [string]::IsNullOrEmpty($env:REQUESTED_POLICY_QA_EXECUTION_RUN_ID)) {
+            $executionPath = Join-Path $env:RUNNER_TEMP 'policy-qa-reviewed-execution/policy-qa-execution.json'
+            $actualExecutionHash = (Get-FileHash -LiteralPath $executionPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualExecutionHash -ne $env:REQUESTED_POLICY_QA_EXECUTION_SHA256) {
+              throw "Policy QA execution bundle differs from reviewed SHA-256"
+            }
+            $producerArguments += @(
+              '--qa-execution-sha256',
+              $env:REQUESTED_POLICY_QA_EXECUTION_SHA256
+            )
           }
-          npm run release:produce-input -- policy-activation-closure `
-            --namespace $env:RELEASE_STATE_NAMESPACE `
-            --operation-id $env:REQUESTED_OPERATION_ID `
-            --source-sha $env:REQUESTED_SOURCE_SHA `
-            --qa-execution-sha256 $env:REQUESTED_POLICY_QA_EXECUTION_SHA256 `
-            --output $closurePath
+          $producerArguments += @('--output', $closurePath)
+          & npm @producerArguments
           if ($LASTEXITCODE -ne 0) {
             throw "policy activation closure production failed with exit code $LASTEXITCODE"
           }
@@ -2467,6 +2757,9 @@ jobs:
       - name: Produce authoritative generic policy activation subject
         if: inputs.operation == 'produce-policy-activation-subject'
         shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
         run: |
           $outputPath = Join-Path $env:RUNNER_TEMP 'policy-activation-subject-output'
           New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
@@ -2501,12 +2794,14 @@ jobs:
           name: foundation-policy-activation-subject-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/policy-activation-subject-input
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.subject_run_id }}
+          run-id: ${{ env.REQUESTED_SUBJECT_RUN_ID }}
 
       - name: Activate the reviewed generic policy transition
         if: inputs.operation == 'activate-policy' || inputs.operation == 'activate-policy-floor'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $subjectPath = Join-Path $env:RUNNER_TEMP 'policy-activation-subject-input/policy-activation-subject.json'
@@ -2538,6 +2833,9 @@ jobs:
       - name: Verify and plan archive recovery without provider mutation
         if: inputs.operation == 'plan-archive-recovery'
         shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
         run: |
           $outputPath = Join-Path $env:RUNNER_TEMP 'archive-recovery-output'
           New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
@@ -2564,6 +2862,8 @@ jobs:
         if: inputs.operation == 'produce-archive-recovery-subject'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -2666,12 +2966,14 @@ jobs:
           name: foundation-archive-recovery-subject-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/archive-recovery-subject-input
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.subject_run_id }}
+          run-id: ${{ env.REQUESTED_SUBJECT_RUN_ID }}
 
       - name: Execute reviewed archive recovery
         if: inputs.operation == 'execute-reviewed-archive-recovery'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -2761,6 +3063,9 @@ jobs:
         if: inputs.operation == 'produce-state-initialization-subject' || inputs.operation == 'produce-db-contract-activation-subject' || inputs.operation == 'produce-operation-abort-subject'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           $outputPath = Join-Path $env:RUNNER_TEMP 'administrative-subject-output'
@@ -2777,14 +3082,25 @@ jobs:
             & npm run release:administrative -- produce-state-initialized @common `
               --bootstrap-recovery-sha256 $env:REQUESTED_BOOTSTRAP_RECOVERY_SHA256 `
               --db-contract-sha256 $env:REQUESTED_DB_CONTRACT_SHA256 `
+              --db-observation-sha256 $env:REQUESTED_DB_OBSERVATION_SHA256 `
+              --db-observation-production-sha256 $env:REQUESTED_DB_OBSERVATION_PRODUCTION_SHA256 `
+              --db-observation-run-id $env:REQUESTED_DB_OBSERVATION_RUN_ID `
+              --db-observation-run-attempt $env:REQUESTED_DB_OBSERVATION_RUN_ATTEMPT `
               --legacy-observation-sha256 $env:REQUESTED_LEGACY_OBSERVATION_SHA256 `
+              --p0-baseline-attestation-sha256 $env:REQUESTED_P0_BASELINE_ATTESTATION_SHA256 `
+              --p0-toolchain-attestation-sha256 $env:REQUESTED_P0_TOOLCHAIN_ATTESTATION_SHA256 `
+              --p0-artifact-attestation-sha256 $env:REQUESTED_P0_ARTIFACT_ATTESTATION_SHA256 `
               --release-policy-sha256 $env:REQUESTED_RELEASE_POLICY_SHA256
             if ($LASTEXITCODE -ne 0) {
               throw "state initialization subject production failed with exit code $LASTEXITCODE"
             }
           } elseif ($env:REQUESTED_OPERATION -eq 'produce-db-contract-activation-subject') {
             & npm run release:administrative -- produce-db-contract-activated @common `
-              --db-contract-sha256 $env:REQUESTED_DB_CONTRACT_SHA256
+              --db-contract-sha256 $env:REQUESTED_DB_CONTRACT_SHA256 `
+              --db-observation-sha256 $env:REQUESTED_DB_OBSERVATION_SHA256 `
+              --db-observation-production-sha256 $env:REQUESTED_DB_OBSERVATION_PRODUCTION_SHA256 `
+              --db-observation-run-id $env:REQUESTED_DB_OBSERVATION_RUN_ID `
+              --db-observation-run-attempt $env:REQUESTED_DB_OBSERVATION_RUN_ATTEMPT
             if ($LASTEXITCODE -ne 0) {
               throw "DB contract activation subject production failed with exit code $LASTEXITCODE"
             }
@@ -2839,7 +3155,7 @@ jobs:
           name: foundation-state-initialization-subject-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/administrative-subject-input
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.subject_run_id }}
+          run-id: ${{ env.REQUESTED_SUBJECT_RUN_ID }}
 
       - name: Download reviewed DB contract activation subject
         if: inputs.operation == 'activate-db-contract'
@@ -2848,7 +3164,7 @@ jobs:
           name: foundation-db-contract-activation-subject-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/administrative-subject-input
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.subject_run_id }}
+          run-id: ${{ env.REQUESTED_SUBJECT_RUN_ID }}
 
       - name: Download reviewed operation abort subject
         if: inputs.operation == 'abort-pending-operation'
@@ -2857,12 +3173,14 @@ jobs:
           name: foundation-operation-abort-subject-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/administrative-subject-input
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.subject_run_id }}
+          run-id: ${{ env.REQUESTED_SUBJECT_RUN_ID }}
 
       - name: Execute reviewed administrative transition
         if: inputs.operation == 'initialize-release-state' || inputs.operation == 'activate-db-contract' || inputs.operation == 'abort-pending-operation'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $subjectPath = Join-Path $env:RUNNER_TEMP 'administrative-subject-input/administrative-subject.json'
@@ -2891,4 +3209,284 @@ jobs:
           name: foundation-administrative-transition-${{ inputs.source_sha }}-${{ inputs.operation }}
           path: ${{ runner.temp }}/administrative-execution-output
           if-no-files-found: warn
+          retention-days: 30
+
+  browser-authority:
+    if: ${{ github.ref == 'refs/heads/main' && github.ref_protected == true && github.sha == inputs.source_sha && inputs.operation != 'collect-managed-device-live-stage' && (inputs.operation == 'collect-production-request-graph' || inputs.operation == 'collect-csp-report-observation' || inputs.operation == 'collect-deployed-csp-flow' || inputs.operation == 'collect-startup-waf-observation') }}
+    runs-on: ubuntu-latest
+    environment: foundation-release-state
+    timeout-minutes: 30
+    env:
+      REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
+      REQUESTED_OPERATION: ${{ inputs.operation }}
+      RELEASE_STATE_NAMESPACE: ${{ vars.RELEASE_STATE_NAMESPACE }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+
+      - name: Guard browser authority protected source
+        shell: pwsh
+        run: |
+          if (
+            $env:GITHUB_REF -ne 'refs/heads/main' -or
+            $env:GITHUB_REF_PROTECTED -ne 'true' -or
+            $env:GITHUB_SHA -ne $env:REQUESTED_SOURCE_SHA
+          ) {
+            throw "browser authority source is not the protected exact main commit"
+          }
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) {
+            throw "browser authority git rev-parse failed with exit code $LASTEXITCODE"
+          }
+          if ($actual.Trim() -ne $env:REQUESTED_SOURCE_SHA) {
+            throw "browser authority checked out source differs"
+          }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+
+      - name: Normalize browser authority dispatch request
+        shell: pwsh
+        env:
+          INPUT_OPERATION: ${{ inputs.operation }}
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
+          INPUT_REQUEST_JSON: ${{ inputs.request_json }}
+        run: |
+          node scripts/release-state/release-dispatch-request.mjs validate
+          if ($LASTEXITCODE -ne 0) {
+            throw "browser authority dispatch normalization failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Pin exact npm
+        shell: pwsh
+        run: |
+          npm install --global npm@11.19.0
+          if ($LASTEXITCODE -ne 0) {
+            throw "npm pin failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Install exact browser collector dependencies
+        shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) {
+            throw "npm ci failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Verify exact browser collector toolchain
+        shell: pwsh
+        run: |
+          npm run verify:toolchain
+          if ($LASTEXITCODE -ne 0) {
+            throw "browser toolchain verification failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Install Chromium for protected production observation
+        shell: pwsh
+        run: |
+          npm exec -- playwright install --with-deps chromium
+          if ($LASTEXITCODE -ne 0) {
+            throw "Chromium installation failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Collect production request graph authority
+        if: inputs.operation == 'collect-production-request-graph'
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+        shell: pwsh
+        run: |
+          npm run browser:request-graph:collect -- --namespace $env:RELEASE_STATE_NAMESPACE --source-sha $env:REQUESTED_SOURCE_SHA --output (Join-Path $env:RUNNER_TEMP 'production-request-graph-observation.json')
+          if ($LASTEXITCODE -ne 0) {
+            throw "production request graph collection failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload exact production request graph observation
+        if: inputs.operation == 'collect-production-request-graph'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-production-request-graph-${{ inputs.source_sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/production-request-graph-observation.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Collect CSP report observation authority
+        if: inputs.operation == 'collect-csp-report-observation'
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+          DB_COMPATIBILITY_OBSERVER_DATABASE_URL: ${{ secrets.DB_COMPATIBILITY_OBSERVER_DATABASE_URL }}
+          DB_COMPATIBILITY_OBSERVER_CA_PEM: ${{ secrets.DB_COMPATIBILITY_OBSERVER_CA_PEM }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        shell: pwsh
+        run: |
+          npm run browser:csp-report:collect -- --namespace $env:RELEASE_STATE_NAMESPACE --source-sha $env:REQUESTED_SOURCE_SHA --output (Join-Path $env:RUNNER_TEMP 'csp-report-observation.json')
+          if ($LASTEXITCODE -ne 0) {
+            throw "CSP report observation collection failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload exact CSP report observation
+        if: inputs.operation == 'collect-csp-report-observation'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-csp-report-observation-${{ inputs.source_sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/csp-report-observation.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Collect deployed CSP flow authority
+        if: inputs.operation == 'collect-deployed-csp-flow'
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+        shell: pwsh
+        run: |
+          npm run browser:csp-flow:collect -- --namespace $env:RELEASE_STATE_NAMESPACE --source-sha $env:REQUESTED_SOURCE_SHA --output (Join-Path $env:RUNNER_TEMP 'deployed-csp-flow-observation.json')
+          if ($LASTEXITCODE -ne 0) {
+            throw "deployed CSP flow collection failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload exact deployed CSP flow observation
+        if: inputs.operation == 'collect-deployed-csp-flow'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-deployed-csp-flow-${{ inputs.source_sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/deployed-csp-flow-observation.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Collect startup WAF observation authority
+        if: inputs.operation == 'collect-startup-waf-observation'
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        shell: pwsh
+        run: |
+          npm run provider:observe-startup-waf -- --namespace $env:RELEASE_STATE_NAMESPACE --source-sha $env:REQUESTED_SOURCE_SHA --output (Join-Path $env:RUNNER_TEMP 'startup-waf-observation.json')
+          if ($LASTEXITCODE -ne 0) {
+            throw "startup WAF observation collection failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload exact startup WAF observation
+        if: inputs.operation == 'collect-startup-waf-observation'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-startup-waf-observation-${{ inputs.source_sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/startup-waf-observation.json
+          if-no-files-found: error
+          retention-days: 30
+
+  managed-device-authority:
+    if: ${{ github.ref == 'refs/heads/main' && github.ref_protected == true && github.sha == inputs.source_sha && inputs.operation == 'collect-managed-device-live-stage' }}
+    runs-on:
+      group: foundation-managed-devices
+      labels:
+        - Windows
+        - X64
+        - foundation-device
+        - managed
+        - self-hosted
+    environment: foundation-release-state
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    env:
+      REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
+      REQUESTED_OPERATION: ${{ inputs.operation }}
+      RELEASE_STATE_NAMESPACE: ${{ vars.RELEASE_STATE_NAMESPACE }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+
+      - name: Guard managed device authority protected source
+        shell: pwsh
+        run: |
+          if (
+            $env:GITHUB_REF -ne 'refs/heads/main' -or
+            $env:GITHUB_REF_PROTECTED -ne 'true' -or
+            $env:GITHUB_SHA -ne $env:REQUESTED_SOURCE_SHA -or
+            $env:REQUESTED_OPERATION -ne 'collect-managed-device-live-stage'
+          ) {
+            throw "managed device authority source is not the protected exact main commit"
+          }
+          $actual = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) {
+            throw "managed device authority git rev-parse failed with exit code $LASTEXITCODE"
+          }
+          if ($actual.Trim() -ne $env:REQUESTED_SOURCE_SHA) {
+            throw "managed device authority checked out source differs"
+          }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+
+      - name: Normalize managed device authority dispatch request
+        shell: pwsh
+        env:
+          INPUT_OPERATION: ${{ inputs.operation }}
+          INPUT_SOURCE_SHA: ${{ inputs.source_sha }}
+          INPUT_REQUEST_JSON: ${{ inputs.request_json }}
+        run: |
+          node scripts/release-state/release-dispatch-request.mjs validate
+          if ($LASTEXITCODE -ne 0) {
+            throw "managed device authority dispatch normalization failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Pin exact managed device npm
+        shell: pwsh
+        run: |
+          npm install --global npm@11.19.0
+          if ($LASTEXITCODE -ne 0) {
+            throw "managed device npm pin failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Install exact managed device collector dependencies
+        shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) {
+            throw "managed device npm ci failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Verify exact managed device collector toolchain
+        shell: pwsh
+        run: |
+          npm run verify:toolchain
+          if ($LASTEXITCODE -ne 0) {
+            throw "managed device toolchain verification failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Collect exact managed device live stage
+        shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+          FOUNDATION_DEVICE_ATTESTATION_PRIVATE_KEY_PEM: ${{ secrets.FOUNDATION_DEVICE_ATTESTATION_PRIVATE_KEY_PEM }}
+          FOUNDATION_DEVICE_ATTESTATION_PUBLIC_KEY_PEM: ${{ secrets.FOUNDATION_DEVICE_ATTESTATION_PUBLIC_KEY_PEM }}
+          FOUNDATION_DEVICE_RUNNER_GROUP: foundation-managed-devices
+          FOUNDATION_DEVICE_RUNNER_LABELS: Windows,X64,foundation-device,managed,self-hosted
+        run: |
+          npm run browser:managed-device-stage:collect -- --namespace $env:RELEASE_STATE_NAMESPACE --source-sha $env:REQUESTED_SOURCE_SHA --output (Join-Path $env:RUNNER_TEMP 'managed-device-live-stage.json')
+          if ($LASTEXITCODE -ne 0) {
+            throw "managed device live stage collection failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload exact managed device live stage
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-managed-device-live-stage-${{ inputs.source_sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/managed-device-live-stage.json
+          if-no-files-found: error
+          compression-level: 9
+          overwrite: false
+          include-hidden-files: false
           retention-days: 30

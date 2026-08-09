@@ -13,7 +13,10 @@ import {
 } from "./lib/canonical-json.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const packageJson = await readJsonStrict(path.join(root, "package.json"));
+const [packageJson, releaseStateStorePolicy] = await Promise.all([
+  readJsonStrict(path.join(root, "package.json")),
+  readJsonStrict(path.join(root, "config", "release-state-store.json")),
+]);
 const cspContractMigration = await readFile(
   path.join(
     root,
@@ -30,14 +33,34 @@ if (!cspUpgradeMatch) {
   throw new Error("CSP report contract upgrade block is missing");
 }
 const cspReportContractUpgradeSql = cspUpgradeMatch[1];
+const expectedReleaseStateMigrationPaths = [
+  "ops/release-state/migrations/0001_release_state_store.sql",
+  "ops/release-state/migrations/0002_acceptance_evidence_chains.sql",
+  "ops/release-state/migrations/0003_phase_exit_attestations.sql",
+];
+if (
+  !Array.isArray(releaseStateStorePolicy.migrations) ||
+  releaseStateStorePolicy.migrations.length !==
+    expectedReleaseStateMigrationPaths.length ||
+  releaseStateStorePolicy.migrations.some(
+    (migration, index) =>
+      migration?.path !== expectedReleaseStateMigrationPaths[index] ||
+      typeof migration.sha256 !== "string" ||
+      !/^[0-9a-f]{64}$/u.test(migration.sha256),
+  )
+) {
+  throw new Error("Disposable DB Release State migration order differs");
+}
 const releaseStateStoreMigrations = await Promise.all(
-  ["0001_release_state_store.sql", "0002_acceptance_evidence_chains.sql"].map(
-    (migration) =>
-      readFile(
-        path.join(root, "ops", "release-state", "migrations", migration),
-        "utf8",
-      ),
-  ),
+  releaseStateStorePolicy.migrations.map(async (migration) => {
+    const bytes = await readFile(path.join(root, ...migration.path.split("/")));
+    if (sha256Bytes(bytes) !== migration.sha256) {
+      throw new Error(
+        `Disposable DB Release State migration hash differs: ${migration.path}`,
+      );
+    }
+    return bytes.toString("utf8");
+  }),
 );
 if (process.versions.node !== packageJson.engines.node) {
   throw new Error(
@@ -127,6 +150,7 @@ const isPostgresError = (error, expectedCode, messagePattern = null) => {
 };
 
 const RELEASE_STATE_NAMESPACE = "foundation-disposable-control";
+const RELEASE_STATE_UPGRADE_NAMESPACE = "foundation-disposable-control-upgrade";
 const RELEASE_STATE_EXECUTOR = "foundation_disposable_release_executor";
 const RELEASE_STATE_DENIED_EXECUTOR = "foundation_disposable_release_denied";
 const RELEASE_STATE_EXECUTOR_PASSWORD = "disposable-release-executor";
@@ -248,31 +272,76 @@ const readAcceptanceChain = (
     ],
   });
 
-const createReleaseStateEvent = ({ appendId, operationId }) => {
-  const payload = {};
+const createReleaseStateEvent = ({
+  appendId,
+  operationId,
+  namespace = RELEASE_STATE_NAMESPACE,
+  eventType = "operation-aborted",
+  sequence = 1,
+  previousEventHash = null,
+  payload = {},
+  evidenceRefs = [],
+}) => {
   return {
     approvalRefs: [],
     appendId,
-    evidenceRefs: [],
-    eventType: "operation-aborted",
-    namespace: RELEASE_STATE_NAMESPACE,
+    evidenceRefs,
+    eventType,
+    namespace,
     operationId,
     payload,
     payloadSha256: sha256Bytes(canonicalJsonBytes(payload)),
-    previousEventHash: null,
+    previousEventHash,
     schemaVersion: 1,
-    sequence: 1,
+    sequence,
   };
 };
 
-const appendReleaseStateEvent = (client, event) =>
+const createPhaseExitReleaseStateEvent = ({
+  appendId,
+  marker,
+  namespace,
+  operationId,
+  previousEventHash,
+  sequence,
+}) => {
+  const attestationSha256 = sha256Bytes(
+    Buffer.from(`${namespace}\n${marker}`, "utf8"),
+  );
+  const attestation = {
+    sha256: attestationSha256,
+    uri: `release-state://${namespace}/evidence/${attestationSha256}`,
+  };
+  return createReleaseStateEvent({
+    appendId,
+    operationId,
+    namespace,
+    eventType: "phase-exit-attested",
+    sequence,
+    previousEventHash,
+    payload: {
+      gate: "P0-BASELINE",
+      sourceSha: ACCEPTANCE_SOURCE_SHA,
+      subjectKind: "repository-phase-subject/v1",
+      attestation,
+      predecessor: null,
+    },
+    evidenceRefs: [attestation],
+  });
+};
+
+const appendReleaseStateEvent = (
+  client,
+  event,
+  { expectedSequence = 0, expectedHash = null } = {},
+) =>
   client.query({
     text: `select *
       from foundation_release.compare_and_append($1, $2, $3, $4, $5)`,
     values: [
-      RELEASE_STATE_NAMESPACE,
-      0,
-      null,
+      event.namespace,
+      expectedSequence,
+      expectedHash,
       event.appendId,
       canonicalJsonBytes(event),
     ],
@@ -307,7 +376,8 @@ const connectReleaseStateRole = async ({ Client, password, user }) => {
 };
 
 const verifyReleaseStateControlStore = async ({ Client, administrator }) => {
-  for (const migration of releaseStateStoreMigrations) {
+  const phaseExitMigration = releaseStateStoreMigrations.at(-1);
+  for (const migration of releaseStateStoreMigrations.slice(0, -1)) {
     await administrator.query(migration);
   }
   await administrator.query(`
@@ -358,6 +428,9 @@ const verifyReleaseStateControlStore = async ({ Client, administrator }) => {
     ) values (
       '${RELEASE_STATE_NAMESPACE}',
       '${RELEASE_STATE_EXECUTOR}'
+    ), (
+      '${RELEASE_STATE_UPGRADE_NAMESPACE}',
+      '${RELEASE_STATE_EXECUTOR}'
     );
   `);
 
@@ -372,6 +445,103 @@ const verifyReleaseStateControlStore = async ({ Client, administrator }) => {
     user: RELEASE_STATE_DENIED_EXECUTOR,
   });
   try {
+    const upgradeInitialEvent = createReleaseStateEvent({
+      appendId: "33333333-3333-4333-8333-333333333333",
+      operationId: "disposable-control-store-upgrade-initial",
+      namespace: RELEASE_STATE_UPGRADE_NAMESPACE,
+      eventType: "state-initialized",
+    });
+    const upgradeInitialAppend = await appendReleaseStateEvent(
+      executor,
+      upgradeInitialEvent,
+    );
+    const upgradeInitialHash = sha256Bytes(
+      canonicalJsonBytes(upgradeInitialEvent),
+    );
+    if (
+      upgradeInitialAppend.rowCount !== 1 ||
+      Number(upgradeInitialAppend.rows[0].sequence) !== 1 ||
+      upgradeInitialAppend.rows[0].event_hash !== upgradeInitialHash ||
+      upgradeInitialAppend.rows[0].replayed !== false
+    ) {
+      throw new Error("Release State pre-upgrade append differs");
+    }
+    const upgradePhaseExitEvent = createPhaseExitReleaseStateEvent({
+      appendId: "44444444-4444-4444-8444-444444444444",
+      marker: "existing-namespace-upgrade",
+      namespace: RELEASE_STATE_UPGRADE_NAMESPACE,
+      operationId: "disposable-control-store-upgrade-phase-exit",
+      previousEventHash: upgradeInitialHash,
+      sequence: 2,
+    });
+    await assert.rejects(
+      appendReleaseStateEvent(executor, upgradePhaseExitEvent, {
+        expectedSequence: 1,
+        expectedHash: upgradeInitialHash,
+      }),
+      (error) =>
+        isPostgresError(error, "22023", /event envelope does not match/u),
+    );
+
+    await administrator.query(phaseExitMigration);
+    const upgradedPhaseExitAppend = await appendReleaseStateEvent(
+      executor,
+      upgradePhaseExitEvent,
+      { expectedSequence: 1, expectedHash: upgradeInitialHash },
+    );
+    const upgradePhaseExitHash = sha256Bytes(
+      canonicalJsonBytes(upgradePhaseExitEvent),
+    );
+    if (
+      upgradedPhaseExitAppend.rowCount !== 1 ||
+      Number(upgradedPhaseExitAppend.rows[0].sequence) !== 2 ||
+      upgradedPhaseExitAppend.rows[0].event_hash !== upgradePhaseExitHash ||
+      upgradedPhaseExitAppend.rows[0].replayed !== false
+    ) {
+      throw new Error("Release State phase exit upgrade append differs");
+    }
+
+    await administrator.query(phaseExitMigration);
+    const upgradedPhaseExitReplay = await appendReleaseStateEvent(
+      executor,
+      upgradePhaseExitEvent,
+      { expectedSequence: 1, expectedHash: upgradeInitialHash },
+    );
+    if (
+      upgradedPhaseExitReplay.rowCount !== 1 ||
+      upgradedPhaseExitReplay.rows[0].event_hash !== upgradePhaseExitHash ||
+      upgradedPhaseExitReplay.rows[0].replayed !== true
+    ) {
+      throw new Error("Release State phase exit upgrade replay differs");
+    }
+    const upgradedHistory = await administrator.query({
+      text: `select sequence, event_hash
+        from foundation_release.release_state_events
+        where namespace = $1
+        order by sequence`,
+      values: [RELEASE_STATE_UPGRADE_NAMESPACE],
+    });
+    if (
+      upgradedHistory.rowCount !== 2 ||
+      Number(upgradedHistory.rows[0].sequence) !== 1 ||
+      upgradedHistory.rows[0].event_hash !== upgradeInitialHash ||
+      Number(upgradedHistory.rows[1].sequence) !== 2 ||
+      upgradedHistory.rows[1].event_hash !== upgradePhaseExitHash
+    ) {
+      throw new Error("Release State phase exit upgrade changed prior history");
+    }
+
+    const unknownEvent = createReleaseStateEvent({
+      appendId: "66666666-6666-4666-8666-666666666666",
+      operationId: "disposable-control-store-unknown-event",
+      eventType: "caller-defined-event",
+    });
+    await assert.rejects(
+      appendReleaseStateEvent(executor, unknownEvent),
+      (error) =>
+        isPostgresError(error, "22023", /event envelope does not match/u),
+    );
+
     const event = createReleaseStateEvent({
       appendId: "11111111-1111-4111-8111-111111111111",
       operationId: "disposable-control-store-append",
@@ -394,6 +564,29 @@ const verifyReleaseStateControlStore = async ({ Client, administrator }) => {
       replayedAppend.rows[0].replayed !== true
     ) {
       throw new Error("Release State idempotent append receipt differs");
+    }
+
+    const freshPhaseExitEvent = createPhaseExitReleaseStateEvent({
+      appendId: "55555555-5555-4555-8555-555555555555",
+      marker: "fresh-ordered-migrations",
+      namespace: RELEASE_STATE_NAMESPACE,
+      operationId: "disposable-control-store-fresh-phase-exit",
+      previousEventHash: firstAppend.rows[0].event_hash,
+      sequence: 2,
+    });
+    const freshPhaseExitAppend = await appendReleaseStateEvent(
+      executor,
+      freshPhaseExitEvent,
+      { expectedSequence: 1, expectedHash: firstAppend.rows[0].event_hash },
+    );
+    if (
+      freshPhaseExitAppend.rowCount !== 1 ||
+      Number(freshPhaseExitAppend.rows[0].sequence) !== 2 ||
+      freshPhaseExitAppend.rows[0].event_hash !==
+        sha256Bytes(canonicalJsonBytes(freshPhaseExitEvent)) ||
+      freshPhaseExitAppend.rows[0].replayed !== false
+    ) {
+      throw new Error("Release State fresh phase exit append differs");
     }
 
     const conflictingEvent = createReleaseStateEvent({
@@ -745,12 +938,13 @@ try {
         and p.proname in (
           'read_persistence_release_a_metrics',
           'read_csp_violation_aggregates',
+          'read_csp_deployment_violation_aggregates',
           'retain_persistence_release_a_metrics',
           'retain_csp_violation_reports'
         )
       order by p.proname
     `);
-    if (requiredFunctions.rowCount !== 4) {
+    if (requiredFunctions.rowCount !== 5) {
       throw new Error("Disposable DB is missing a bounded operator function");
     }
 
@@ -962,6 +1156,7 @@ try {
              and p.proname in (
                'read_persistence_release_a_metrics',
                'read_csp_violation_aggregates',
+               'read_csp_deployment_violation_aggregates',
                'retain_persistence_release_a_metrics',
                'retain_csp_violation_reports'
              )
@@ -1120,6 +1315,15 @@ try {
           integer
         ) to ${cspOperatorRole}`,
       );
+      await client.query(
+        `grant execute on function public.read_csp_deployment_violation_aggregates(
+          timestamptz,
+          timestamptz,
+          text,
+          text,
+          integer
+        ) to ${cspOperatorRole}`,
+      );
       await client.query("begin");
       try {
         await client.query(`set local role ${cspOperatorRole}`);
@@ -1162,6 +1366,24 @@ try {
         ) {
           throw new Error("Disposable DB CSP operator aggregate differs");
         }
+        const deploymentAggregate = await client.query({
+          text: `select *
+            from public.read_csp_deployment_violation_aggregates(
+              clock_timestamp() - interval '1 minute',
+              clock_timestamp() + interval '1 minute',
+              $1,
+              $2,
+              10
+            )`,
+          values: [cspSourceSha, "deployment_disposable_csp_1"],
+        });
+        if (
+          deploymentAggregate.rowCount !== 1 ||
+          deploymentAggregate.rows[0].effective_directive !== "worker-src" ||
+          Number(deploymentAggregate.rows[0].violation_count) !== 1
+        ) {
+          throw new Error("Disposable DB deployment CSP aggregate differs");
+        }
       } finally {
         await client.query("rollback");
       }
@@ -1170,6 +1392,15 @@ try {
         `revoke execute on function public.read_csp_violation_aggregates(
           timestamptz,
           timestamptz,
+          integer
+        ) from ${cspOperatorRole}`,
+      );
+      await client.query(
+        `revoke execute on function public.read_csp_deployment_violation_aggregates(
+          timestamptz,
+          timestamptz,
+          text,
+          text,
           integer
         ) from ${cspOperatorRole}`,
       );

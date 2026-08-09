@@ -44,6 +44,11 @@ import {
 import { verifyDeterministicZip } from "./deterministic-zip.mjs";
 import { providerConfigurationHash } from "./provider/providerConfiguration.mjs";
 import { readStaticApplicationStylesheetContract } from "./lib/application-stylesheet-contract.mjs";
+import {
+  ARTIFACT_DRILL_TARGET_GATE,
+  readArtifactDrillBuildAuthority,
+} from "./lib/artifact-drill-build-authority.mjs";
+import { ARTIFACT_DRILL_BUILD_PURPOSE } from "./lib/release-build-input.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -146,6 +151,10 @@ const extractVerifiedZip = async ({ archivePath, destination }) => {
 
 const assertContractSchemas = async (root) => {
   const expected = new Map([
+    [
+      "contracts/artifact-drill-build-authority-v1.schema.json",
+      "urn:event-shopping-planner:artifact-drill-build-authority:v1",
+    ],
     [
       "contracts/artifact-manifest-v1.schema.json",
       "urn:event-shopping-planner:artifact-manifest:v1",
@@ -501,10 +510,12 @@ export const verifyReleasePackage = async ({
   providerObservation = null,
   dbContract,
   cspPolicy,
+  foundationBaseline = null,
   requireProductionBindings = false,
   root = repositoryRoot,
   environment = process.env,
   expectedBuildPurpose = null,
+  artifactDrillBootstrapVerification = null,
 }) => {
   const resolvedPackageRoot = path.resolve(packageRoot);
   await assertContractSchemas(root);
@@ -513,6 +524,9 @@ export const verifyReleasePackage = async ({
     bytes: indexBytes,
     resolvedBuildPurpose,
   } = await readPackageIndex(resolvedPackageRoot, expectedBuildPurpose);
+  if (requireProductionBindings && resolvedBuildPurpose !== "production") {
+    throw new Error("Production verification rejects a nonpromotable package");
+  }
   assertExpectedContext({
     index,
     releasePolicy,
@@ -522,10 +536,38 @@ export const verifyReleasePackage = async ({
     dbContract,
     requireProductionBindings,
   });
+  let artifactDrillAuthority = null;
+  if (resolvedBuildPurpose === ARTIFACT_DRILL_BUILD_PURPOSE) {
+    if (
+      providerObservation === null ||
+      foundationBaseline === null ||
+      index.targetGate !== ARTIFACT_DRILL_TARGET_GATE ||
+      index.promotable !== false
+    ) {
+      throw new Error("Artifact drill verification context is incomplete");
+    }
+    artifactDrillAuthority = await readArtifactDrillBuildAuthority({
+      packageRoot: resolvedPackageRoot,
+      reference: index.buildAuthority,
+      expected: {
+        sourceSha: index.sourceSha,
+        releasePolicy,
+        toolchainPolicy,
+        providerPolicy,
+        providerObservation,
+        dbContract,
+        cspPolicy,
+        foundationBaseline,
+        bootstrapVerification: artifactDrillBootstrapVerification,
+      },
+    });
+  }
   const scratchRoot = await mkdtemp(
     path.join(os.tmpdir(), "foundation-artifact-verify-"),
   );
   try {
+    let roles = null;
+    let bootstrapVerification = null;
     if (index.packageKind === "source-hardened-pair") {
       const standard = await verifyArtifactReference({
         packageRoot: resolvedPackageRoot,
@@ -573,6 +615,20 @@ export const verifyReleasePackage = async ({
           "Source-hardened role identity bytes must exist and differ",
         );
       }
+      roles = [
+        [index.artifacts[0], standard],
+        [index.artifacts[1], containment],
+      ].map(([reference, verified]) => ({
+        role: reference.releaseRole,
+        variantId: reference.variantId,
+        manifestReference: structuredClone(reference.manifest),
+        archiveReference: structuredClone(reference.archive),
+        manifestSha256: reference.manifest.sha256,
+        archiveSha256: reference.archive.sha256,
+        capabilitySha256: sha256Bytes(verified.capability.bytes),
+        dbFingerprint: verified.manifest.requiredDbCompatibility.fingerprint,
+        policySha256: verified.manifest.releasePolicyHash,
+      }));
     } else {
       const bootstrapObject = await resolveContentAddressedObject({
         packageRoot: resolvedPackageRoot,
@@ -628,15 +684,41 @@ export const verifyReleasePackage = async ({
       if (artifact.publicIdentity !== null) {
         throw new Error("Legacy bootstrap cannot contain ReleaseIdentity");
       }
+      bootstrapVerification = {
+        sourceSha: index.sourceSha,
+        packageIndexSha256: sha256Bytes(indexBytes),
+        artifactManifestSha256: index.artifact.manifest.sha256,
+        artifactArchiveSha256: index.artifact.archive.sha256,
+        rawDistManifestSha256: index.rawDistManifest.sha256,
+        rawDistTreeSha256: rawDistManifest.treeSha256,
+        rawDistFileCount: rawDistManifest.files.length,
+        preserved: true,
+        releaseIdentityAbsent: true,
+      };
     }
     return {
       index,
       packageIndexSha256: sha256Bytes(indexBytes),
       productionEligible: requireProductionBindings,
+      artifactDrillAuthority,
+      roles,
+      bootstrapVerification,
     };
   } finally {
     await rm(scratchRoot, { recursive: true, force: true });
   }
+};
+
+export const verifyArtifactDrillBootstrapPackage = async (options) => {
+  const result = await verifyReleasePackage({
+    ...options,
+    expectedBuildPurpose: "legacy-bootstrap",
+    requireProductionBindings: false,
+  });
+  if (result.bootstrapVerification === null) {
+    throw new Error("Artifact drill bootstrap package verification is absent");
+  }
+  return result;
 };
 
 const option = (name) => {
@@ -661,6 +743,7 @@ const runCli = async () => {
     providerPolicy,
     dbContract,
     cspPolicy,
+    foundationBaseline,
     providerObservation,
   ] = await Promise.all([
     readJsonStrict(
@@ -674,6 +757,9 @@ const runCli = async () => {
       path.join(repositoryRoot, "config", "db-compatibility-contract.json"),
     ),
     readJsonStrict(path.join(repositoryRoot, "config", "csp-policy.json")),
+    readJsonStrict(
+      path.join(repositoryRoot, "config", "foundation-baseline.json"),
+    ),
     providerObservationPath
       ? readJsonStrict(path.resolve(providerObservationPath))
       : Promise.resolve(null),
@@ -686,6 +772,7 @@ const runCli = async () => {
     providerObservation,
     dbContract,
     cspPolicy,
+    foundationBaseline,
     requireProductionBindings,
   });
   const mode = result.productionEligible

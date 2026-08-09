@@ -25,5 +25,12 @@
       "cutoff": "2026-07-02T02:00:00.000Z"
     }
   },
-  "backupRetentionOwner": null
+  "backupRetentionOwner": null,
+  "collectorIdentity": {
+    "repository": "example/event-shopping-planner",
+    "workflowPath": ".github/workflows/metrics-retention.yml",
+    "sourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "runId": "100",
+    "runAttempt": "1"
+  }
 }

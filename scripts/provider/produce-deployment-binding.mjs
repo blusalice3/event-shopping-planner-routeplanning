@@ -1,19 +1,16 @@
 #!/usr/bin/env node
 
 import { randomBytes } from "node:crypto";
-import {
-  link,
-  lstat,
-  mkdir,
-  open,
-  readFile,
-  realpath,
-  unlink,
-} from "node:fs/promises";
+import { link, lstat, mkdir, open, realpath, unlink } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readJsonStrict } from "../lib/canonical-json.mjs";
+import {
+  describeExactFile,
+  readExactRegularFile,
+} from "../lib/exact-file-read.mjs";
+import { exactFileIdentity } from "../lib/exact-file-identity.mjs";
 import { createPostgresReleaseStateStore } from "../release-state/postgresStore.mjs";
 import { NAMESPACE_PATTERN } from "../release-state/releaseWorkflowValidation.mjs";
 import { produceDeploymentBinding } from "./deploymentBindingProducer.mjs";
@@ -87,7 +84,7 @@ const requireEnvironment = (environment, name) => {
 
 const assertUnaliasedPath = async (filePath, expectedType, label) => {
   const resolved = path.resolve(filePath);
-  const metadata = await lstat(resolved);
+  const metadata = await lstat(resolved, { bigint: true });
   if (
     metadata.isSymbolicLink() ||
     (expectedType === "file" && !metadata.isFile()) ||
@@ -101,21 +98,17 @@ const assertUnaliasedPath = async (filePath, expectedType, label) => {
   }
   return {
     path: resolved,
-    identity: `${metadata.dev}:${metadata.ino}`,
-    size: metadata.size,
+    ...describeExactFile(metadata),
   };
 };
 
-const readBoundedInput = async (description, readFileImpl) => {
-  if (description.size < 1 || description.size > MAX_INPUT_BYTES) {
-    throw new Error("Deployment binding producer input is empty or oversized");
-  }
-  const bytes = await readFileImpl(description.path);
-  if (!Buffer.isBuffer(bytes) || bytes.length !== description.size) {
-    throw new Error("Deployment binding producer input changed while read");
-  }
-  return bytes;
-};
+const readBoundedInput = (description, openFile) =>
+  readExactRegularFile({
+    description,
+    maximumBytes: MAX_INPUT_BYTES,
+    label: "Deployment binding producer input",
+    openFile,
+  });
 
 export const resolveDeploymentBindingProducerPaths = async (values, cwd) => {
   const packageRoot = await assertUnaliasedPath(
@@ -185,7 +178,29 @@ const createBoundStore = async ({
   });
 };
 
-export const writeDeploymentBindingCreateOnly = async (outputPath, bytes) => {
+const assertCommittedOutputPath = async ({
+  resolved,
+  description,
+  readOutputMetadata,
+}) => {
+  const metadata = await readOutputMetadata(resolved, { bigint: true });
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new Error("Deployment binding output path changed after commit");
+  }
+  const current = describeExactFile(metadata);
+  if (
+    current.identity !== description.identity ||
+    current.size !== description.size
+  ) {
+    throw new Error("Deployment binding output path changed after commit");
+  }
+};
+
+export const writeDeploymentBindingCreateOnly = async (
+  outputPath,
+  bytes,
+  { readCommittedFile = readExactRegularFile, readOutputMetadata = lstat } = {},
+) => {
   const resolved = path.resolve(outputPath);
   await mkdir(path.dirname(resolved), { recursive: true });
   const parent = await assertUnaliasedPath(
@@ -200,17 +215,92 @@ export const writeDeploymentBindingCreateOnly = async (outputPath, bytes) => {
     parent.path,
     `.${path.basename(resolved)}.${randomBytes(12).toString("hex")}.tmp`,
   );
+  let temporaryHandle;
+  let temporaryDescription;
+  let temporaryRetired = false;
+  let linked = false;
   try {
-    const handle = await open(temporary, "wx", 0o600);
-    try {
-      await handle.writeFile(bytes);
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
+    temporaryHandle = await open(temporary, "wx", 0o600);
+    await temporaryHandle.writeFile(bytes);
+    await temporaryHandle.sync();
+    temporaryDescription = {
+      path: temporary,
+      ...describeExactFile(await temporaryHandle.stat({ bigint: true })),
+    };
     await link(temporary, resolved);
+    linked = true;
+    temporaryDescription = {
+      path: temporary,
+      ...describeExactFile(await temporaryHandle.stat({ bigint: true })),
+    };
+    await assertCommittedOutputPath({
+      resolved,
+      description: temporaryDescription,
+      readOutputMetadata,
+    });
+    await temporaryHandle.close();
+    temporaryHandle = undefined;
+    await unlink(temporary);
+    temporaryRetired = true;
+    await assertCommittedOutputPath({
+      resolved,
+      description: temporaryDescription,
+      readOutputMetadata,
+    });
+    const finalizedBytes = await readCommittedFile({
+      description: { ...temporaryDescription, path: resolved },
+      maximumBytes: bytes.length,
+      label: "Finalized deployment binding output",
+      requireDescriptionTimestamps: false,
+    });
+    if (!finalizedBytes.equals(bytes)) {
+      throw new Error("Finalized deployment binding output bytes differ");
+    }
+    await assertCommittedOutputPath({
+      resolved,
+      description: temporaryDescription,
+      readOutputMetadata,
+    });
+    const committedBytes = await readCommittedFile({
+      description: { ...temporaryDescription, path: resolved },
+      maximumBytes: bytes.length,
+      label: "Deployment binding output",
+      requireDescriptionTimestamps: false,
+    });
+    if (!committedBytes.equals(bytes)) {
+      throw new Error("Deployment binding output committed bytes differ");
+    }
+    await assertCommittedOutputPath({
+      resolved,
+      description: temporaryDescription,
+      readOutputMetadata,
+    });
+    const settledBytes = await readCommittedFile({
+      description: { ...temporaryDescription, path: resolved },
+      maximumBytes: bytes.length,
+      label: "Settled deployment binding output",
+      requireDescriptionTimestamps: false,
+    });
+    if (!settledBytes.equals(bytes)) {
+      throw new Error("Settled deployment binding output bytes differ");
+    }
+  } catch (error) {
+    if (linked && temporaryDescription !== undefined) {
+      const current = await lstat(resolved, { bigint: true }).catch(() => null);
+      if (
+        current !== null &&
+        !current.isSymbolicLink() &&
+        exactFileIdentity(current) === temporaryDescription.identity
+      ) {
+        await unlink(resolved);
+      }
+    }
+    throw error;
   } finally {
-    await unlink(temporary).catch(() => {});
+    await temporaryHandle?.close();
+    if (!temporaryRetired) {
+      await unlink(temporary).catch(() => {});
+    }
   }
 };
 
@@ -223,7 +313,7 @@ export const runDeploymentBindingProducerCli = async (
   } = {},
   {
     loadJson = readJsonStrict,
-    readFileImpl = readFile,
+    openFile = open,
     createStore = createPostgresReleaseStateStore,
     producer = produceDeploymentBinding,
     writeOutput = writeDeploymentBindingCreateOnly,
@@ -249,8 +339,8 @@ export const runDeploymentBindingProducerCli = async (
     cspPolicy,
     storePolicy,
   ] = await Promise.all([
-    readBoundedInput(paths.receipt, readFileImpl),
-    readBoundedInput(paths.observation, readFileImpl),
+    readBoundedInput(paths.receipt, openFile),
+    readBoundedInput(paths.observation, openFile),
     loadJson(path.join(root, "config", "release-variants.json")),
     loadJson(path.join(root, "config", "toolchain-versions.json")),
     loadJson(path.join(root, "config", "provider-policy.json")),

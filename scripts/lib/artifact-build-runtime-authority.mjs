@@ -47,6 +47,9 @@ export const assertArtifactBuildRuntimeAuthority = ({
       "Artifact build source or target gate differs from requirements",
     );
   }
+  if (Object.hasOwn(releasePolicy, "blockerCodes")) {
+    throw new Error("Release policy uses a noncanonical blocker authority");
+  }
   const requirementsSha256 = sha256Bytes(canonicalJsonBytes(requirements));
   assertReference(
     requirementsReference,
@@ -97,8 +100,8 @@ export const assertArtifactBuildRuntimeAuthority = ({
       requirements.buildPurpose !== "production" ||
       requirements.promotable !== true ||
       releasePolicy.activationStatus !== "active" ||
-      !Array.isArray(releasePolicy.blockerCodes) ||
-      releasePolicy.blockerCodes.length !== 0 ||
+      !Array.isArray(releasePolicy.activationBlockers) ||
+      releasePolicy.activationBlockers.length !== 0 ||
       Object.hasOwn(requirements, "proposedReleasePolicy") ||
       Object.hasOwn(requirements, "activeReleasePolicy")
     ) {

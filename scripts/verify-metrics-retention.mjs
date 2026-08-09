@@ -1,8 +1,8 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { readJsonStrict } from "./lib/canonical-json.mjs";
+import { canonicalJsonBytes, readJsonStrict } from "./lib/canonical-json.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const policy = await readJsonStrict(
@@ -66,9 +66,139 @@ for (const fragment of [
   }
 }
 
-const evidenceIndex = process.argv.indexOf("--evidence");
+const parseArguments = (argv) => {
+  const options = {
+    evidencePath: null,
+    live: false,
+    outputPath: null,
+    requireProductionReady: false,
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--live" && !options.live) {
+      options.live = true;
+    } else if (
+      argument === "--require-production-ready" &&
+      !options.requireProductionReady
+    ) {
+      options.requireProductionReady = true;
+    } else if (
+      argument === "--evidence" &&
+      options.evidencePath === null &&
+      typeof argv[index + 1] === "string"
+    ) {
+      options.evidencePath = path.resolve(argv[index + 1]);
+      index += 1;
+    } else if (
+      argument === "--output" &&
+      options.outputPath === null &&
+      typeof argv[index + 1] === "string"
+    ) {
+      options.outputPath = path.resolve(argv[index + 1]);
+      index += 1;
+    } else {
+      throw new Error(`Invalid metrics retention argument: ${argument}`);
+    }
+  }
+  if (
+    (options.outputPath !== null && !options.live) ||
+    (options.evidencePath !== null && options.live)
+  ) {
+    throw new Error("Metrics retention argument combination is invalid");
+  }
+  return options;
+};
+
+const options = parseArguments(process.argv.slice(2));
+
+const canonicalTimestamp = (value) => {
+  const milliseconds = typeof value === "string" ? Date.parse(value) : NaN;
+  return Number.isFinite(milliseconds) &&
+    new Date(milliseconds).toISOString() === value
+    ? milliseconds
+    : NaN;
+};
+
+const hasExactKeys = (value, expected) =>
+  value !== null &&
+  typeof value === "object" &&
+  !Array.isArray(value) &&
+  Object.keys(value).length === expected.length &&
+  expected.every((key) => Object.hasOwn(value, key));
+
+const assertCollectorIdentity = (identity) => {
+  if (
+    !hasExactKeys(identity, [
+      "repository",
+      "workflowPath",
+      "sourceSha",
+      "runId",
+      "runAttempt",
+    ]) ||
+    !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(identity.repository ?? "") ||
+    identity.workflowPath !== ".github/workflows/metrics-retention.yml" ||
+    !/^[0-9a-f]{40}$/u.test(identity.sourceSha ?? "") ||
+    !/^[1-9][0-9]{0,19}$/u.test(identity.runId ?? "") ||
+    !/^[1-9][0-9]{0,19}$/u.test(identity.runAttempt ?? "")
+  ) {
+    throw new Error("Retention collector identity is invalid");
+  }
+};
+
+const readProtectedCollectorIdentity = (
+  environment,
+  { requireWorkflowDispatch },
+) => {
+  const workflowReference = environment.GITHUB_WORKFLOW_REF ?? "";
+  const repository = environment.GITHUB_REPOSITORY ?? "";
+  const workflowPrefix = `${repository}/.github/workflows/metrics-retention.yml@`;
+  const identity = {
+    repository,
+    workflowPath: ".github/workflows/metrics-retention.yml",
+    sourceSha: environment.GITHUB_SHA ?? "",
+    runId: environment.GITHUB_RUN_ID ?? "",
+    runAttempt: environment.GITHUB_RUN_ATTEMPT ?? "",
+  };
+  assertCollectorIdentity(identity);
+  if (
+    environment.GITHUB_ACTIONS !== "true" ||
+    !["schedule", "workflow_dispatch"].includes(
+      environment.GITHUB_EVENT_NAME,
+    ) ||
+    (requireWorkflowDispatch &&
+      environment.GITHUB_EVENT_NAME !== "workflow_dispatch") ||
+    environment.GITHUB_REF !== "refs/heads/main" ||
+    environment.GITHUB_REF_PROTECTED !== "true" ||
+    !workflowReference.startsWith(workflowPrefix)
+  ) {
+    throw new Error(
+      "Retention collector must run as the protected main workflow dispatch",
+    );
+  }
+  return identity;
+};
+
 const validateEvidence = (evidence) => {
-  const observedAt = new Date(evidence.observedAt).getTime();
+  if (
+    !hasExactKeys(evidence, [
+      "schemaVersion",
+      "observedAt",
+      "lastSuccessByTarget",
+      "cronSchedule",
+      "cronActive",
+      "batchSize",
+      "maximumBatchesPerRun",
+      "lockTimeoutMilliseconds",
+      "statementTimeoutMilliseconds",
+      "dryRunByTarget",
+      "backupRetentionOwner",
+      "collectorIdentity",
+    ])
+  ) {
+    throw new Error("Retention evidence schema is not closed");
+  }
+  assertCollectorIdentity(evidence.collectorIdentity);
+  const observedAt = canonicalTimestamp(evidence.observedAt);
   if (!Number.isFinite(observedAt)) {
     throw new Error("Retention observation timestamp is invalid");
   }
@@ -82,7 +212,7 @@ const validateEvidence = (evidence) => {
     throw new Error("Retention evidence target set is incomplete");
   }
   for (const target of requiredTargets) {
-    const lastSuccess = new Date(lastSuccessByTarget[target]).getTime();
+    const lastSuccess = canonicalTimestamp(lastSuccessByTarget[target]);
     const dryRun = dryRunByTarget[target];
     if (
       !Number.isFinite(lastSuccess) ||
@@ -98,7 +228,7 @@ const validateEvidence = (evidence) => {
       !Number.isSafeInteger(dryRun.batchCount) ||
       dryRun.batchCount < 0 ||
       dryRun.batchCount > policy.maximumBatchesPerRun ||
-      !Number.isFinite(new Date(dryRun.cutoff).getTime())
+      !Number.isFinite(canonicalTimestamp(dryRun.cutoff))
     ) {
       throw new Error(`Retention dry-run evidence is invalid: ${target}`);
     }
@@ -118,14 +248,12 @@ const validateEvidence = (evidence) => {
   }
 };
 
-if (evidenceIndex !== -1) {
-  const evidencePath = process.argv[evidenceIndex + 1];
-  if (!evidencePath) throw new Error("--evidence requires a file");
-  const evidence = await readJsonStrict(path.resolve(evidencePath));
+if (options.evidencePath !== null) {
+  const evidence = await readJsonStrict(options.evidencePath);
   validateEvidence(evidence);
 }
 
-if (process.argv.includes("--live")) {
+if (options.live) {
   if (
     policy.activationStatus !== "configured" ||
     typeof policy.backupRetentionOwner !== "string" ||
@@ -183,7 +311,10 @@ if (process.argv.includes("--live")) {
       throw new Error("Remote retention cron or dry-run contract is invalid");
     }
     const successByTarget = Object.fromEntries(
-      successResult.rows.map((row) => [row.target, row.last_success_at]),
+      successResult.rows.map((row) => [
+        row.target,
+        new Date(row.last_success_at).toISOString(),
+      ]),
     );
     const toDryRunEvidence = (row) => ({
       succeeded: true,
@@ -191,7 +322,7 @@ if (process.argv.includes("--live")) {
       batchCount: Number(row.batch_count),
       cutoff: new Date(row.cutoff).toISOString(),
     });
-    validateEvidence({
+    const evidence = {
       schemaVersion: 1,
       observedAt: new Date().toISOString(),
       lastSuccessByTarget: successByTarget,
@@ -208,14 +339,26 @@ if (process.argv.includes("--live")) {
         "csp-reports": toDryRunEvidence(cspDryRun.rows[0] ?? {}),
       },
       backupRetentionOwner: policy.backupRetentionOwner,
-    });
+      collectorIdentity: readProtectedCollectorIdentity(process.env, {
+        requireWorkflowDispatch: options.outputPath !== null,
+      }),
+    };
+    validateEvidence(evidence);
+    if (options.outputPath !== null) {
+      const bytes = canonicalJsonBytes(evidence);
+      await writeFile(options.outputPath, bytes, { flag: "wx" });
+      const readback = await readFile(options.outputPath);
+      if (!readback.equals(bytes)) {
+        throw new Error("Metrics retention evidence readback differs");
+      }
+    }
   } finally {
     await client.end();
   }
 }
 
 if (
-  process.argv.includes("--require-production-ready") &&
+  options.requireProductionReady &&
   policy.activationStatus !== "configured"
 ) {
   throw new Error(

@@ -40,6 +40,7 @@ import { assertSafeRelativePath } from "../lib/file-manifest.mjs";
 import { verifyReleasePackage } from "../verify-release-artifact.mjs";
 import { verifyDeterministicZip } from "../deterministic-zip.mjs";
 import { providerConfigurationHash } from "./providerConfiguration.mjs";
+import { buildClosedVercelCommandEnvironment } from "./vercel-command-environment.mjs";
 
 export const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -905,7 +906,7 @@ export const deployVerifiedPrebuilt = async ({
       executable: process.execPath,
       arguments: arguments_,
       cwd: deployRoot,
-      environment,
+      environment: buildClosedVercelCommandEnvironment(environment),
     });
     if (result?.error !== undefined) throw result.error;
     assertNoSecret(result?.stdout ?? "", secrets, "Vercel CLI stdout");

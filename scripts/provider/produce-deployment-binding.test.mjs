@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import {
   link,
+  lstat,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   rm,
   writeFile,
@@ -11,6 +13,12 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { canonicalJsonBytes, sha256Bytes } from "../lib/canonical-json.mjs";
+import {
+  describeExactFile,
+  readExactRegularFile,
+  sameExactFileDescription,
+} from "../lib/exact-file-read.mjs";
+import { exactFileIdentity } from "../lib/exact-file-identity.mjs";
 import {
   parseDeploymentBindingProducerArguments,
   resolveDeploymentBindingProducerPaths,
@@ -43,6 +51,73 @@ const baseArgv = [
 
 const createTemporaryDirectory = () =>
   mkdtemp(path.join(os.tmpdir(), "deployment-binding-cli-"));
+
+test("keeps adjacent unsafe Windows file identities distinct", () => {
+  const first = {
+    dev: 2321462046n,
+    ino: 9288674232814823n,
+  };
+  const second = {
+    dev: 2321462046n,
+    ino: 9288674232814824n,
+  };
+
+  assert.equal(Number(first.ino), Number(second.ino));
+  assert.notEqual(exactFileIdentity(first), exactFileIdentity(second));
+  assert.throws(
+    () => exactFileIdentity({ dev: Number(first.dev), ino: Number(first.ino) }),
+    /must use bigint/,
+  );
+});
+
+test("rejects descriptor swaps and nanosecond snapshot drift", async () => {
+  const temporaryRoot = await createTemporaryDirectory();
+  try {
+    const originalPath = path.join(temporaryRoot, "original.json");
+    const replacementPath = path.join(temporaryRoot, "replacement.json");
+    await Promise.all([
+      writeFile(originalPath, Buffer.from("original-bytes")),
+      writeFile(replacementPath, Buffer.from("replaced-bytes")),
+    ]);
+    const original = {
+      path: originalPath,
+      ...describeExactFile(await lstat(originalPath, { bigint: true })),
+    };
+    await assert.rejects(
+      readExactRegularFile({
+        description: original,
+        maximumBytes: 1024,
+        label: "Descriptor-bound input",
+        openFile: () => open(replacementPath, "r"),
+      }),
+      /changed while read/,
+    );
+
+    const drifted = { ...original, mtimeNs: original.mtimeNs + 1n };
+    assert.equal(sameExactFileDescription(original, drifted), false);
+    await assert.rejects(
+      readExactRegularFile({
+        description: drifted,
+        maximumBytes: 1024,
+        label: "Timestamp-bound input",
+      }),
+      /changed while read/,
+    );
+    assert.equal(
+      (
+        await readExactRegularFile({
+          description: drifted,
+          maximumBytes: 1024,
+          label: "Identity-bound output",
+          requireDescriptionTimestamps: false,
+        })
+      ).toString("utf8"),
+      "original-bytes",
+    );
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
 
 test("parses only the closed deployment binding flag set", () => {
   assert.deepEqual(parseDeploymentBindingProducerArguments(baseArgv), {
@@ -260,6 +335,68 @@ test("writes a deployment binding exactly once without replacing it", async () =
       (error) => error?.code === "EEXIST",
     );
     assert.ok((await readFile(outputPath)).equals(firstBytes));
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects an output path swap after descriptor verification", async () => {
+  const temporaryRoot = await createTemporaryDirectory();
+  try {
+    const outputPath = path.join(temporaryRoot, "binding.json");
+    const bytes = canonicalJsonBytes({ binding: "descriptor-bound" });
+    let metadataReads = 0;
+    await assert.rejects(
+      writeDeploymentBindingCreateOnly(outputPath, bytes, {
+        readCommittedFile: async () => bytes,
+        readOutputMetadata: async (filePath, options) => {
+          metadataReads += 1;
+          if (metadataReads === 3) {
+            return {
+              isFile: () => false,
+              isSymbolicLink: () => true,
+            };
+          }
+          return lstat(filePath, options);
+        },
+      }),
+      /output path changed after commit/,
+    );
+    assert.equal(metadataReads, 3);
+    await assert.rejects(
+      lstat(outputPath),
+      (error) => error?.code === "ENOENT",
+    );
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects same-inode bytes changed by the final path metadata check", async () => {
+  const temporaryRoot = await createTemporaryDirectory();
+  try {
+    const outputPath = path.join(temporaryRoot, "binding.json");
+    const bytes = canonicalJsonBytes({ binding: "expected-value" });
+    const replacement = canonicalJsonBytes({ binding: "replaced-value" });
+    assert.equal(replacement.length, bytes.length);
+    let metadataReads = 0;
+    await assert.rejects(
+      writeDeploymentBindingCreateOnly(outputPath, bytes, {
+        readOutputMetadata: async (filePath, options) => {
+          metadataReads += 1;
+          if (metadataReads === 4) {
+            await writeFile(filePath, replacement);
+          }
+          return lstat(filePath, options);
+        },
+      }),
+      /Settled deployment binding output bytes differ/,
+    );
+    assert.equal(metadataReads, 4);
+    await assert.rejects(
+      lstat(outputPath),
+      (error) => error?.code === "ENOENT",
+    );
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }

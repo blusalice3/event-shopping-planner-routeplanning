@@ -47,6 +47,32 @@ const eventRef = (sequence, character) => ({
   sha256: sha(character),
 });
 const policyRef = objectRef("1");
+const phaseExitAttestationSeed = Object.freeze([
+  {
+    gate: "P0-BASELINE",
+    sourceSha,
+    subjectKind: "repository-phase-subject/v1",
+    attestation: objectRef("a"),
+    predecessor: null,
+  },
+  {
+    gate: "P0-TOOLCHAIN",
+    sourceSha,
+    subjectKind: "repository-phase-subject/v1",
+    attestation: objectRef("b"),
+    predecessor: objectRef("a"),
+  },
+  {
+    gate: "P0-ARTIFACT",
+    sourceSha,
+    subjectKind: "disposable-drill-subject/v1",
+    attestation: objectRef("d"),
+    predecessor: objectRef("b"),
+  },
+]);
+const phaseExitSeedEvidence = phaseExitAttestationSeed.map(
+  ({ attestation }) => attestation,
+);
 
 const binding = (role, suffix) => ({
   bindingId: `${role}-${suffix}`,
@@ -117,20 +143,29 @@ const initializeState = () => {
     ...binding("containment", "b"),
     publicIdentityKind: "legacy-bootstrap-v1",
   };
-  const event = appendEvent(null, "state-initialized", "initialize", {
-    acceptedGate: null,
-    legacyObservedProduction: {
-      observationUri: objectRef("c").uri,
-      observationSha256: sha("c"),
+  const event = appendEvent(
+    null,
+    "state-initialized",
+    "initialize",
+    {
+      acceptedGate: null,
+      executorSourceSha: sourceSha,
+      legacyObservedProduction: {
+        observationUri: objectRef("c").uri,
+        observationSha256: sha("c"),
+      },
+      bootstrapRecovery: bootstrap,
+      minimumSafetyFloors: {
+        releaseChannel: "release-a",
+        legacyLocalStorageCleanup: "forced-off",
+      },
+      currentDbCompatibility: dbCompatibility,
+      activeReleasePolicy: policyRef,
+      phaseExitAttestationSeed,
     },
-    bootstrapRecovery: bootstrap,
-    minimumSafetyFloors: {
-      releaseChannel: "release-a",
-      legacyLocalStorageCleanup: "forced-off",
-    },
-    currentDbCompatibility: dbCompatibility,
-    activeReleasePolicy: policyRef,
-  });
+    [],
+    phaseExitSeedEvidence,
+  );
   return reduceReleaseState(null, event);
 };
 
@@ -260,6 +295,45 @@ const appendRecoveryTerminal = (snapshot, eventType, payload, options = {}) =>
     options.approvals ?? snapshot.pendingOperation?.approvalRefs,
     options.evidenceRefs ?? [currentHeadRef(snapshot)],
   );
+
+test("appends the exact next formal phase exit after the pre-initialization seed", () => {
+  const snapshot = initializeState();
+  const operationId = "attest-p0-data";
+  const attestation = objectRef("e");
+  const predecessor = phaseExitAttestationSeed.at(-1).attestation;
+  const payload = {
+    gate: "P0-DATA",
+    sourceSha,
+    subjectKind: "state-initialized-bootstrap-subject/v1",
+    attestation,
+    predecessor,
+  };
+  const event = appendEvent(
+    snapshot,
+    "phase-exit-attested",
+    operationId,
+    payload,
+    [],
+    [attestation, predecessor],
+  );
+
+  const next = reduceReleaseState(snapshot, event);
+  assert.equal(next.phaseExitAttestations.length, 4);
+  assert.deepEqual(next.phaseExitAttestations.at(-1), payload);
+
+  const eventWithApproval = appendEvent(
+    snapshot,
+    "phase-exit-attested",
+    operationId,
+    payload,
+    [approval(operationId, "releaseOwner", "f")],
+    [attestation, predecessor],
+  );
+  assert.throws(
+    () => reduceReleaseState(snapshot, eventWithApproval),
+    /event evidence differs from its chain links/,
+  );
+});
 
 test("builds a source-hardened standard acceptance through the event chain", () => {
   let snapshot = initializeState();
@@ -477,16 +551,26 @@ test("rejects namespace changes while replaying one event chain", () => {
     previousEventHash: firstSnapshot.eventHash,
     payload: {},
   });
-  const initial = appendEvent(null, "state-initialized", "initialize", {
-    legacyObservedProduction: {
-      observationUri: objectRef("c").uri,
-      observationSha256: sha("c"),
+  const initial = appendEvent(
+    null,
+    "state-initialized",
+    "initialize",
+    {
+      acceptedGate: null,
+      executorSourceSha: sourceSha,
+      legacyObservedProduction: {
+        observationUri: objectRef("c").uri,
+        observationSha256: sha("c"),
+      },
+      bootstrapRecovery: firstSnapshot.bootstrapRecovery,
+      minimumSafetyFloors: firstSnapshot.minimumSafetyFloors,
+      currentDbCompatibility: firstSnapshot.currentDbCompatibility,
+      activeReleasePolicy: firstSnapshot.activeReleasePolicy,
+      phaseExitAttestationSeed,
     },
-    bootstrapRecovery: firstSnapshot.bootstrapRecovery,
-    minimumSafetyFloors: firstSnapshot.minimumSafetyFloors,
-    currentDbCompatibility: firstSnapshot.currentDbCompatibility,
-    activeReleasePolicy: firstSnapshot.activeReleasePolicy,
-  });
+    [],
+    phaseExitSeedEvidence,
+  );
   assert.throws(
     () => replayReleaseEvents([initial, second]),
     /namespaces differ/,
@@ -1202,6 +1286,7 @@ const releaseEventSchemaFixtures = () => {
       "state-initialized",
       {
         acceptedGate: null,
+        executorSourceSha: sourceSha,
         legacyObservedProduction: {
           observationUri: objectRef("c").uri,
           observationSha256: sha("c"),
@@ -1210,6 +1295,7 @@ const releaseEventSchemaFixtures = () => {
         minimumSafetyFloors: { releaseChannel: "release-a" },
         currentDbCompatibility: dbCompatibility,
         activeReleasePolicy: policyRef,
+        phaseExitAttestationSeed,
       },
       "initial",
     ],
@@ -1291,6 +1377,17 @@ const releaseEventSchemaFixtures = () => {
       },
       "accepted",
     ],
+    [
+      "phase-exit-attested",
+      {
+        gate: "P0-BASELINE",
+        sourceSha: "a".repeat(40),
+        subjectKind: "repository-phase-subject/v1",
+        attestation: objectRef("a"),
+        predecessor: null,
+      },
+      "phase-exit",
+    ],
     ["operation-aborted", {}, "aborted"],
     [
       "temporary-containment-activated",
@@ -1367,6 +1464,8 @@ const schemaEvent = (eventType, payload, fixtureId = eventType) =>
     operationId: `schema-${fixtureId}`,
     previousEventHash: null,
     payload,
+    evidenceRefs:
+      eventType === "state-initialized" ? phaseExitSeedEvidence : [],
   });
 
 test("accepts a closed payload fixture for every release event type", () => {

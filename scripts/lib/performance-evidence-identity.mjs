@@ -76,6 +76,7 @@ const assertOwnGateProducerReceipt = (value, label) => {
       "artifactArchiveSha256",
       "rawSamplesArtifact",
       "producerRunId",
+      "producerRunAttempt",
       "performanceEvidence",
       "producedAtUtc",
     ]) ||
@@ -87,6 +88,7 @@ const assertOwnGateProducerReceipt = (value, label) => {
     !hasExactKeys(receipt.authoritativeState, ["sequence", "eventHash"]) ||
     !hasExactKeys(receipt.rawSamplesArtifact, [
       "name",
+      "runAttempt",
       "runId",
       "sha256",
       "collectorIdentity",
@@ -138,8 +140,9 @@ const assertOwnGateProducerReceipt = (value, label) => {
     !SHA256_PATTERN.test(receipt.artifactArchiveSha256 ?? "") ||
     receipt.artifactArchiveSha256 !== value.evidence.source?.artifactSha256 ||
     receipt.rawSamplesArtifact.name !==
-      `foundation-performance-raw-samples-${receipt.source.gitCommitSha}` ||
+      `foundation-performance-raw-samples-${receipt.source.gitCommitSha}-${receipt.rawSamplesArtifact.runAttempt}` ||
     !RUN_ID_PATTERN.test(receipt.rawSamplesArtifact.runId ?? "") ||
+    !/^[1-9][0-9]{0,9}$/u.test(receipt.rawSamplesArtifact.runAttempt ?? "") ||
     !SHA256_PATTERN.test(receipt.rawSamplesArtifact.sha256 ?? "") ||
     [
       receipt.rawSamplesArtifact.collectorIdentity,
@@ -151,9 +154,10 @@ const assertOwnGateProducerReceipt = (value, label) => {
           `release-state://${receipt.namespace}/evidence/${reference.sha256}`,
     ) ||
     !RUN_ID_PATTERN.test(receipt.producerRunId ?? "") ||
+    !/^[1-9][0-9]{0,9}$/u.test(receipt.producerRunAttempt ?? "") ||
     BigInt(receipt.rawSamplesArtifact.runId) >= BigInt(receipt.producerRunId) ||
     receipt.performanceEvidence.name !==
-      `foundation-performance-own-gate-evidence-${receipt.source.gitCommitSha}` ||
+      `foundation-performance-own-gate-evidence-${receipt.source.gitCommitSha}-${receipt.producerRunAttempt}` ||
     receipt.performanceEvidence.envelopeSha256 !==
       sha256Bytes(canonicalJsonBytes(envelope)) ||
     receipt.performanceEvidence.evidenceSha256 !== value.evidenceSha256 ||

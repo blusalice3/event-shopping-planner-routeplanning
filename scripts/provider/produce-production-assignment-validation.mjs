@@ -1,19 +1,16 @@
 #!/usr/bin/env node
 
 import { randomBytes } from "node:crypto";
-import {
-  link,
-  lstat,
-  mkdir,
-  open,
-  readFile,
-  realpath,
-  unlink,
-} from "node:fs/promises";
+import { link, lstat, mkdir, open, realpath, unlink } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readJsonStrict } from "../lib/canonical-json.mjs";
+import {
+  describeExactFile,
+  readExactRegularFile,
+} from "../lib/exact-file-read.mjs";
+import { exactFileIdentity } from "../lib/exact-file-identity.mjs";
 import { createPostgresReleaseStateStore } from "../release-state/postgresStore.mjs";
 import { NAMESPACE_PATTERN } from "../release-state/releaseWorkflowValidation.mjs";
 import {
@@ -52,8 +49,6 @@ const comparablePath = (value) => {
   const resolved = path.resolve(value);
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 };
-
-const fileIdentity = (metadata) => `${metadata.dev}:${metadata.ino}`;
 
 export const parseProductionAssignmentValidationArguments = (argv) => {
   if (!Array.isArray(argv) || argv.length < 1) {
@@ -113,7 +108,7 @@ const requireEnvironment = (environment, name) => {
 
 const assertUnaliasedPath = async (filePath, expectedType, label) => {
   const resolved = path.resolve(filePath);
-  const metadata = await lstat(resolved);
+  const metadata = await lstat(resolved, { bigint: true });
   if (
     metadata.isSymbolicLink() ||
     (expectedType === "file" && !metadata.isFile()) ||
@@ -127,10 +122,7 @@ const assertUnaliasedPath = async (filePath, expectedType, label) => {
   }
   return {
     path: resolved,
-    identity: fileIdentity(metadata),
-    size: metadata.size,
-    mtimeMs: metadata.mtimeMs,
-    ctimeMs: metadata.ctimeMs,
+    ...describeExactFile(metadata),
   };
 };
 
@@ -156,7 +148,7 @@ const assertOutputAbsent = async ({
   const resolved = path.resolve(outputPath);
   let metadata;
   try {
-    metadata = await lstat(resolved);
+    metadata = await lstat(resolved, { bigint: true });
   } catch (error) {
     if (error?.code === "ENOENT") return;
     throw error;
@@ -168,38 +160,14 @@ const assertOutputAbsent = async ({
   if (comparablePath(canonical) !== comparablePath(resolved)) {
     throw new Error(`${label} resolves through a path alias`);
   }
-  if (inputIdentities.has(fileIdentity(metadata))) {
+  if (inputIdentities.has(exactFileIdentity(metadata))) {
     throw new Error(`${label} is a hard-linked input alias`);
   }
   throw new Error(`${label} already exists`);
 };
 
-const readBoundedInput = async ({
-  description,
-  maximumBytes,
-  label,
-  readFileImpl,
-}) => {
-  if (description.size < 1 || description.size > maximumBytes) {
-    throw new Error(`${label} is empty or oversized`);
-  }
-  const bytes = await readFileImpl(description.path);
-  if (!Buffer.isBuffer(bytes) && !(bytes instanceof Uint8Array)) {
-    throw new Error(`${label} read did not return bytes`);
-  }
-  const input = Buffer.from(bytes);
-  const after = await assertUnaliasedPath(description.path, "file", label);
-  if (
-    after.identity !== description.identity ||
-    after.size !== description.size ||
-    after.mtimeMs !== description.mtimeMs ||
-    after.ctimeMs !== description.ctimeMs ||
-    input.length !== description.size
-  ) {
-    throw new Error(`${label} changed while read`);
-  }
-  return input;
-};
+const readBoundedInput = ({ description, maximumBytes, label, openFile }) =>
+  readExactRegularFile({ description, maximumBytes, label, openFile });
 
 export const resolveProductionAssignmentValidationPaths = async (
   values,
@@ -352,21 +320,20 @@ const createTemporaryOutput = async ({ outputPath, bytes }) => {
     path.dirname(outputPath),
     `.${path.basename(outputPath)}.${randomBytes(12).toString("hex")}.tmp`,
   );
+  let handle;
   try {
-    const handle = await open(temporaryPath, "wx", 0o600);
-    try {
-      await handle.writeFile(bytes);
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-    const metadata = await lstat(temporaryPath);
+    handle = await open(temporaryPath, "wx", 0o600);
+    await handle.writeFile(bytes);
+    await handle.sync();
+    const description = describeExactFile(await handle.stat({ bigint: true }));
     return {
       path: temporaryPath,
-      identity: fileIdentity(metadata),
-      size: metadata.size,
+      handle,
+      retired: false,
+      ...description,
     };
   } catch (error) {
+    await handle?.close();
     await unlink(temporaryPath).catch((cleanupError) => {
       if (cleanupError?.code !== "ENOENT") throw cleanupError;
     });
@@ -376,12 +343,65 @@ const createTemporaryOutput = async ({ outputPath, bytes }) => {
 
 const removeOwnedOutput = async (outputPath, identity) => {
   try {
-    const metadata = await lstat(outputPath);
-    if (!metadata.isSymbolicLink() && fileIdentity(metadata) === identity) {
+    const metadata = await lstat(outputPath, { bigint: true });
+    if (
+      !metadata.isSymbolicLink() &&
+      exactFileIdentity(metadata) === identity
+    ) {
       await unlink(outputPath);
     }
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
+  }
+};
+
+const retireTemporaryOutput = async (temporary) => {
+  await temporary.handle.close();
+  temporary.handle = null;
+  await unlink(temporary.path);
+  temporary.retired = true;
+};
+
+const assertCommittedOutput = async ({
+  outputPath,
+  description,
+  expectedBytes,
+  label,
+  readCommittedFile,
+  readOutputMetadata,
+}) => {
+  const assertOutputPath = async () => {
+    const metadata = await readOutputMetadata(outputPath, { bigint: true });
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      throw new Error(`${label} path changed after commit`);
+    }
+    const current = describeExactFile(metadata);
+    if (
+      current.identity !== description.identity ||
+      current.size !== description.size
+    ) {
+      throw new Error(`${label} path changed after commit`);
+    }
+  };
+  await assertOutputPath();
+  const actualBytes = await readCommittedFile({
+    description: { ...description, path: outputPath },
+    maximumBytes: expectedBytes.length,
+    label: `${label} committed file`,
+    requireDescriptionTimestamps: false,
+  });
+  if (!actualBytes.equals(expectedBytes)) {
+    throw new Error(`${label} committed bytes differ`);
+  }
+  await assertOutputPath();
+  const settledBytes = await readCommittedFile({
+    description: { ...description, path: outputPath },
+    maximumBytes: expectedBytes.length,
+    label: `${label} settled file`,
+    requireDescriptionTimestamps: false,
+  });
+  if (!settledBytes.equals(expectedBytes)) {
+    throw new Error(`${label} settled bytes differ`);
   }
 };
 
@@ -390,27 +410,36 @@ const assertLinkedOutput = async ({
   temporary,
   expectedBytes,
   label,
+  readCommittedFile = readExactRegularFile,
+  readOutputMetadata = lstat,
 }) => {
-  const metadata = await lstat(outputPath);
+  const linkedDescription = describeExactFile(
+    await temporary.handle.stat({ bigint: true }),
+  );
   if (
-    metadata.isSymbolicLink() ||
-    !metadata.isFile() ||
-    fileIdentity(metadata) !== temporary.identity ||
-    metadata.size !== temporary.size ||
-    metadata.size !== expectedBytes.length
+    linkedDescription.identity !== temporary.identity ||
+    linkedDescription.size !== temporary.size
   ) {
-    throw new Error(`${label} committed file identity differs`);
+    throw new Error(`${label} temporary file changed before commit`);
   }
-  const actualBytes = await readFile(outputPath);
-  if (!actualBytes.equals(expectedBytes)) {
-    throw new Error(`${label} committed bytes differ`);
-  }
+  await assertCommittedOutput({
+    outputPath,
+    description: linkedDescription,
+    expectedBytes,
+    label,
+    readCommittedFile,
+    readOutputMetadata,
+  });
+  return linkedDescription;
 };
 
-export const writeProductionAssignmentAuthorityCreateOnly = async ({
-  assignmentAuthorityPath,
-  assignmentAuthorityBytes: suppliedAssignmentAuthorityBytes,
-}) => {
+export const writeProductionAssignmentAuthorityCreateOnly = async (
+  {
+    assignmentAuthorityPath,
+    assignmentAuthorityBytes: suppliedAssignmentAuthorityBytes,
+  },
+  { readCommittedFile = readExactRegularFile, readOutputMetadata = lstat } = {},
+) => {
   const outputPath = path.resolve(assignmentAuthorityPath);
   const bytes = normalizeOutputBytes(
     suppliedAssignmentAuthorityBytes,
@@ -436,11 +465,22 @@ export const writeProductionAssignmentAuthorityCreateOnly = async ({
     });
     await link(temporary.path, outputPath);
     committed = true;
-    await assertLinkedOutput({
+    const committedDescription = await assertLinkedOutput({
       outputPath,
       temporary,
       expectedBytes: bytes,
       label: "Assignment authority output",
+      readCommittedFile,
+      readOutputMetadata,
+    });
+    await retireTemporaryOutput(temporary);
+    await assertCommittedOutput({
+      outputPath,
+      description: committedDescription,
+      expectedBytes: bytes,
+      label: "Finalized assignment authority output",
+      readCommittedFile,
+      readOutputMetadata,
     });
   } catch (error) {
     if (committed && temporary !== null) {
@@ -449,9 +489,12 @@ export const writeProductionAssignmentAuthorityCreateOnly = async ({
     throw error;
   } finally {
     if (temporary !== null) {
-      await unlink(temporary.path).catch((error) => {
-        if (error?.code !== "ENOENT") throw error;
-      });
+      await temporary.handle?.close();
+      if (!temporary.retired) {
+        await unlink(temporary.path).catch((error) => {
+          if (error?.code !== "ENOENT") throw error;
+        });
+      }
     }
   }
 };
@@ -463,7 +506,11 @@ export const writeProductionAssignmentValidationPairCreateOnly = async (
     productionProbePath,
     productionProbeBytes: suppliedProductionProbeBytes,
   },
-  { linkImpl = link } = {},
+  {
+    linkImpl = link,
+    readCommittedFile = readExactRegularFile,
+    readOutputMetadata = lstat,
+  } = {},
 ) => {
   const assignmentPath = path.resolve(assignmentValidationPath);
   const probePath = path.resolve(productionProbePath);
@@ -540,18 +587,41 @@ export const writeProductionAssignmentValidationPairCreateOnly = async (
       identity: assignmentTemporary.identity,
     });
 
-    await Promise.all([
+    const [assignmentDescription, probeDescription] = await Promise.all([
       assertLinkedOutput({
         outputPath: assignmentPath,
         temporary: assignmentTemporary,
         expectedBytes: assignmentValidationBytes,
         label: "Assignment validation output",
+        readCommittedFile,
+        readOutputMetadata,
       }),
       assertLinkedOutput({
         outputPath: probePath,
         temporary: probeTemporary,
         expectedBytes: productionProbeBytes,
         label: "Production probe output",
+        readCommittedFile,
+        readOutputMetadata,
+      }),
+    ]);
+    await Promise.all(temporaries.map(retireTemporaryOutput));
+    await Promise.all([
+      assertCommittedOutput({
+        outputPath: assignmentPath,
+        description: assignmentDescription,
+        expectedBytes: assignmentValidationBytes,
+        label: "Finalized assignment validation output",
+        readCommittedFile,
+        readOutputMetadata,
+      }),
+      assertCommittedOutput({
+        outputPath: probePath,
+        description: probeDescription,
+        expectedBytes: productionProbeBytes,
+        label: "Finalized production probe output",
+        readCommittedFile,
+        readOutputMetadata,
       }),
     ]);
   } catch (error) {
@@ -561,11 +631,14 @@ export const writeProductionAssignmentValidationPairCreateOnly = async (
     throw error;
   } finally {
     await Promise.all(
-      temporaries.map((temporary) =>
-        unlink(temporary.path).catch((error) => {
-          if (error?.code !== "ENOENT") throw error;
-        }),
-      ),
+      temporaries.map(async (temporary) => {
+        await temporary.handle?.close();
+        if (!temporary.retired) {
+          await unlink(temporary.path).catch((error) => {
+            if (error?.code !== "ENOENT") throw error;
+          });
+        }
+      }),
     );
   }
 };
@@ -579,7 +652,7 @@ export const runProductionAssignmentValidationCli = async (
   } = {},
   {
     loadJson = readJsonStrict,
-    readFileImpl = readFile,
+    openFile = open,
     createStore = createPostgresReleaseStateStore,
     authorityProducer = prepareProductionAssignmentAuthority,
     producer = produceProductionAssignmentValidation,
@@ -614,20 +687,20 @@ export const runProductionAssignmentValidationCli = async (
       description: paths.preparedResult,
       maximumBytes: MAX_PREPARED_RESULT_BYTES,
       label: "Prepared promotion result",
-      readFileImpl,
+      openFile,
     }),
     readBoundedInput({
       description: paths.promotionReceipt,
       maximumBytes: MAX_PROMOTION_RECEIPT_BYTES,
       label: "Prepared promotion receipt",
-      readFileImpl,
+      openFile,
     }),
     command === "assignment-validation"
       ? readBoundedInput({
           description: paths.assignmentAuthority,
           maximumBytes: MAX_ASSIGNMENT_AUTHORITY_BYTES,
           label: "Production assignment authority",
-          readFileImpl,
+          openFile,
         })
       : Promise.resolve(null),
     loadJson(path.join(root, "config", "provider-policy.json")),

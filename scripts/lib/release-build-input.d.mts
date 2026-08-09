@@ -2,7 +2,9 @@ export type ReleaseRole = "standard" | "containment";
 export type ReleaseBuildPurpose =
   | "production"
   | "qa-xlsx-main"
-  | "qa-list-force-full";
+  | "qa-list-force-full"
+  | "non-promotable-policy-activation-qa"
+  | "non-promotable-artifact-drill";
 export type ReleaseDimensions = Readonly<Record<string, string>>;
 export type ReleaseBuildInput = Readonly<{
   schemaVersion: 1;
@@ -17,6 +19,9 @@ export type ReleaseBuildInput = Readonly<{
 }>;
 
 export const RELEASE_BUILD_INPUT_ENV: string;
+export const RELEASE_BUILD_PURPOSE_ENV: string;
+export const POLICY_ACTIVATION_QA_BUILD_PURPOSE: ReleaseBuildPurpose;
+export const ARTIFACT_DRILL_BUILD_PURPOSE: ReleaseBuildPurpose;
 export const RELEASE_BUILD_PURPOSES: readonly ReleaseBuildPurpose[];
 
 export function resolveReleaseBuildInput(options: {

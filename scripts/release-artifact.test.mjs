@@ -11,11 +11,13 @@ import {
   assertVercelOutputShape,
   buildBootstrapGeneratedFiles,
   buildRawDistManifest,
+  buildArtifactDrillReleaseContext,
   buildReleaseContext,
   createArtifactManifestFromOutput,
   createBootstrapInput,
   createBootstrapStaging,
   assertIndependentBuildReproducibility,
+  assertProductionDbContract,
   writeVerifiedArtifactObjects,
 } from "./lib/artifact-builder-core.mjs";
 import {
@@ -36,7 +38,20 @@ import {
   computeRoleEntryGraphHash,
   publicPathToOutputPath,
 } from "./lib/artifact-contract.mjs";
-import { POLICY_ACTIVATION_QA_BUILD_PURPOSE } from "./lib/release-build-input.mjs";
+import {
+  ARTIFACT_DRILL_BUILD_PURPOSE,
+  POLICY_ACTIVATION_QA_BUILD_PURPOSE,
+} from "./lib/release-build-input.mjs";
+import {
+  ARTIFACT_DRILL_TARGET_GATE,
+  createArtifactDrillBuildAuthority,
+  readArtifactDrillBuildAuthority,
+  writeArtifactDrillBuildAuthority,
+} from "./lib/artifact-drill-build-authority.mjs";
+import {
+  FINAL_DB_CONTRACT_STATUS,
+  FINAL_DB_OBSERVATION_STATUS,
+} from "./lib/db-compatibility-authority.mjs";
 import {
   OUTER_AGENT_ENTRY_MODULE,
   OUTER_AGENT_GRAPH_URL,
@@ -54,6 +69,7 @@ import {
   renderCspHeaders,
 } from "./lib/csp-delivery.mjs";
 import { verifyReleasePackage } from "./verify-release-artifact.mjs";
+import { runPinnedVercelBuild } from "./build-release-artifact.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -61,6 +77,58 @@ const fixtureApplicationStylesheet = Buffer.from(
   "#loading-screen{display:flex}#loading-screen.hidden{display:none;visibility:hidden}\n",
   "utf8",
 );
+
+test("Vercel build launcher passes only closed build authority", () => {
+  let invocation = null;
+  runPinnedVercelBuild({
+    vercelCliPath: "C:/workspace/node_modules/vercel/dist/index.js",
+    cwd: "C:/workspace",
+    environment: {
+      PATH: "C:\\tools",
+      SystemRoot: "C:\\Windows",
+      VERCEL_ORG_ID: "team_foundation",
+      VERCEL_PROJECT_ID: "project_foundation",
+      VERCEL_TOKEN: "provider-token-secret",
+      RELEASE_STATE_DATABASE_URL: "postgresql://control-store-secret",
+      RELEASE_STATE_DATABASE_CA_PEM: "control-store-ca-secret",
+      GITHUB_TOKEN: "github-token-secret",
+      ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-request-secret",
+    },
+    additionalEnvironment: {
+      FOUNDATION_CANONICAL_BUILD_PURPOSE: "non-promotable-artifact-drill",
+      FOUNDATION_RELEASE_SOURCE_SHA: "a".repeat(40),
+      VERCEL: "1",
+      VERCEL_GIT_COMMIT_SHA: "a".repeat(40),
+      VITE_APP_BUILD_ID: "a".repeat(40),
+    },
+    productionTarget: false,
+    execute(executable, arguments_, options) {
+      invocation = { executable, arguments: arguments_, options };
+    },
+  });
+  assert.deepEqual(invocation.arguments, [
+    "C:/workspace/node_modules/vercel/dist/index.js",
+    "build",
+    "--target",
+    "preview",
+    "--yes",
+  ]);
+  assert.equal(invocation.executable, process.execPath);
+  assert.equal(invocation.options.cwd, "C:/workspace");
+  for (const forbidden of [
+    "RELEASE_STATE_DATABASE_URL",
+    "RELEASE_STATE_DATABASE_CA_PEM",
+    "GITHUB_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+  ]) {
+    assert.equal(Object.hasOwn(invocation.options.env, forbidden), false);
+  }
+  assert.equal(
+    invocation.options.env.FOUNDATION_CANONICAL_BUILD_PURPOSE,
+    "non-promotable-artifact-drill",
+  );
+  assert.equal(invocation.options.env.VERCEL_TOKEN, "provider-token-secret");
+});
 
 const createFixtureOuterAgent = (sourceSha) => {
   const outerAgentBytes = Buffer.from(
@@ -107,6 +175,7 @@ const loadFixtureContext = async () => {
     baseProviderPolicy,
     dbContract,
     cspPolicy,
+    foundationBaseline,
   ] = await Promise.all([
     readJsonStrict(
       path.join(
@@ -122,6 +191,7 @@ const loadFixtureContext = async () => {
     readJsonStrict(path.join(root, "config", "provider-policy.json")),
     readJsonStrict(path.join(root, "config", "db-compatibility-contract.json")),
     readJsonStrict(path.join(root, "config", "csp-policy.json")),
+    readJsonStrict(path.join(root, "config", "foundation-baseline.json")),
   ]);
   const providerPolicy = {
     ...baseProviderPolicy,
@@ -151,6 +221,7 @@ const loadFixtureContext = async () => {
     providerObservation,
     dbContract,
     cspPolicy,
+    foundationBaseline,
     releaseContext,
     archivePolicy: await readJsonStrict(
       path.join(root, "config", "artifact-archive-policy.json"),
@@ -426,7 +497,15 @@ const createRoleOutput = async ({
   ]);
 };
 
-const createSourceHardenedFixturePackage = async (temporaryRoot, context) => {
+const createSourceHardenedFixturePackage = async (
+  temporaryRoot,
+  context,
+  {
+    buildPurpose = "production",
+    targetGate = "P0-RELEASE",
+    authorityDocument = null,
+  } = {},
+) => {
   const packageRoot = path.join(temporaryRoot, "pair-package");
   const scratchRoot = path.join(temporaryRoot, "pair-scratch");
   await Promise.all([
@@ -439,8 +518,14 @@ const createSourceHardenedFixturePackage = async (temporaryRoot, context) => {
     context.releasePolicy,
     standardDimensions,
   );
-  const capabilityBytes = buildCapabilityBytes(sourceSha);
-  const authority = buildAuthority("source-hardened-pair");
+  const capabilityBytes = buildCapabilityBytes(sourceSha, buildPurpose);
+  const authority =
+    authorityDocument === null
+      ? buildAuthority("source-hardened-pair")
+      : await writeArtifactDrillBuildAuthority({
+          packageRoot,
+          authority: authorityDocument,
+        });
   const artifactReferences = [];
   for (const dimensions of [standardDimensions, containmentDimensions]) {
     const outputRoot = path.join(
@@ -455,6 +540,7 @@ const createSourceHardenedFixturePackage = async (temporaryRoot, context) => {
       requiredDbCompatibility: context.releaseContext.requiredDbCompatibility,
       capabilityBytes,
       cspPolicy: context.cspPolicy,
+      buildPurpose,
     });
     const manifest = await createArtifactManifestFromOutput({
       outputRoot,
@@ -468,7 +554,9 @@ const createSourceHardenedFixturePackage = async (temporaryRoot, context) => {
       publicIdentityKind: "release-identity-v1",
       bootstrap: null,
       buildAuthority: authority,
-      targetGate: "P0-RELEASE",
+      targetGate,
+      buildPurpose,
+      promotable: buildPurpose === "production",
       cspPolicy: context.cspPolicy,
     });
     artifactReferences.push(
@@ -488,9 +576,9 @@ const createSourceHardenedFixturePackage = async (temporaryRoot, context) => {
     sourceSha,
     buildId: sourceSha,
     buildAuthority: authority,
-    targetGate: "P0-RELEASE",
-    buildPurpose: "production",
-    promotable: true,
+    targetGate,
+    buildPurpose,
+    promotable: buildPurpose === "production",
     toolchainPolicyHash: context.releaseContext.toolchainPolicyHash,
     providerConfigurationHash: context.releaseContext.providerConfigurationHash,
     providerPolicyHash: context.releaseContext.providerPolicyHash,
@@ -503,7 +591,7 @@ const createSourceHardenedFixturePackage = async (temporaryRoot, context) => {
     canonicalJsonBytes(index),
     { flag: "wx" },
   );
-  return { packageRoot, index };
+  return { packageRoot, index, authority };
 };
 
 const createBootstrapFixturePackage = async (temporaryRoot, context) => {
@@ -1042,6 +1130,154 @@ test("policy activation QA artifact purpose is explicit and production-rejected"
   }
 });
 
+test("artifact drill package is P0-only, closed, and production-rejected", async () => {
+  const temporaryRoot = await mkdtemp(
+    path.join(os.tmpdir(), "foundation-artifact-drill-contract-"),
+  );
+  try {
+    const context = await loadFixtureContext();
+    const bootstrapVerification = {
+      sourceSha: "8".repeat(40),
+      packageIndexSha256: sha256Json({ fixture: "bootstrap-index" }),
+      artifactManifestSha256: sha256Json({ fixture: "bootstrap-manifest" }),
+      artifactArchiveSha256: sha256Json({ fixture: "bootstrap-archive" }),
+      rawDistManifestSha256: sha256Json({ fixture: "raw-dist-manifest" }),
+      rawDistTreeSha256: sha256Json({ fixture: "raw-dist-tree" }),
+      rawDistFileCount: 3,
+      preserved: true,
+      releaseIdentityAbsent: true,
+    };
+    const authorityDocument = createArtifactDrillBuildAuthority({
+      sourceSha: context.fixture.sourceSha,
+      releasePolicy: context.releasePolicy,
+      toolchainPolicy: context.toolchainPolicy,
+      providerPolicy: context.providerPolicy,
+      providerObservation: context.providerObservation,
+      dbContract: context.dbContract,
+      cspPolicy: context.cspPolicy,
+      foundationBaseline: context.foundationBaseline,
+      bootstrapVerification,
+    });
+    const { packageRoot, index, authority } =
+      await createSourceHardenedFixturePackage(temporaryRoot, context, {
+        buildPurpose: ARTIFACT_DRILL_BUILD_PURPOSE,
+        targetGate: ARTIFACT_DRILL_TARGET_GATE,
+        authorityDocument,
+      });
+    assert.doesNotThrow(() =>
+      assertReleasePackageIndex(index, {
+        expectedBuildPurpose: ARTIFACT_DRILL_BUILD_PURPOSE,
+      }),
+    );
+    assert.throws(
+      () => assertReleasePackageIndex(index),
+      /purpose\/promotable binding is invalid/,
+    );
+    assert.throws(
+      () =>
+        assertReleasePackageIndex(index, {
+          expectedBuildPurpose: "non-promotable-unknown-purpose",
+        }),
+      /Expected release build purpose is invalid/,
+    );
+
+    const wrongGate = structuredClone(index);
+    wrongGate.targetGate = "P0-RELEASE";
+    assert.throws(
+      () =>
+        assertReleasePackageIndex(wrongGate, {
+          expectedBuildPurpose: ARTIFACT_DRILL_BUILD_PURPOSE,
+        }),
+      /targetGate is invalid/,
+    );
+    const wrongAuthorityKind = structuredClone(index);
+    wrongAuthorityKind.buildAuthority = buildAuthority("wrong-drill-kind");
+    assert.throws(
+      () =>
+        assertReleasePackageIndex(wrongAuthorityKind, {
+          expectedBuildPurpose: ARTIFACT_DRILL_BUILD_PURPOSE,
+        }),
+      /Unsupported immutable artifact URI/,
+    );
+
+    const authorityReadback = await readArtifactDrillBuildAuthority({
+      packageRoot,
+      reference: authority,
+      expected: {
+        sourceSha: index.sourceSha,
+        releasePolicy: context.releasePolicy,
+        toolchainPolicy: context.toolchainPolicy,
+        providerPolicy: context.providerPolicy,
+        providerObservation: context.providerObservation,
+        dbContract: context.dbContract,
+        cspPolicy: context.cspPolicy,
+        foundationBaseline: context.foundationBaseline,
+        bootstrapVerification,
+      },
+    });
+    assert.deepEqual(authorityReadback.authority, authorityDocument);
+
+    const verification = await verifyReleasePackage({
+      packageRoot,
+      releasePolicy: context.releasePolicy,
+      toolchainPolicy: context.toolchainPolicy,
+      providerPolicy: context.providerPolicy,
+      providerObservation: context.providerObservation,
+      dbContract: context.dbContract,
+      cspPolicy: context.cspPolicy,
+      foundationBaseline: context.foundationBaseline,
+      root,
+      expectedBuildPurpose: ARTIFACT_DRILL_BUILD_PURPOSE,
+      artifactDrillBootstrapVerification: bootstrapVerification,
+    });
+    assert.equal(verification.productionEligible, false);
+    assert.equal(verification.roles.length, 2);
+    assert.equal(
+      verification.artifactDrillAuthority.authority.buildPurpose,
+      ARTIFACT_DRILL_BUILD_PURPOSE,
+    );
+
+    const wrongBootstrap = {
+      ...bootstrapVerification,
+      rawDistTreeSha256: "f".repeat(64),
+    };
+    await assert.rejects(
+      verifyReleasePackage({
+        packageRoot,
+        releasePolicy: context.releasePolicy,
+        toolchainPolicy: context.toolchainPolicy,
+        providerPolicy: context.providerPolicy,
+        providerObservation: context.providerObservation,
+        dbContract: context.dbContract,
+        cspPolicy: context.cspPolicy,
+        foundationBaseline: context.foundationBaseline,
+        root,
+        expectedBuildPurpose: ARTIFACT_DRILL_BUILD_PURPOSE,
+        artifactDrillBootstrapVerification: wrongBootstrap,
+      }),
+      /bootstrap verification differs/,
+    );
+    await assert.rejects(
+      verifyReleasePackage({
+        packageRoot,
+        releasePolicy: context.releasePolicy,
+        toolchainPolicy: context.toolchainPolicy,
+        providerPolicy: context.providerPolicy,
+        providerObservation: context.providerObservation,
+        dbContract: context.dbContract,
+        cspPolicy: context.cspPolicy,
+        foundationBaseline: context.foundationBaseline,
+        root,
+        expectedBuildPurpose: ARTIFACT_DRILL_BUILD_PURPOSE,
+        requireProductionBindings: true,
+      }),
+      /rejects a nonpromotable package/,
+    );
+  } finally {
+    await rm(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
 test("rejects archive tampering independently of its manifest", async () => {
   const temporaryRoot = await mkdtemp(
     path.join(os.tmpdir(), "foundation-artifact-tamper-"),
@@ -1066,6 +1302,67 @@ test("rejects archive tampering independently of its manifest", async () => {
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
+});
+
+test("accepts only the final remotely observed DB authority for production artifacts", async () => {
+  const current = await readJsonStrict(
+    path.join(root, "config", "db-compatibility-contract.json"),
+  );
+  const finalContract = structuredClone(current);
+  finalContract.contractStatus = FINAL_DB_CONTRACT_STATUS;
+  finalContract.remote.observationStatus = FINAL_DB_OBSERVATION_STATUS;
+  finalContract.blockerCodes = [];
+
+  const result = assertProductionDbContract(finalContract);
+  assert.equal(result.contractUri, finalContract.contractUri);
+  assert.equal(result.fingerprint, sha256Json(finalContract));
+
+  for (const invalidStatus of ["verified", "unobserved"]) {
+    const invalid = structuredClone(finalContract);
+    if (invalidStatus === "unobserved") {
+      invalid.remote.observationStatus = invalidStatus;
+    } else {
+      invalid.contractStatus = invalidStatus;
+    }
+    assert.throws(
+      () => assertProductionDbContract(invalid),
+      /Production DB compatibility is unavailable/,
+    );
+  }
+});
+
+test("artifact drill context binds static DB and policy hashes without production DB authority", async () => {
+  const context = await loadFixtureContext();
+  const providerPolicy = structuredClone(context.providerPolicy);
+  providerPolicy.bindingStatus = "configured";
+  providerPolicy.blockerCodes = [];
+  providerPolicy.logPolicy.retentionDays = 30;
+  providerPolicy.wafRules.metricsRoute = {
+    ruleId: "artifact-drill-fixture-metrics",
+  };
+  const providerObservation = structuredClone(context.providerObservation);
+  providerObservation.logPolicy = structuredClone(providerPolicy.logPolicy);
+  providerObservation.wafRules = structuredClone(providerPolicy.wafRules);
+  const releaseContext = buildArtifactDrillReleaseContext({
+    releasePolicy: context.releasePolicy,
+    toolchainPolicy: context.toolchainPolicy,
+    providerPolicy,
+    providerObservation,
+    dbContract: context.dbContract,
+  });
+  assert.equal(
+    releaseContext.requiredDbCompatibility.fingerprint,
+    sha256Json(context.dbContract),
+  );
+  assert.equal(
+    releaseContext.toolchainPolicyHash,
+    sha256Json(context.toolchainPolicy),
+  );
+  assert.equal(releaseContext.providerPolicyHash, sha256Json(providerPolicy));
+  assert.equal(
+    releaseContext.releasePolicyHash,
+    sha256Json(context.releasePolicy),
+  );
 });
 
 test("current external policy explicitly blocks production artifact context", async () => {

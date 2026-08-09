@@ -133,12 +133,12 @@ const VERIFIER_COMMANDS = Object.freeze({
   resource: Object.freeze([
     [
       "artifact-verify-build-1",
-      "npm run artifact:verify -- --package <independent-build-output>",
+      "npm run artifact:verify -- -- --package <independent-build-output>",
       1,
     ],
     [
       "artifact-verify-build-2",
-      "npm run artifact:verify -- --package <independent-build-output>",
+      "npm run artifact:verify -- -- --package <independent-build-output>",
       2,
     ],
     ["test-artifact", "npm run test:artifact"],

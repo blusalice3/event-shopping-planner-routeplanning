@@ -9,6 +9,7 @@ import { createReleaseEvent } from "../release-state/releaseStateReducer.mjs";
 import { compareUtf8 } from "../release-state/releaseWorkflowValidation.mjs";
 import {
   prepareProductionAssignmentAuthority,
+  productionAssignmentApiRouteExpectations,
   produceProductionAssignmentValidation,
   validateProductionAssignmentAuthority,
 } from "./productionAssignmentValidation.mjs";
@@ -176,6 +177,29 @@ const immutableRouteReceipt = ({
   securityHeaders: SECURITY_HEADERS,
   bodySha256: sha256Bytes(bytes),
   byteLength: bytes.length,
+});
+
+test("derives the CSP report assignment route from the artifact CSP mode", () => {
+  const none = productionAssignmentApiRouteExpectations("none").find(
+    ({ path }) => path === "/api/csp-report",
+  );
+  assert.equal(none.status, 404);
+  assert.equal(none.body.toString("utf8"), '{"error":"api-not-found"}');
+  assert.equal(none.contentType, "application/json");
+  assert.equal(none.allow, null);
+
+  for (const mode of ["report-only", "enforced"]) {
+    const active = productionAssignmentApiRouteExpectations(mode).find(
+      ({ path }) => path === "/api/csp-report",
+    );
+    assert.equal(active.status, 405);
+    assert.equal(active.body.length, 0);
+    assert.equal(active.allow, "POST");
+  }
+  assert.throws(
+    () => productionAssignmentApiRouteExpectations("caller-claimed"),
+    /CSP mode is invalid/,
+  );
 });
 
 const providerObservation = () => ({
@@ -790,6 +814,7 @@ const createFixture = ({
     dependencies: {
       validatePreparedResult: () => validatedPrepared,
       providerObservationValidator: () => {},
+      resolveCspMode: async () => "report-only",
       fetchImpl,
       clock: () => FIXED_NOW,
       readState: async () => {

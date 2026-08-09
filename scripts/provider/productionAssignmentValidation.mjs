@@ -4,6 +4,8 @@ import {
   sha256Bytes,
   sha256Json,
 } from "../lib/canonical-json.mjs";
+import { assertArtifactManifest } from "../lib/artifact-contract.mjs";
+import { RELEASE_POLICY_MEDIA_TYPE } from "../release-state/artifactBuildAuthority.mjs";
 import { buildAuthoritativeProviderAliasObservation } from "../release-state/authoritativeInputProducers.mjs";
 import { readCurrentReleaseState } from "../release-state/currentReleaseState.mjs";
 import { decideProviderReconciliation } from "../release-state/reconcileDecision.mjs";
@@ -244,6 +246,8 @@ const PROVIDER_ALIAS_RESPONSE_MEDIA_TYPE =
   "application/vnd.vercel.alias-response+json";
 const PROVIDER_ALIAS_RECEIPT_MEDIA_TYPE =
   "application/vnd.event-shopping-planner.vercel-alias-receipt+json;version=1";
+const ARTIFACT_MANIFEST_MEDIA_TYPE =
+  "application/vnd.event-shopping-planner.artifact-manifest+json;version=1";
 const PROVIDER_ALIAS_OBSERVATION_KEYS = [
   "assignments",
   "namespace",
@@ -270,7 +274,7 @@ const PROVIDER_ALIAS_RECEIPT_KEYS = [
   "schemaVersion",
   "status",
 ];
-const API_ROUTE_EXPECTATIONS = Object.freeze([
+const BASE_API_ROUTE_EXPECTATIONS = Object.freeze([
   {
     path: "/api",
     status: 404,
@@ -296,14 +300,6 @@ const API_ROUTE_EXPECTATIONS = Object.freeze([
     allow: "POST",
   },
   {
-    path: "/api/csp-report",
-    status: 405,
-    body: Buffer.alloc(0),
-    cacheControl: "no-store",
-    contentType: null,
-    allow: "POST",
-  },
-  {
     path: "/api/google-sheets-csv",
     status: 405,
     body: Buffer.alloc(0),
@@ -312,6 +308,31 @@ const API_ROUTE_EXPECTATIONS = Object.freeze([
     allow: "POST",
   },
 ]);
+
+export const productionAssignmentApiRouteExpectations = (cspMode) => {
+  if (!["none", "report-only", "enforced"].includes(cspMode)) {
+    throw new Error("Production assignment CSP mode is invalid");
+  }
+  const cspExpectation =
+    cspMode === "none"
+      ? {
+          path: "/api/csp-report",
+          status: 404,
+          body: Buffer.from('{"error":"api-not-found"}'),
+          cacheControl: "no-store",
+          contentType: "application/json",
+          allow: null,
+        }
+      : {
+          path: "/api/csp-report",
+          status: 405,
+          body: Buffer.alloc(0),
+          cacheControl: "no-store",
+          contentType: null,
+          allow: "POST",
+        };
+  return Object.freeze([...BASE_API_ROUTE_EXPECTATIONS, cspExpectation]);
+};
 
 const assertNoCallerAuthority = (options) => {
   if (!isRecord(options)) {
@@ -997,6 +1018,45 @@ const readExactEvidence = async ({
     throw new Error(`${label} immutable-store content differs`);
   }
   return stored;
+};
+
+const resolveBindingCspMode = async ({ store, namespace, binding }) => {
+  const [manifestStored, policyStored] = await Promise.all([
+    readExactEvidence({
+      store,
+      namespace,
+      reference: binding.artifactManifest,
+      expectedMediaType: ARTIFACT_MANIFEST_MEDIA_TYPE,
+      label: "Production assignment artifact manifest",
+    }),
+    readExactEvidence({
+      store,
+      namespace,
+      reference: binding.releasePolicy,
+      expectedMediaType: RELEASE_POLICY_MEDIA_TYPE,
+      label: "Production assignment release policy",
+    }),
+  ]);
+  const manifest = parseCanonicalJsonBytes(
+    manifestStored.bytes,
+    "Production assignment artifact manifest",
+  );
+  const releasePolicy = parseCanonicalJsonBytes(
+    policyStored.bytes,
+    "Production assignment release policy",
+  );
+  assertArtifactManifest(manifest, releasePolicy);
+  if (
+    manifest.sourceSha !== binding.sourceSha ||
+    manifest.buildId !== binding.buildId ||
+    manifest.variantId !== binding.variantId ||
+    manifest.releaseRole !== binding.releaseRole ||
+    manifest.dimensions?.releaseRole !== binding.releaseRole ||
+    !["none", "report-only", "enforced"].includes(manifest.dimensions?.cspMode)
+  ) {
+    throw new Error("Production assignment artifact dimension differs");
+  }
+  return manifest.dimensions.cspMode;
 };
 
 const parseStrictUtf8Json = (bytes, label) => {
@@ -1792,7 +1852,13 @@ const assertDomainPublicIdentity = ({
 
 const validateProductionAssignmentContext = async (
   options,
-  { readState, validatePreparedResult, providerObservationValidator, clock },
+  {
+    readState,
+    validatePreparedResult,
+    providerObservationValidator,
+    resolveCspMode,
+    clock,
+  },
   { requireFreshPromotion = true } = {},
 ) => {
   assertNoCallerAuthority(options);
@@ -1867,13 +1933,16 @@ const validateProductionAssignmentContext = async (
     binding: target,
     label: "Production assignment target",
   });
-  const immutable = await validateStoredRouteProbe({
-    store,
-    namespace,
-    target,
-    providerEvidence,
-    secrets,
-  });
+  const [immutable, targetCspMode] = await Promise.all([
+    validateStoredRouteProbe({
+      store,
+      namespace,
+      target,
+      providerEvidence,
+      secrets,
+    }),
+    resolveCspMode({ store, namespace, binding: target }),
+  ]);
   return {
     environment,
     immutable,
@@ -1888,6 +1957,7 @@ const validateProductionAssignmentContext = async (
     startedAt,
     store,
     target,
+    targetCspMode,
     toolchainPolicy,
     validatedPrepared,
   };
@@ -1913,6 +1983,7 @@ export const prepareProductionAssignmentAuthority = async (
     readState = readCurrentReleaseState,
     validatePreparedResult = validatePreparedPromotionResult,
     providerObservationValidator = assertVercelObservationEvidence,
+    resolveCspMode = resolveBindingCspMode,
     buildAssignmentObservation = buildAuthoritativeProviderAliasObservation,
     reconcileProviderAssignment = decideProviderReconciliation,
     fetchImpl = globalThis.fetch,
@@ -1928,6 +1999,7 @@ export const prepareProductionAssignmentAuthority = async (
       readState,
       validatePreparedResult,
       providerObservationValidator,
+      resolveCspMode,
       clock,
     },
     {
@@ -2058,6 +2130,7 @@ export const produceProductionAssignmentValidation = async (
     readState = readCurrentReleaseState,
     validatePreparedResult = validatePreparedPromotionResult,
     providerObservationValidator = assertVercelObservationEvidence,
+    resolveCspMode = resolveBindingCspMode,
     fetchImpl = globalThis.fetch,
     clock = Date.now,
   } = {},
@@ -2071,6 +2144,7 @@ export const produceProductionAssignmentValidation = async (
       readState,
       validatePreparedResult,
       providerObservationValidator,
+      resolveCspMode,
       clock,
     },
     {
@@ -2096,10 +2170,13 @@ export const produceProductionAssignmentValidation = async (
     providerPolicy,
     secrets,
     target,
+    targetCspMode,
   } = context;
 
+  const apiRouteExpectations =
+    productionAssignmentApiRouteExpectations(targetCspMode);
   const declaredPaths = [...immutable.routes.keys()];
-  const apiPaths = API_ROUTE_EXPECTATIONS.map(({ path }) => path);
+  const apiPaths = apiRouteExpectations.map(({ path }) => path);
   const allPaths = [...new Set([...declaredPaths, ...apiPaths])].sort(
     compareUtf8,
   );
@@ -2121,7 +2198,7 @@ export const produceProductionAssignmentValidation = async (
   if (rootSecurityHeaders === null) {
     throw new Error("Immutable root security headers are absent");
   }
-  for (const expectation of [...API_ROUTE_EXPECTATIONS].sort((left, right) =>
+  for (const expectation of [...apiRouteExpectations].sort((left, right) =>
     compareUtf8(left.path, right.path),
   )) {
     const result = await fetchRoute({

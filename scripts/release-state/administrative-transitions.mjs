@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
+import { spawnSync } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readJsonStrict, sha256Bytes } from "../lib/canonical-json.mjs";
+import { putReviewedRemoteDbObservationProductionAuthority } from "../db/remote-db-observation-authority.mjs";
 import {
   buildAuthoritativeDbContractActivationSubject,
   buildAuthoritativeOperationAbortSubject,
@@ -13,6 +15,7 @@ import {
 } from "./administrativeTransitions.mjs";
 import { createPostgresReleaseStateStore } from "./postgresStore.mjs";
 import { assertProtectedWorkflowEnvironment } from "./protected-release.mjs";
+import { collectReviewedWorkflowRunAuthority } from "./reviewedWorkflowRunAuthority.mjs";
 import {
   NAMESPACE_PATTERN,
   OPERATION_ID_PATTERN,
@@ -40,10 +43,24 @@ const COMMAND_FLAGS = Object.freeze({
     ...COMMON_FLAGS,
     "--bootstrap-recovery-sha256",
     "--db-contract-sha256",
+    "--db-observation-sha256",
+    "--db-observation-production-sha256",
+    "--db-observation-run-attempt",
+    "--db-observation-run-id",
     "--legacy-observation-sha256",
+    "--p0-artifact-attestation-sha256",
+    "--p0-baseline-attestation-sha256",
+    "--p0-toolchain-attestation-sha256",
     "--release-policy-sha256",
   ],
-  "produce-db-contract-activated": [...COMMON_FLAGS, "--db-contract-sha256"],
+  "produce-db-contract-activated": [
+    ...COMMON_FLAGS,
+    "--db-contract-sha256",
+    "--db-observation-sha256",
+    "--db-observation-production-sha256",
+    "--db-observation-run-attempt",
+    "--db-observation-run-id",
+  ],
   "produce-operation-aborted": [...COMMON_FLAGS, "--provider-observation"],
   execute: [...COMMON_FLAGS, "--subject", "--subject-sha256"],
 });
@@ -88,6 +105,14 @@ export const parseAdministrativeArguments = (argv) => {
       throw new Error(`Administrative hash argument is invalid: ${flag}`);
     }
   }
+  for (const flag of expected.filter(
+    (candidate) =>
+      candidate.endsWith("-run-id") || candidate.endsWith("-run-attempt"),
+  )) {
+    if (!RUN_ID_PATTERN.test(values[flag])) {
+      throw new Error(`Administrative run argument is invalid: ${flag}`);
+    }
+  }
   return { command, values };
 };
 
@@ -121,6 +146,12 @@ const evidenceReference = (namespace, sha256) => ({
   sha256,
 });
 
+const gitIsAncestor = (ancestor, descendant) =>
+  spawnSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], {
+    cwd: root,
+    windowsHide: true,
+  }).status === 0;
+
 const readBounded = async (filePath, readFileImpl) => {
   const bytes = await readFileImpl(filePath);
   if (
@@ -131,6 +162,19 @@ const readBounded = async (filePath, readFileImpl) => {
     throw new Error("Administrative input is empty or oversized");
   }
   return bytes;
+};
+
+const readStoredDbContract = async ({ store, reference }) => {
+  const stored = await store.readEvidence({ sha256: reference.sha256 });
+  if (
+    !Buffer.isBuffer(stored?.bytes) ||
+    stored.bytes.length === 0 ||
+    stored.bytes.length > MAX_INPUT_BYTES ||
+    sha256Bytes(stored.bytes) !== reference.sha256
+  ) {
+    throw new Error("Reviewed DB contract is absent from immutable storage");
+  }
+  return parseCanonicalJsonBytes(stored.bytes, "Reviewed DB contract");
 };
 
 const resolveOutput = (values, cwd, inputFlag = null) => {
@@ -158,6 +202,9 @@ export const runAdministrativeTransitionsCli = async (
     buildDbActivation = buildAuthoritativeDbContractActivationSubject,
     buildAbort = buildAuthoritativeOperationAbortSubject,
     execute = executeAdministrativeTransition,
+    collectReviewedRun = collectReviewedWorkflowRunAuthority,
+    bindReviewedDbObservationRun = putReviewedRemoteDbObservationProductionAuthority,
+    readDbContract = readStoredDbContract,
   } = {},
 ) => {
   const { command, values } = parseAdministrativeArguments(argv);
@@ -201,20 +248,28 @@ export const runAdministrativeTransitionsCli = async (
           "Administrative subject differs from reviewed CLI identity",
         );
       }
-      output = await execute({
-        store,
-        subjectBytes,
-        expectedSubjectSha256: values["--subject-sha256"],
-        expectedExecutorSourceSha: sourceSha,
-        expectedRunId: runId,
-        approvalPolicy,
-        oidcRequestUrl: requireEnvironment(env, "ACTIONS_ID_TOKEN_REQUEST_URL"),
-        oidcRequestToken: requireEnvironment(
-          env,
-          "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
-        ),
-        githubToken: requireEnvironment(env, "GITHUB_TOKEN"),
-      });
+      output = await execute(
+        {
+          store,
+          subjectBytes,
+          expectedSubjectSha256: values["--subject-sha256"],
+          expectedExecutorSourceSha: sourceSha,
+          expectedRunId: runId,
+          approvalPolicy,
+          oidcRequestUrl: requireEnvironment(
+            env,
+            "ACTIONS_ID_TOKEN_REQUEST_URL",
+          ),
+          oidcRequestToken: requireEnvironment(
+            env,
+            "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+          ),
+          githubToken: requireEnvironment(env, "GITHUB_TOKEN"),
+        },
+        {
+          isSourceAncestor: gitIsAncestor,
+        },
+      );
       await writeFileImpl(
         resolveOutput(values, cwd, "--subject"),
         `${JSON.stringify(output, null, 2)}\n`,
@@ -222,29 +277,108 @@ export const runAdministrativeTransitionsCli = async (
       );
     } else {
       let built;
-      if (command === "produce-state-initialized") {
-        built = await buildInitialization({
+      let dbObservationRunAuthorityReference = null;
+      if (
+        command === "produce-state-initialized" ||
+        command === "produce-db-contract-activated"
+      ) {
+        const producerRunId = values["--db-observation-run-id"];
+        if (producerRunId === runId) {
+          throw new Error(
+            "Remote DB observation producer must be a distinct prior run",
+          );
+        }
+        const repository = requireEnvironment(env, "GITHUB_REPOSITORY");
+        const producerRunAttempt = values["--db-observation-run-attempt"];
+        const reviewed = await collectReviewedRun({
+          githubToken: requireEnvironment(env, "GITHUB_TOKEN"),
+          namespace,
+          repository,
+          expectedRunId: producerRunId,
+          expectedRunAttempt: producerRunAttempt,
+          expectedSourceSha: sourceSha,
+          expectedWorkflowPath: ".github/workflows/release.yml",
+          store,
+        });
+        const dbContractReference = evidenceReference(
+          namespace,
+          values["--db-contract-sha256"],
+        );
+        const contract = await readDbContract({
+          store,
+          reference: dbContractReference,
+        });
+        const bound = await bindReviewedDbObservationRun({
           store,
           namespace,
-          operationId,
-          executorSourceSha: sourceSha,
-          bootstrapRecoveryReference: evidenceReference(
+          sourceSha,
+          producerRunId,
+          producerRunAttempt,
+          currentWorkflowRunId: runId,
+          repository,
+          observationReference: evidenceReference(
             namespace,
-            values["--bootstrap-recovery-sha256"],
+            values["--db-observation-sha256"],
           ),
-          legacyObservationReference: evidenceReference(
+          productionReceiptReference: evidenceReference(
             namespace,
-            values["--legacy-observation-sha256"],
+            values["--db-observation-production-sha256"],
           ),
-          dbContractReference: evidenceReference(
-            namespace,
-            values["--db-contract-sha256"],
-          ),
-          activeReleasePolicyReference: evidenceReference(
-            namespace,
-            values["--release-policy-sha256"],
-          ),
+          reviewedWorkflowRunReference: reviewed.receipt,
+          contract,
+          approvalPolicy,
         });
+        dbObservationRunAuthorityReference = bound.reference;
+      }
+      if (command === "produce-state-initialized") {
+        built = await buildInitialization(
+          {
+            store,
+            namespace,
+            operationId,
+            executorSourceSha: sourceSha,
+            bootstrapRecoveryReference: evidenceReference(
+              namespace,
+              values["--bootstrap-recovery-sha256"],
+            ),
+            legacyObservationReference: evidenceReference(
+              namespace,
+              values["--legacy-observation-sha256"],
+            ),
+            dbContractReference: evidenceReference(
+              namespace,
+              values["--db-contract-sha256"],
+            ),
+            dbObservationReference: evidenceReference(
+              namespace,
+              values["--db-observation-sha256"],
+            ),
+            dbObservationRunAuthorityReference,
+            currentWorkflowRunId: runId,
+            approvalPolicy,
+            activeReleasePolicyReference: evidenceReference(
+              namespace,
+              values["--release-policy-sha256"],
+            ),
+            phaseExitAttestationReferences: [
+              evidenceReference(
+                namespace,
+                values["--p0-baseline-attestation-sha256"],
+              ),
+              evidenceReference(
+                namespace,
+                values["--p0-toolchain-attestation-sha256"],
+              ),
+              evidenceReference(
+                namespace,
+                values["--p0-artifact-attestation-sha256"],
+              ),
+            ],
+          },
+          {
+            isSourceAncestor: gitIsAncestor,
+          },
+        );
       } else if (command === "produce-db-contract-activated") {
         built = await buildDbActivation({
           store,
@@ -255,6 +389,13 @@ export const runAdministrativeTransitionsCli = async (
             namespace,
             values["--db-contract-sha256"],
           ),
+          dbObservationReference: evidenceReference(
+            namespace,
+            values["--db-observation-sha256"],
+          ),
+          dbObservationRunAuthorityReference,
+          currentWorkflowRunId: runId,
+          approvalPolicy,
         });
       } else {
         const input = path.resolve(cwd, values["--provider-observation"]);

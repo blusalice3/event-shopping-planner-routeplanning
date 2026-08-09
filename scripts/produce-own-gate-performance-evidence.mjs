@@ -37,6 +37,7 @@ const ARGUMENT_NAMES = new Set([
   "--raw-samples",
   "--raw-samples-sha256",
   "--raw-samples-run-id",
+  "--raw-samples-run-attempt",
   "--output",
   "--receipt-output",
 ]);
@@ -44,6 +45,7 @@ const usage =
   "Usage: produce-own-gate-performance-evidence.mjs " +
   "--namespace <release-state-namespace> --raw-samples <reviewed-json> " +
   "--raw-samples-sha256 <sha256> --raw-samples-run-id <prior-run-id> " +
+  "--raw-samples-run-attempt <prior-run-attempt> " +
   "--output <performance-evidence.json> " +
   "--receipt-output <producer-receipt.json>";
 
@@ -76,7 +78,8 @@ export const parseOwnGatePerformanceEvidenceArguments = (arguments_) => {
   if (
     !NAMESPACE_PATTERN.test(values["--namespace"]) ||
     !SHA256_PATTERN.test(values["--raw-samples-sha256"]) ||
-    !RUN_ID_PATTERN.test(values["--raw-samples-run-id"])
+    !RUN_ID_PATTERN.test(values["--raw-samples-run-id"]) ||
+    !RUN_ID_PATTERN.test(values["--raw-samples-run-attempt"])
   ) {
     throw new Error("Own-gate performance authority arguments are invalid");
   }
@@ -85,6 +88,7 @@ export const parseOwnGatePerformanceEvidenceArguments = (arguments_) => {
     rawSamplesPath: values["--raw-samples"],
     expectedRawSamplesSha256: values["--raw-samples-sha256"],
     rawSamplesRunId: values["--raw-samples-run-id"],
+    rawSamplesRunAttempt: values["--raw-samples-run-attempt"],
     outputPath: values["--output"],
     receiptOutputPath: values["--receipt-output"],
   };
@@ -214,6 +218,7 @@ const createBoundStore = async ({
 export const resolveRawCollectorAuthority = async ({
   rawArtifactBytes,
   rawSamplesRunId,
+  rawSamplesRunAttempt,
   sourceSha,
   namespace,
   approvalPolicy,
@@ -249,13 +254,14 @@ export const resolveRawCollectorAuthority = async ({
     policy: oidcPolicy,
     expectedSourceSha: sourceSha,
     expectedRunId: rawSamplesRunId,
+    expectedRunAttempt: rawSamplesRunAttempt,
   });
   const runAuthority = await collectRunAuthority({
     githubToken: requireEnvironment(environment, "GITHUB_TOKEN"),
     namespace,
     repository: approvalPolicy.repository,
     expectedRunId: rawSamplesRunId,
-    expectedRunAttempt: receipt.claims.runAttempt,
+    expectedRunAttempt: rawSamplesRunAttempt,
     expectedSourceSha: sourceSha,
     expectedWorkflowPath: PERFORMANCE_WORKFLOW_PATH,
     store,
@@ -309,6 +315,10 @@ export const runOwnGatePerformanceEvidenceProducerCli = async (
     ],
   );
   const currentRunId = requireEnvironment(environment, "GITHUB_RUN_ID");
+  const currentRunAttempt = requireEnvironment(
+    environment,
+    "GITHUB_RUN_ATTEMPT",
+  );
   assertProtectedWorkflowEnvironment({
     env: environment,
     approvalPolicy,
@@ -338,6 +348,7 @@ export const runOwnGatePerformanceEvidenceProducerCli = async (
     const rawAuthority = await resolveCollectorAuthority({
       rawArtifactBytes: rawSamplesBytes,
       rawSamplesRunId: parsed.rawSamplesRunId,
+      rawSamplesRunAttempt: parsed.rawSamplesRunAttempt,
       sourceSha: sourceState.gitCommitSha,
       namespace: parsed.namespace,
       approvalPolicy,
@@ -351,7 +362,9 @@ export const runOwnGatePerformanceEvidenceProducerCli = async (
       collectorAuthority: rawAuthority.collectorAuthority,
       expectedRawSamplesSha256: parsed.expectedRawSamplesSha256,
       rawSamplesRunId: parsed.rawSamplesRunId,
+      rawSamplesRunAttempt: parsed.rawSamplesRunAttempt,
       currentRunId,
+      currentRunAttempt,
       sourceState,
       context,
       producedAtUtc,

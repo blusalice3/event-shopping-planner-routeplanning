@@ -13,6 +13,11 @@ import {
   sha256Bytes,
   sha256Json,
 } from "./lib/canonical-json.mjs";
+import { hasFinalRemoteDbAuthority } from "./lib/db-compatibility-authority.mjs";
+import {
+  assertRemoteDbObservation,
+  assertRemoteDbObservationAuthority,
+} from "./db/remote-db-observation.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const contractPath = path.join(
@@ -24,17 +29,28 @@ const migrationDirectory = path.join(root, "supabase", "migrations");
 const hardeningMigrationName =
   "20260805000000_persistence_release_a_hardening.sql";
 const cspContractMigrationName = "20260808000000_csp_report_contract.sql";
-const [contract, hardeningMigrationBytes, cspContractMigrationBytes] =
-  await Promise.all([
-    readJsonStrict(contractPath),
-    readFile(path.join(migrationDirectory, hardeningMigrationName)),
-    readFile(path.join(migrationDirectory, cspContractMigrationName)),
-  ]);
+const cspDeploymentAggregateMigrationName =
+  "20260809000000_csp_report_deployment_aggregate.sql";
+const [
+  contract,
+  hardeningMigrationBytes,
+  cspContractMigrationBytes,
+  cspDeploymentAggregateMigrationBytes,
+] = await Promise.all([
+  readJsonStrict(contractPath),
+  readFile(path.join(migrationDirectory, hardeningMigrationName)),
+  readFile(path.join(migrationDirectory, cspContractMigrationName)),
+  readFile(path.join(migrationDirectory, cspDeploymentAggregateMigrationName)),
+]);
 const migrationChecksums = Object.freeze({
   [hardeningMigrationName]: sha256Bytes(hardeningMigrationBytes),
   [cspContractMigrationName]: sha256Bytes(cspContractMigrationBytes),
+  [cspDeploymentAggregateMigrationName]: sha256Bytes(
+    cspDeploymentAggregateMigrationBytes,
+  ),
 });
 const fingerprint = sha256Json(contract);
+assertRemoteDbObservationAuthority(contract.remote?.observationAuthority);
 
 const expectedStores = [
   "dayModes",
@@ -115,6 +131,8 @@ if (
 
 const hardeningMigrationText = hardeningMigrationBytes.toString("utf8");
 const cspContractMigrationText = cspContractMigrationBytes.toString("utf8");
+const cspDeploymentAggregateMigrationText =
+  cspDeploymentAggregateMigrationBytes.toString("utf8");
 const expectedCspEffectiveDirectiveValues = [
   "base-uri",
   "child-src",
@@ -241,6 +259,28 @@ for (const requiredFragment of requiredCspMigrationFragments) {
   }
   previousCspMigrationFragmentIndex = fragmentIndex;
 }
+for (const requiredFragment of [
+  "create index if not exists csp_violation_reports_deployment_received_idx",
+  "create or replace function public.read_csp_deployment_violation_aggregates",
+  "requested_from >= requested_to",
+  "requested_to - requested_from > interval '8 days'",
+  "reports.received_at >= requested_from",
+  "reports.received_at < requested_to",
+  "reports.source_sha = requested_source_sha",
+  "reports.provider_deployment_id = requested_provider_deployment_id",
+  "security definer",
+  "revoke all on function public.read_csp_deployment_violation_aggregates",
+]) {
+  if (
+    !cspDeploymentAggregateMigrationText
+      .toLowerCase()
+      .includes(requiredFragment.toLowerCase())
+  ) {
+    throw new Error(
+      `CSP deployment aggregate migration lacks: ${requiredFragment}`,
+    );
+  }
+}
 
 const evidenceArgumentIndex = process.argv.indexOf("--remote-evidence");
 let remoteEvidenceValidated = false;
@@ -248,40 +288,13 @@ if (evidenceArgumentIndex !== -1) {
   const evidencePath = process.argv[evidenceArgumentIndex + 1];
   if (!evidencePath) throw new Error("--remote-evidence requires a file");
   const evidence = await readJsonStrict(path.resolve(evidencePath));
-  const requiredTables = [...contract.remote.requiredTables].sort();
-  const observedTables = [...(evidence.requiredTables ?? [])].sort();
-  const requiredFunctions = [...contract.remote.requiredFunctions].sort();
-  const observedFunctions = [...(evidence.requiredFunctions ?? [])].sort();
-  if (
-    evidence.schemaVersion !== 1 ||
-    evidence.contractFingerprint !== fingerprint ||
-    !hasExactMigrationChecksums(evidence.migrationChecksums) ||
-    evidence.migrationsApplied !== true ||
-    evidence.serviceRoleRawSelect !== false ||
-    evidence.serviceRoleRawInsert !== true ||
-    evidence.cspServiceRoleRawSelect !== false ||
-    evidence.cspServiceRoleRawInsert !== true ||
-    evidence.cspObjectsPresent !== true ||
-    evidence.operatorBoundedFunctionOnly !== true ||
-    evidence.cspApplicationCredentialReachable !== false ||
-    requiredTables.length !== observedTables.length ||
-    requiredTables.some((table, index) => table !== observedTables[index]) ||
-    requiredFunctions.length !== observedFunctions.length ||
-    requiredFunctions.some(
-      (functionName, index) => functionName !== observedFunctions[index],
-    ) ||
-    !Number.isFinite(new Date(evidence.observedAt).getTime())
-  ) {
-    throw new Error(
-      "Remote DB evidence does not match the compatibility contract",
-    );
-  }
+  assertRemoteDbObservation(evidence, { contract, migrationChecksums });
   remoteEvidenceValidated = true;
 }
 
 if (
   process.argv.includes("--require-remote") &&
-  (contract.remote.observationStatus !== "observed" || !remoteEvidenceValidated)
+  (!hasFinalRemoteDbAuthority(contract) || !remoteEvidenceValidated)
 ) {
   throw new Error(
     `DB compatibility is not remotely observed: ${(contract.blockerCodes ?? []).join(", ")}`,

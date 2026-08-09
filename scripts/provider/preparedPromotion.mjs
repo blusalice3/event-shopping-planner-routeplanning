@@ -16,6 +16,7 @@ import {
   collectVercelProviderObservation,
 } from "./collect-vercel-observation.mjs";
 import { providerConfigurationHash } from "./providerConfiguration.mjs";
+import { buildClosedVercelCommandEnvironment } from "./vercel-command-environment.mjs";
 import { hashReleaseEvent } from "../release-state/releaseStateReducer.mjs";
 import {
   OPERATION_ID_PATTERN,
@@ -1274,7 +1275,7 @@ export const promotePreparedOperation = async (
         executable: process.execPath,
         arguments: arguments_,
         cwd: root,
-        environment,
+        environment: buildClosedVercelCommandEnvironment(environment),
       });
     } catch (error) {
       commandError = error;

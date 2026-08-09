@@ -114,16 +114,26 @@ export const parseAuthoritativeInputProducerArguments = (argv) => {
     );
   }
   const [command, ...tokens] = argv;
-  const expectedFlags = COMMAND_FLAGS[command];
-  if (!expectedFlags || tokens.length !== expectedFlags.length * 2) {
+  const baseFlags = COMMAND_FLAGS[command];
+  const flagSets =
+    command === "policy-activation-closure" && baseFlags
+      ? [
+          baseFlags,
+          baseFlags.filter((flag) => flag !== "--qa-execution-sha256"),
+        ]
+      : baseFlags
+        ? [baseFlags]
+        : [];
+  if (!flagSets.some((flags) => tokens.length === flags.length * 2)) {
     throw new Error(`Invalid authoritative input command: ${command}`);
   }
+  const allowedFlags = [...new Set(flagSets.flat())];
   const values = {};
   for (let index = 0; index < tokens.length; index += 2) {
     const flag = tokens[index];
     const value = tokens[index + 1];
     if (
-      !expectedFlags.includes(flag) ||
+      !allowedFlags.includes(flag) ||
       Object.hasOwn(values, flag) ||
       typeof value !== "string" ||
       value.length === 0 ||
@@ -133,8 +143,14 @@ export const parseAuthoritativeInputProducerArguments = (argv) => {
     }
     values[flag] = value;
   }
+  const providedFlags = Object.keys(values).sort();
+  const exactFlagSet = flagSets.some(
+    (flags) =>
+      flags.length === providedFlags.length &&
+      [...flags].sort().every((flag, index) => flag === providedFlags[index]),
+  );
   if (
-    Object.keys(values).length !== expectedFlags.length ||
+    !exactFlagSet ||
     !NAMESPACE_PATTERN.test(values["--namespace"]) ||
     ([
       "promotion-subject",
@@ -180,7 +196,8 @@ export const parseAuthoritativeInputProducerArguments = (argv) => {
         ].some((flag) => !SHA256_PATTERN.test(values[flag])))) ||
     (command === "policy-activation-closure" &&
       (!SOURCE_SHA_PATTERN.test(values["--source-sha"]) ||
-        !SHA256_PATTERN.test(values["--qa-execution-sha256"])))
+        (Object.hasOwn(values, "--qa-execution-sha256") &&
+          !SHA256_PATTERN.test(values["--qa-execution-sha256"]))))
   ) {
     throw new Error("Authoritative input arguments are incomplete or invalid");
   }
@@ -501,7 +518,9 @@ export const runAuthoritativeInputProducerCli = async (
         namespace,
         operationId: values["--operation-id"],
         executorSourceSha: values["--source-sha"],
-        qaExecutionReference: reference("--qa-execution-sha256"),
+        qaExecutionReference: Object.hasOwn(values, "--qa-execution-sha256")
+          ? reference("--qa-execution-sha256")
+          : null,
       });
       await writeFileImpl(output, result.bundleBytes, {
         flag: "wx",

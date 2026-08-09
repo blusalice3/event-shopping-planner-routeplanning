@@ -7,6 +7,7 @@ import {
   verifyPhaseSequence,
 } from "./lib/release-policy.mjs";
 import {
+  ARTIFACT_DRILL_BUILD_PURPOSE,
   assertReleaseBuildLauncherBinding,
   bindReleaseBuildLauncher,
   createReleaseBuildInput,
@@ -232,6 +233,59 @@ test("policy activation QA build purpose permits an exact role pair", () => {
         nonPromotable: true,
       },
     ],
+  );
+});
+
+test("artifact drill purpose permits only a closed nonpromotable role pair", () => {
+  const sourceSha = "5".repeat(40);
+  const dbFingerprint = "6".repeat(64);
+  const standardDimensions = { ...policy.initialStandard };
+  const containmentDimensions = projectContainmentDimensions(
+    policy,
+    standardDimensions,
+  );
+  const inputs = [standardDimensions, containmentDimensions].map((dimensions) =>
+    createReleaseBuildInput({
+      policy,
+      sourceSha,
+      sourceState: "clean",
+      releaseRole: dimensions.releaseRole,
+      dimensions,
+      dbFingerprint,
+      buildPurpose: ARTIFACT_DRILL_BUILD_PURPOSE,
+    }),
+  );
+  assert.deepEqual(
+    inputs.map(({ releaseRole, buildPurpose, nonPromotable }) => ({
+      releaseRole,
+      buildPurpose,
+      nonPromotable,
+    })),
+    [
+      {
+        releaseRole: "standard",
+        buildPurpose: ARTIFACT_DRILL_BUILD_PURPOSE,
+        nonPromotable: true,
+      },
+      {
+        releaseRole: "containment",
+        buildPurpose: ARTIFACT_DRILL_BUILD_PURPOSE,
+        nonPromotable: true,
+      },
+    ],
+  );
+  assert.throws(
+    () =>
+      createReleaseBuildInput({
+        policy,
+        sourceSha,
+        sourceState: "clean",
+        releaseRole: "standard",
+        dimensions: standardDimensions,
+        dbFingerprint,
+        buildPurpose: "non-promotable-unknown-purpose",
+      }),
+    /buildPurpose is invalid/,
   );
 });
 

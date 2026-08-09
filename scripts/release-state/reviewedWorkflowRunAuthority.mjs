@@ -12,9 +12,11 @@ export const REVIEWED_WORKFLOW_RUN_RECEIPT_MEDIA_TYPE =
 const MAX_RESPONSE_BYTES = 1024 * 1024;
 const RUN_ID_PATTERN = /^[1-9][0-9]{0,19}$/;
 const SOURCE_SHA_PATTERN = /^[0-9a-f]{40}$/;
-const WORKFLOW_PATHS = new Set([
-  ".github/workflows/performance-evidence.yml",
-  ".github/workflows/release.yml",
+const WORKFLOW_EVENTS = new Map([
+  [".github/workflows/performance-evidence.yml", "workflow_dispatch"],
+  [".github/workflows/release.yml", "workflow_dispatch"],
+  [".github/workflows/metrics-retention.yml", "workflow_dispatch"],
+  [".github/workflows/quality.yml", "push"],
 ]);
 const RECEIPT_KEYS = [
   "apiResponse",
@@ -103,7 +105,7 @@ const assertOptions = ({
     !RUN_ID_PATTERN.test(expectedRunId ?? "") ||
     !RUN_ID_PATTERN.test(expectedRunAttempt ?? "") ||
     !SOURCE_SHA_PATTERN.test(expectedSourceSha ?? "") ||
-    !WORKFLOW_PATHS.has(expectedWorkflowPath) ||
+    !WORKFLOW_EVENTS.has(expectedWorkflowPath) ||
     store?.namespace !== namespace
   ) {
     throw new Error(
@@ -126,7 +128,7 @@ const assertRun = ({
     Array.isArray(run) ||
     String(run.id) !== expectedRunId ||
     String(run.run_attempt) !== expectedRunAttempt ||
-    run.event !== "workflow_dispatch" ||
+    run.event !== WORKFLOW_EVENTS.get(expectedWorkflowPath) ||
     run.status !== "completed" ||
     run.conclusion !== "success" ||
     run.head_branch !== "main" ||
@@ -197,7 +199,7 @@ export const readReviewedWorkflowRunAuthority = async ({
     receipt.runId !== expectedRunId ||
     receipt.runAttempt !== expectedRunAttempt ||
     receipt.workflowPath !== expectedWorkflowPath ||
-    receipt.event !== "workflow_dispatch" ||
+    receipt.event !== WORKFLOW_EVENTS.get(expectedWorkflowPath) ||
     receipt.status !== "completed" ||
     receipt.conclusion !== "success" ||
     receipt.headBranch !== "main" ||
@@ -220,7 +222,7 @@ export const readReviewedWorkflowRunAuthority = async ({
   ) {
     throw new Error("Reviewed GitHub workflow run API response is absent");
   }
-  assertRun({
+  const run = assertRun({
     run: parseJsonStrict(
       storedResponse.bytes.toString("utf8"),
       "Stored GitHub workflow run API response",
@@ -231,7 +233,7 @@ export const readReviewedWorkflowRunAuthority = async ({
     expectedSourceSha,
     expectedWorkflowPath,
   });
-  return { receipt, receiptBytes: storedReceipt.bytes };
+  return { receipt, receiptBytes: storedReceipt.bytes, run };
 };
 
 export const readBoundReviewedWorkflowRunAuthority = async ({
@@ -346,7 +348,7 @@ export const collectReviewedWorkflowRunAuthority = async ({
     runId: expectedRunId,
     runAttempt: expectedRunAttempt,
     workflowPath: expectedWorkflowPath,
-    event: "workflow_dispatch",
+    event: WORKFLOW_EVENTS.get(expectedWorkflowPath),
     status: "completed",
     conclusion: "success",
     headBranch: "main",

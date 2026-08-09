@@ -9,6 +9,7 @@ import {
   POLICY_ACTIVATION_CLOSURE_KIND,
   derivePolicyActivationTransition,
 } from "./policyActivation.mjs";
+import { buildP8FloorActivationClosure } from "./p8FloorActivationClosure.mjs";
 import { assertPolicyCompatibilityEntries } from "./policyCompatibility.mjs";
 import {
   POLICY_ACTIVATION_QA_MANIFEST_MEDIA_TYPE,
@@ -1645,6 +1646,7 @@ export const buildAuthoritativePolicyActivationClosure = async (
   {
     readState = readCurrentReleaseState,
     validateExecution = validatePolicyActivationQaExecutionBundle,
+    buildP8Closure = buildP8FloorActivationClosure,
     nowMilliseconds = Date.now(),
   } = {},
 ) => {
@@ -1670,6 +1672,43 @@ export const buildAuthoritativePolicyActivationClosure = async (
     !SOURCE_SHA_PATTERN.test(executorSourceSha)
   ) {
     throw new Error("Policy closure producer identity or store is invalid");
+  }
+  if (qaExecutionReference === null || qaExecutionReference === undefined) {
+    const current = await readState({ store });
+    const releasePolicyReference = current.snapshot?.activeReleasePolicy;
+    assertReference(
+      releasePolicyReference,
+      namespace,
+      "P8 active release policy",
+    );
+    const releasePolicyObject = await readCanonical({
+      store,
+      namespace,
+      reference: releasePolicyReference,
+      label: "P8 active release policy",
+    });
+    const transition = derivePolicyActivationTransition({
+      previousPolicy: releasePolicyObject.value,
+      proposedPolicy: releasePolicyObject.value,
+      activePolicy: releasePolicyObject.value,
+      acceptedGate: current.snapshot.acceptedGate,
+      acceptedStandardFloors: current.snapshot.acceptedStandardFloors,
+      currentFloors: current.snapshot.minimumSafetyFloors,
+      previousReleasePolicy: releasePolicyReference,
+      proposedReleasePolicy: releasePolicyReference,
+      activeReleasePolicy: releasePolicyReference,
+    });
+    return buildP8Closure({
+      store,
+      namespace,
+      operationId,
+      executorSourceSha,
+      current,
+      releasePolicy: releasePolicyObject.value,
+      releasePolicyReference,
+      transition,
+      nowMilliseconds,
+    });
   }
   assertReference(qaExecutionReference, namespace, "QA execution");
   const reviewedExecutionObject = await readCanonical({

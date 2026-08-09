@@ -3,8 +3,15 @@ import {
   sha256Bytes,
   sha256Json,
 } from "../lib/canonical-json.mjs";
+import { assertRemoteDbObservation } from "../db/remote-db-observation.mjs";
+import {
+  readReviewedRemoteDbObservationProductionAuthority,
+  readStoredRemoteDbObservationAuthority,
+} from "../db/remote-db-observation-authority.mjs";
+import { hasFinalRemoteDbAuthority } from "../lib/db-compatibility-authority.mjs";
 import { verifyPhaseSequence } from "../lib/release-policy.mjs";
 import { readCurrentReleaseState } from "./currentReleaseState.mjs";
+import { validatePreInitializationPhaseExitSeed } from "./phaseExitAttestation.mjs";
 import {
   deriveLifecycleAppendId,
   deriveRollbackInventory,
@@ -45,6 +52,7 @@ export const ADMINISTRATIVE_SUBJECT_KINDS = Object.freeze({
 const SUBJECT_MEDIA_TYPE =
   "application/vnd.event-shopping-planner.release-state-administrative-subject+json;version=1";
 const DB_ACTIVATION_ROLES = ["releaseOwner", "dataSafetyReviewer"];
+const RUN_ID_PATTERN = /^[1-9][0-9]{0,19}$/;
 const EVENT_TYPE_BY_SUBJECT_KIND = Object.freeze({
   [ADMINISTRATIVE_SUBJECT_KINDS.initialize]: "state-initialized",
   [ADMINISTRATIVE_SUBJECT_KINDS.activateDb]: "db-contract-activated",
@@ -58,6 +66,8 @@ const SUBJECT_KEYS_BY_KIND = Object.freeze({
     "bootstrapRecoveryReference",
     "currentDbCompatibility",
     "dbContractReference",
+    "dbObservationReference",
+    "dbObservationRunAuthorityReference",
     "executorSourceSha",
     "expectedState",
     "legacyObservationReference",
@@ -65,6 +75,8 @@ const SUBJECT_KEYS_BY_KIND = Object.freeze({
     "minimumSafetyFloors",
     "namespace",
     "operationId",
+    "phaseExitAttestationReferences",
+    "phaseExitAttestationSeed",
     "schemaVersion",
     "sourceEvidenceRefs",
     "subjectKind",
@@ -73,6 +85,8 @@ const SUBJECT_KEYS_BY_KIND = Object.freeze({
   [ADMINISTRATIVE_SUBJECT_KINDS.activateDb]: [
     "currentDbCompatibility",
     "dbContractReference",
+    "dbObservationReference",
+    "dbObservationRunAuthorityReference",
     "executorSourceSha",
     "expectedState",
     "namespace",
@@ -170,10 +184,7 @@ const initialMinimumSafetyFloors = (releasePolicy) => {
 
 const assertFinalDbContract = (contract, reference) => {
   if (
-    contract?.contractStatus !== "remote-verified" ||
-    contract?.remote?.observationStatus !== "observed" ||
-    !Array.isArray(contract.blockerCodes) ||
-    contract.blockerCodes.length !== 0 ||
+    !hasFinalRemoteDbAuthority(contract) ||
     typeof contract.contractUri !== "string" ||
     contract.contractUri.length === 0 ||
     sha256Json(contract) !== reference.sha256
@@ -186,6 +197,52 @@ const assertFinalDbContract = (contract, reference) => {
     contractUri: contract.contractUri,
     fingerprint: reference.sha256,
   };
+};
+
+const assertBoundRemoteDbObservation = ({
+  contract,
+  contractReference,
+  observation,
+  nowMs,
+}) => {
+  assertRemoteDbObservation(observation, {
+    contract,
+    migrationChecksums: contract.remote?.migrationChecksums,
+    now: () => nowMs,
+  });
+  if (observation.contractFingerprint !== contractReference.sha256) {
+    throw new Error(
+      "Remote DB observation differs from the final compatibility contract",
+    );
+  }
+};
+
+const validateDbObservationProducerRun = async ({
+  store,
+  namespace,
+  reference,
+  observationReference,
+  sourceSha,
+  currentWorkflowRunId,
+  contract,
+  approvalPolicy,
+  nowMs,
+}) => {
+  if (!RUN_ID_PATTERN.test(currentWorkflowRunId ?? "")) {
+    throw new Error("Current administrative workflow run is invalid");
+  }
+  const reviewed = await readReviewedRemoteDbObservationProductionAuthority({
+    store,
+    namespace,
+    reference,
+    observationReference,
+    expectedSourceSha: sourceSha,
+    currentWorkflowRunId,
+    contract,
+    approvalPolicy,
+    now: () => nowMs,
+  });
+  return reviewed;
 };
 
 const validateReleasePolicyReference = async ({
@@ -258,13 +315,19 @@ export const buildAuthoritativeStateInitializationSubject = async (
     readState = readCurrentReleaseState,
     validateProviderObservation = validateProviderAliasObservationEvidence,
     verifyBindingEvidence = collectAndVerifyBindingEvidence,
+    validateDbObservationRun = validateDbObservationProducerRun,
+    validatePhaseExitSeed = validatePreInitializationPhaseExitSeed,
+    isSourceAncestor = (ancestor, descendant) => ancestor === descendant,
+    nowMs = Date.now(),
   } = {},
 ) => {
   assertNoAuthorityInjection(options, [
     "bootstrapRecovery",
     "currentDbCompatibility",
+    "dbObservation",
     "legacyObservedProduction",
     "minimumSafetyFloors",
+    "phaseExitAttestationSeed",
     "releasePolicy",
     "snapshot",
   ]);
@@ -276,7 +339,12 @@ export const buildAuthoritativeStateInitializationSubject = async (
     bootstrapRecoveryReference,
     legacyObservationReference,
     dbContractReference,
+    dbObservationReference,
+    dbObservationRunAuthorityReference,
     activeReleasePolicyReference,
+    currentWorkflowRunId,
+    approvalPolicy,
+    phaseExitAttestationReferences,
   } = options;
   assertIdentity({ store, namespace, operationId });
   if (!SOURCE_SHA_PATTERN.test(executorSourceSha)) {
@@ -291,6 +359,12 @@ export const buildAuthoritativeStateInitializationSubject = async (
   ) {
     throw new Error("State initialization requires an empty namespace");
   }
+  const phaseExitAttestationSeed = await validatePhaseExitSeed({
+    store,
+    references: phaseExitAttestationReferences,
+    currentSourceSha: executorSourceSha,
+    isSourceAncestor,
+  });
   const [{ value: bootstrapRecovery }, { value: dbContract }, releasePolicy] =
     await Promise.all([
       readCanonicalEvidence({
@@ -312,6 +386,26 @@ export const buildAuthoritativeStateInitializationSubject = async (
         label: "Active release policy",
       }),
     ]);
+  const [{ observation: dbObservation }] = await Promise.all([
+    readStoredRemoteDbObservationAuthority({
+      store,
+      namespace,
+      reference: dbObservationReference,
+      contract: dbContract,
+      now: () => nowMs,
+    }),
+    validateDbObservationRun({
+      store,
+      namespace,
+      reference: dbObservationRunAuthorityReference,
+      observationReference: dbObservationReference,
+      sourceSha: executorSourceSha,
+      currentWorkflowRunId,
+      contract: dbContract,
+      approvalPolicy,
+      nowMs,
+    }),
+  ]);
   assertDeploymentBinding(bootstrapRecovery, {
     namespace,
     expectedRole: "containment",
@@ -323,10 +417,23 @@ export const buildAuthoritativeStateInitializationSubject = async (
       "Bootstrap recovery does not use legacy bootstrap identity",
     );
   }
+  if (
+    !(await isSourceAncestor(bootstrapRecovery.sourceSha, executorSourceSha))
+  ) {
+    throw new Error(
+      "Bootstrap recovery source is not an ancestor of the initialization executor",
+    );
+  }
   const currentDbCompatibility = assertFinalDbContract(
     dbContract,
     dbContractReference,
   );
+  assertBoundRemoteDbObservation({
+    contract: dbContract,
+    contractReference: dbContractReference,
+    observation: dbObservation,
+    nowMs,
+  });
   if (
     !sameCanonicalValue(
       bootstrapRecovery.requiredDbCompatibility,
@@ -385,6 +492,10 @@ export const buildAuthoritativeStateInitializationSubject = async (
     bootstrapRecoveryReference: structuredClone(bootstrapRecoveryReference),
     legacyObservationReference: structuredClone(legacyObservationReference),
     dbContractReference: structuredClone(dbContractReference),
+    dbObservationReference: structuredClone(dbObservationReference),
+    dbObservationRunAuthorityReference: structuredClone(
+      dbObservationRunAuthorityReference,
+    ),
     activeReleasePolicyReference: structuredClone(activeReleasePolicyReference),
     acceptedGate: null,
     bootstrapRecovery: structuredClone(bootstrapRecovery),
@@ -394,12 +505,21 @@ export const buildAuthoritativeStateInitializationSubject = async (
     },
     currentDbCompatibility,
     minimumSafetyFloors: initialMinimumSafetyFloors(releasePolicy),
+    phaseExitAttestationReferences: phaseExitAttestationReferences.map(
+      (reference) => structuredClone(reference),
+    ),
+    phaseExitAttestationSeed: phaseExitAttestationSeed.map((entry) =>
+      structuredClone(entry),
+    ),
     sourceEvidenceRefs: sortAndDedupeReferences(
       [
         bootstrapRecoveryReference,
         legacyObservationReference,
         dbContractReference,
+        dbObservationReference,
+        dbObservationRunAuthorityReference,
         activeReleasePolicyReference,
+        ...phaseExitAttestationReferences,
         ...bindingEvidenceRefs,
         ...legacyValidation.providerReceiptChainReferences,
       ],
@@ -420,10 +540,13 @@ export const buildAuthoritativeDbContractActivationSubject = async (
   {
     readState = readCurrentReleaseState,
     deriveInventory = deriveRollbackInventory,
+    validateDbObservationRun = validateDbObservationProducerRun,
+    nowMs = Date.now(),
   } = {},
 ) => {
   assertNoAuthorityInjection(options, [
     "currentDbCompatibility",
+    "dbObservation",
     "previousDbCompatibility",
     "rollbackInventory",
     "snapshot",
@@ -434,6 +557,10 @@ export const buildAuthoritativeDbContractActivationSubject = async (
     operationId,
     executorSourceSha,
     dbContractReference,
+    dbObservationReference,
+    dbObservationRunAuthorityReference,
+    currentWorkflowRunId,
+    approvalPolicy,
   } = options;
   assertIdentity({ store, namespace, operationId });
   if (!SOURCE_SHA_PATTERN.test(executorSourceSha)) {
@@ -453,10 +580,36 @@ export const buildAuthoritativeDbContractActivationSubject = async (
     reference: dbContractReference,
     label: "Next DB compatibility contract",
   });
+  const [{ observation: dbObservation }] = await Promise.all([
+    readStoredRemoteDbObservationAuthority({
+      store,
+      namespace,
+      reference: dbObservationReference,
+      contract: dbContract,
+      now: () => nowMs,
+    }),
+    validateDbObservationRun({
+      store,
+      namespace,
+      reference: dbObservationRunAuthorityReference,
+      observationReference: dbObservationReference,
+      sourceSha: executorSourceSha,
+      currentWorkflowRunId,
+      contract: dbContract,
+      approvalPolicy,
+      nowMs,
+    }),
+  ]);
   const nextDbCompatibility = assertFinalDbContract(
     dbContract,
     dbContractReference,
   );
+  assertBoundRemoteDbObservation({
+    contract: dbContract,
+    contractReference: dbContractReference,
+    observation: dbObservation,
+    nowMs,
+  });
   if (
     sameCanonicalValue(
       current.snapshot.currentDbCompatibility,
@@ -513,6 +666,10 @@ export const buildAuthoritativeDbContractActivationSubject = async (
       current.snapshot.activeProduction?.sourceSha ??
       current.snapshot.bootstrapRecovery.sourceSha,
     dbContractReference: structuredClone(dbContractReference),
+    dbObservationReference: structuredClone(dbObservationReference),
+    dbObservationRunAuthorityReference: structuredClone(
+      dbObservationRunAuthorityReference,
+    ),
     previousDbCompatibility: structuredClone(
       current.snapshot.currentDbCompatibility,
     ),
@@ -521,6 +678,8 @@ export const buildAuthoritativeDbContractActivationSubject = async (
     sourceEvidenceRefs: sortAndDedupeReferences(
       [
         dbContractReference,
+        dbObservationReference,
+        dbObservationRunAuthorityReference,
         current.snapshot.activeReleasePolicy,
         ...inventoryEvidence,
       ],
@@ -722,11 +881,13 @@ const payloadFromSubject = (subject) => {
     case ADMINISTRATIVE_SUBJECT_KINDS.initialize:
       return {
         acceptedGate: subject.acceptedGate,
+        executorSourceSha: subject.executorSourceSha,
         legacyObservedProduction: subject.legacyObservedProduction,
         bootstrapRecovery: subject.bootstrapRecovery,
         minimumSafetyFloors: subject.minimumSafetyFloors,
         currentDbCompatibility: subject.currentDbCompatibility,
         activeReleasePolicy: subject.activeReleasePolicyReference,
+        phaseExitAttestationSeed: subject.phaseExitAttestationSeed,
       };
     case ADMINISTRATIVE_SUBJECT_KINDS.activateDb:
       return {
@@ -776,6 +937,13 @@ const rederiveSubject = async ({
   readState,
   deriveInventory,
   validateProviderObservation,
+  verifyBindingEvidence,
+  validateDbObservationRun,
+  validatePhaseExitSeed,
+  isSourceAncestor,
+  currentWorkflowRunId,
+  approvalPolicy,
+  nowMs,
 }) => {
   if (subject.subjectKind === ADMINISTRATIVE_SUBJECT_KINDS.initialize) {
     return buildAuthoritativeStateInitializationSubject(
@@ -787,9 +955,23 @@ const rederiveSubject = async ({
         bootstrapRecoveryReference: subject.bootstrapRecoveryReference,
         legacyObservationReference: subject.legacyObservationReference,
         dbContractReference: subject.dbContractReference,
+        dbObservationReference: subject.dbObservationReference,
+        dbObservationRunAuthorityReference:
+          subject.dbObservationRunAuthorityReference,
         activeReleasePolicyReference: subject.activeReleasePolicyReference,
+        phaseExitAttestationReferences: subject.phaseExitAttestationReferences,
+        currentWorkflowRunId,
+        approvalPolicy,
       },
-      { readState, validateProviderObservation },
+      {
+        readState,
+        validateProviderObservation,
+        verifyBindingEvidence,
+        validateDbObservationRun,
+        validatePhaseExitSeed,
+        isSourceAncestor,
+        nowMs,
+      },
     );
   }
   if (subject.subjectKind === ADMINISTRATIVE_SUBJECT_KINDS.activateDb) {
@@ -800,8 +982,13 @@ const rederiveSubject = async ({
         operationId: subject.operationId,
         executorSourceSha: subject.executorSourceSha,
         dbContractReference: subject.dbContractReference,
+        dbObservationReference: subject.dbObservationReference,
+        dbObservationRunAuthorityReference:
+          subject.dbObservationRunAuthorityReference,
+        currentWorkflowRunId,
+        approvalPolicy,
       },
-      { readState, deriveInventory },
+      { readState, deriveInventory, validateDbObservationRun, nowMs },
     );
   }
   if (subject.subjectKind === ADMINISTRATIVE_SUBJECT_KINDS.abort) {
@@ -892,6 +1079,10 @@ export const executeAdministrativeTransition = async (
     collectApprovals = collectAndStorePrePromotionApprovals,
     deriveInventory = deriveRollbackInventory,
     validateProviderObservation = validateProviderAliasObservationEvidence,
+    verifyBindingEvidence = collectAndVerifyBindingEvidence,
+    validateDbObservationRun = validateDbObservationProducerRun,
+    validatePhaseExitSeed = validatePreInitializationPhaseExitSeed,
+    isSourceAncestor = (ancestor, descendant) => ancestor === descendant,
     nowMs = Date.now(),
   } = {},
 ) => {
@@ -973,6 +1164,13 @@ export const executeAdministrativeTransition = async (
     readState,
     deriveInventory,
     validateProviderObservation,
+    verifyBindingEvidence,
+    validateDbObservationRun,
+    validatePhaseExitSeed,
+    isSourceAncestor,
+    currentWorkflowRunId: expectedRunId,
+    approvalPolicy,
+    nowMs,
   });
   if (!sameCanonicalValue(subject, derived.subject)) {
     throw new Error(
@@ -1030,6 +1228,13 @@ export const executeAdministrativeTransition = async (
     readState,
     deriveInventory,
     validateProviderObservation,
+    verifyBindingEvidence,
+    validateDbObservationRun,
+    validatePhaseExitSeed,
+    isSourceAncestor,
+    currentWorkflowRunId: expectedRunId,
+    approvalPolicy,
+    nowMs,
   });
   if (!sameCanonicalValue(subject, refreshed.subject)) {
     throw new Error("Release State or evidence changed during authorization");

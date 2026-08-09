@@ -13,7 +13,7 @@ const run = (...arguments_) =>
   });
 const output = (result) => `${result.stdout}\n${result.stderr}`;
 
-test("foundation readiness includes baseline, retention, and startup authorities", () => {
+test("foundation readiness includes baseline, retention, startup, and external prerequisite authorities", () => {
   const result = run("scripts/verify-foundation-policy.mjs", "--json");
   assert.equal(result.status, 0, output(result));
   const report = JSON.parse(result.stdout);
@@ -24,6 +24,9 @@ test("foundation readiness includes baseline, retention, and startup authorities
     "cron-not-remotely-observed",
     "last-success-not-remotely-observed",
     "production-waf-rate-unobserved",
+    "backup-provider-unconfigured",
+    "device-runner-group-unconfigured",
+    "artifact-drill-database-host-unconfigured",
   ]) {
     assert.ok(report.blockerCodes.includes(blocker), `missing ${blocker}`);
   }
@@ -38,6 +41,9 @@ test("foundation production readiness rejects unresolved control authorities", (
   assert.match(output(result), /P0-BOOTSTRAP-BASELINE/);
   assert.match(output(result), /cron-not-remotely-observed/);
   assert.match(output(result), /production-waf-rate-unobserved/);
+  assert.match(output(result), /backup-provider-unconfigured/);
+  assert.match(output(result), /device-runner-group-unconfigured/);
+  assert.match(output(result), /artifact-drill-database-host-unconfigured/);
 });
 
 test("accepts complete per-target retention evidence", () => {

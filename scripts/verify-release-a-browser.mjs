@@ -754,8 +754,10 @@ const collectFixtureEvidence = async (client) =>
           .join("");
       };
       const legacySourceEvidence = {};
+      const rawValues = {};
       for (const key of legacySourceKeys) {
         const value = localStorage.getItem(key);
+        rawValues[key] = value;
         legacySourceEvidence[key] = {
           present: value !== null,
           length: value?.length ?? 0,
@@ -764,6 +766,7 @@ const collectFixtureEvidence = async (client) =>
       }
       return {
         legacySources: legacySourceEvidence,
+        rawValues,
         metadataPresent: metadata !== null,
         metadataLength: metadata?.length ?? 0,
         metadataHash: await hash(metadata),
@@ -791,7 +794,7 @@ const collectRollbackDatabaseEvidence = async (client) =>
       });
       try {
         const transaction = database.transaction(
-          ["syncQueue", "eventMetadata", "eventLists"],
+          [...database.objectStoreNames],
           "readonly",
         );
         const read = (storeName, key) =>
@@ -812,8 +815,21 @@ const collectRollbackDatabaseEvidence = async (client) =>
           "__esp_internal__:checkpoint:v1:eventMetadata:data",
         );
         const eventLists = await read("eventLists", "data");
+        const syncQueuePayload = await read("syncQueue", "data");
+        const stores = [...database.objectStoreNames]
+          .map((name) => {
+            const store = transaction.objectStore(name);
+            return {
+              name,
+              keyPath: store.keyPath,
+              indexes: [...store.indexNames].sort(),
+            };
+          })
+          .sort((left, right) => left.name.localeCompare(right.name));
         return {
           dbVersion: database.version,
+          databaseName: database.name,
+          stores,
           journalSchemaVersion: journal?.schemaVersion ?? null,
           journalPhase: journal?.phase ?? null,
           journalDataMigrationStatus: journal?.dataMigrationStatus ?? null,
@@ -848,6 +864,12 @@ const collectRollbackDatabaseEvidence = async (client) =>
             )}])
               ? eventLists[${JSON.stringify(ROLLBACK_SAVE_EVENT_NAME)}].length
               : 0,
+          },
+          raw: {
+            archive,
+            checkpoint: eventMetadataCheckpoint,
+            journal,
+            syncQueuePayload,
           },
         };
       } finally {
@@ -1226,6 +1248,19 @@ try {
   browserClient = await browser.newBrowserCDPSession();
   const devToolsVersion = await browserClient.send("Browser.getVersion");
   browserVersion = devToolsVersion.product ?? browser.version();
+  const browserProcesses = await browserClient.send(
+    "SystemInfo.getProcessInfo",
+  );
+  const browserProcessIds = browserProcesses.processInfo
+    .filter(({ type }) => type === "browser")
+    .map(({ id }) => id);
+  assert(
+    browserProcessIds.length === 1 &&
+      Number.isSafeInteger(browserProcessIds[0]) &&
+      browserProcessIds[0] > 0,
+    "Chromium browser process identity is ambiguous.",
+  );
+  const browserProcessId = browserProcessIds[0];
   const startupAppPage = browserContext.pages()[0];
   assert(startupAppPage, "Initial standalone app-window page is missing.");
   standaloneTarget = await createTarget(browserContext, startupAppPage);
@@ -1294,6 +1329,11 @@ try {
       activeRollbackWorker.sha256 === EXPECTED_SERVICE_WORKER_SHA256,
       "Active rollback Service Worker does not match the expected artifact.",
     );
+    const rollbackOfflineControllerIdentity =
+      await collectOfflineControllerBuildIdentity(
+        primary.client,
+        TARGET_ARTIFACT_ID,
+      );
     const expectedFixture = createExpectedLegacyFixtureEvidence();
     const rollbackFixture = await collectFixtureEvidence(primary.client);
     assertFixtureUnchanged(
@@ -1423,12 +1463,14 @@ try {
           result: "PASS",
           mode: "rollback",
           browser: path.basename(browserExecutablePath),
+          browserProcessId,
           previewOrigin: new URL(PREVIEW_URL).origin,
           fromArtifactId: EXPECTED_FROM_ARTIFACT_ID,
           targetArtifactId: TARGET_ARTIFACT_ID,
           rollbackArtifactLoaded: true,
           indexSha256: previewIndexSha256,
           activeServiceWorker: activeRollbackWorker,
+          offlineControllerIdentity: rollbackOfflineControllerIdentity,
           serviceWorkerResponseCacheControl: serviceWorkerCacheControl,
           legacySources: {
             metadataPresent: finalRollbackFixture.metadataPresent,
@@ -1440,6 +1482,7 @@ try {
             protectedLegacySourceCount: Object.keys(
               finalRollbackFixture.legacySources,
             ).length,
+            rawValues: finalRollbackFixture.rawValues,
             unchanged: true,
             physicalDeleteCount: rollbackInstrumentation.legacyDeleteCount,
           },
@@ -1643,6 +1686,7 @@ try {
           result: "PASS",
           mode: "forward",
           browser: path.basename(browserExecutablePath),
+          browserProcessId,
           previewOrigin: new URL(PREVIEW_URL).origin,
           fromArtifactId: EXPECTED_FROM_ARTIFACT_ID,
           targetArtifactId: TARGET_ARTIFACT_ID,
@@ -1661,10 +1705,12 @@ try {
             protectedLegacySourceCount: Object.keys(
               forwardFixture.legacySources,
             ).length,
+            rawValues: forwardFixture.rawValues,
             unchanged: true,
             physicalDeleteCount: forwardInstrumentation.legacyDeleteCount,
           },
           rollbackSavedEvent: forwardDatabase.rollbackSavedEvent,
+          database: forwardDatabase,
           surfaces: {
             normalTab: true,
             standaloneAppWindowEquivalent: forwardStandaloneMedia,
@@ -1821,6 +1867,9 @@ try {
         offlineControllerIdentity.cleanupCapability === "forced-off",
       "Active controller cannot serve the Release A build identity offline.",
     );
+    const preflightDatabase = await collectRollbackDatabaseEvidence(
+      primary.client,
+    );
 
     process.stdout.write(
       `${JSON.stringify(
@@ -1828,6 +1877,7 @@ try {
           result: "PREFLIGHT_PASS",
           observedAt: new Date().toISOString(),
           browser: path.basename(browserExecutablePath),
+          browserProcessId,
           browserVersion,
           previewOrigin: new URL(PREVIEW_URL).origin,
           buildId: finalProbe.buildId,
@@ -1864,9 +1914,11 @@ try {
             syncQueueHash: finalFixture.syncQueueHash,
             protectedLegacySourceCount: Object.keys(finalFixture.legacySources)
               .length,
+            rawValues: finalFixture.rawValues,
             unchanged: true,
             physicalDeleteCount: finalInstrumentation.legacyDeleteCount,
           },
+          database: preflightDatabase,
           recoveryScreenVisible: finalProbe.recoveryVisible,
           startupMetricRecorded: finalProbe.startupReadyCount >= 1,
         },

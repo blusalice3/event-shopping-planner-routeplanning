@@ -11,6 +11,7 @@ import {
 } from "./build-pwa-recovery-agent.mjs";
 import { readJsonStrict, sha256Json } from "./lib/canonical-json.mjs";
 import {
+  ARTIFACT_DRILL_BUILD_PURPOSE,
   bindReleaseBuildLauncher,
   POLICY_ACTIVATION_QA_BUILD_PURPOSE,
   RELEASE_BUILD_PURPOSE_ENV,
@@ -47,17 +48,19 @@ if (
 }
 const reviewedRequirementsSha256 =
   process.env.FOUNDATION_ARTIFACT_BUILD_REQUIREMENTS_SHA256 ?? null;
-const reviewedPolicyQaLaunch =
+const reviewedPairPurpose = process.env[RELEASE_BUILD_PURPOSE_ENV] ?? null;
+const reviewedNonPromotablePairLaunch =
   qaProfile === null &&
-  process.env[RELEASE_BUILD_PURPOSE_ENV] ===
-    POLICY_ACTIVATION_QA_BUILD_PURPOSE &&
+  [POLICY_ACTIVATION_QA_BUILD_PURPOSE, ARTIFACT_DRILL_BUILD_PURPOSE].includes(
+    reviewedPairPurpose,
+  ) &&
   typeof reviewedRequirementsSha256 === "string" &&
   /^[0-9a-f]{64}$/.test(reviewedRequirementsSha256);
 const cliBuildPurpose =
   qaProfile !== null
     ? `qa-${qaProfile}`
-    : reviewedPolicyQaLaunch
-      ? POLICY_ACTIVATION_QA_BUILD_PURPOSE
+    : reviewedNonPromotablePairLaunch
+      ? reviewedPairPurpose
       : "production";
 if (
   qaProfile !== null &&

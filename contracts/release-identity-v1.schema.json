@@ -45,7 +45,12 @@
           "$ref": "#/$defs/sha256"
         },
         "buildPurpose": {
-          "enum": ["qa-xlsx-main", "qa-list-force-full"]
+          "enum": [
+            "qa-xlsx-main",
+            "qa-list-force-full",
+            "non-promotable-policy-activation-qa",
+            "non-promotable-artifact-drill"
+          ]
         },
         "nonPromotable": {
           "const": true

@@ -3,10 +3,12 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { readJsonStrict, sha256Json } from "./lib/canonical-json.mjs";
+import { verifyArtifactControlStoreDrillPolicy } from "./lib/artifact-control-store-drill-policy.mjs";
 import {
   projectContainmentDimensions,
   verifyPhaseSequence,
 } from "./lib/release-policy.mjs";
+import { verifyExternalPrerequisitePolicy } from "./lib/phase-exit-external-prerequisites.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const configDirectory = path.join(root, "config");
@@ -98,6 +100,18 @@ const metricsRetentionPolicy = await readJsonStrict(
 const startupBurstContract = await readJsonStrict(
   path.join(contractDirectory, "persistence-release-a-startup-bursts-v1.json"),
 );
+const externalPrerequisitePolicy = await readJsonStrict(
+  path.join(configDirectory, "phase-exit-external-prerequisites.json"),
+);
+const externalPrerequisiteBlockers = verifyExternalPrerequisitePolicy(
+  externalPrerequisitePolicy,
+).blockerCodes;
+const artifactControlStoreDrillPolicy = await readJsonStrict(
+  path.join(configDirectory, "artifact-control-store-drill.json"),
+);
+const artifactControlStoreDrillBlockers = verifyArtifactControlStoreDrillPolicy(
+  artifactControlStoreDrillPolicy,
+).blockerCodes;
 const [
   legacyContinuousSourceSchema,
   legacyCompanionSourceSchema,
@@ -163,6 +177,8 @@ assertClosedKeys(
     "statementTimeoutMilliseconds",
     "maximumEvidenceObjectBytes",
     "credentialRotationDays",
+    "backupOwner",
+    "restoreOwner",
     "productionCaSha256",
     "localContainerImage",
     "migrations",
@@ -174,6 +190,7 @@ assertClosedKeys(
 const expectedReleaseStateMigrations = [
   "ops/release-state/migrations/0001_release_state_store.sql",
   "ops/release-state/migrations/0002_acceptance_evidence_chains.sql",
+  "ops/release-state/migrations/0003_phase_exit_attestations.sql",
 ];
 if (
   !Array.isArray(stateStorePolicy.migrations) ||
@@ -357,6 +374,8 @@ const blockers = [
   ...baselineBlockers,
   ...retentionBlockers,
   ...startupBurstBlockers,
+  ...externalPrerequisiteBlockers,
+  ...artifactControlStoreDrillBlockers,
 ];
 
 if (

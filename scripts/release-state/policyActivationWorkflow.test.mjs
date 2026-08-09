@@ -7,6 +7,7 @@ import {
   NORMAL_POLICY_ACTIVATION_GATES,
   POLICY_ACTIVATION_GATES,
 } from "./phaseGates.mjs";
+import { RELEASE_DISPATCH_OPERATION_SCHEMAS } from "./releaseDispatchRequest.mjs";
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -39,10 +40,7 @@ test("connects every policy gate through QA, closure, reviewed subject, and CAS"
     "activate-policy",
     "activate-policy-floor",
   ]) {
-    assert.match(workflow, new RegExp(`^          - ${operation}$`, "m"));
-  }
-  for (const gate of POLICY_ACTIVATION_GATES) {
-    assert.match(workflow, new RegExp(`^          - ${gate}$`, "m"));
+    assert.ok(Object.hasOwn(RELEASE_DISPATCH_OPERATION_SCHEMAS, operation));
   }
   assert.deepEqual(
     POLICY_ACTIVATION_GATES.filter((gate) => gate !== "P8-CLEAN"),
@@ -131,6 +129,8 @@ test("builds a nonpromotable pair and rejects it from the production package pat
     closureValidationEnd,
   );
   assert.match(closureValidation, /REQUESTED_POLICY_QA_EXECUTION_SHA256/);
+  assert.match(closureValidation, /\$hasQaRun -ne \$hasQaHash/);
+  assert.match(closureValidation, /live P8 floor-only branch/);
   assert.doesNotMatch(
     closureValidation,
     /REQUESTED_(?:PROPOSED_RELEASE_POLICY|ACTIVE_RELEASE_POLICY|APPROVAL_POLICY|POLICY_QA_PACKAGE)_SHA256/,
@@ -154,7 +154,7 @@ test("derives every source-hardened build from a distinct reviewed requirements 
   );
   assert.match(
     productionDownload,
-    /run-id: \$\{\{ inputs\.artifact_build_requirements_run_id \}\}/,
+    /run-id: \$\{\{ env\.REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_RUN_ID \}\}/,
   );
   const build = stepBody(
     "Build and verify reviewed immutable package",
@@ -170,11 +170,11 @@ test("derives every source-hardened build from a distinct reviewed requirements 
   assert.doesNotMatch(build, /--standard-dimensions/);
   assert.match(
     workflow,
-    /foundation-release-\$\{\{ inputs\.source_sha \}\}-\$\{\{ inputs\.artifact_build_requirements_sha256 \}\}/,
+    /foundation-release-\$\{\{ inputs\.source_sha \}\}-\$\{\{ env\.REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256 \}\}/,
   );
   assert.match(
     workflow,
-    /foundation-policy-qa-build-\$\{\{ inputs\.policy_target_source_sha \}\}-\$\{\{ inputs\.artifact_build_requirements_sha256 \}\}/,
+    /foundation-policy-qa-build-\$\{\{ env\.REQUESTED_POLICY_TARGET_SOURCE_SHA \}\}-\$\{\{ env\.REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_SHA256 \}\}/,
   );
   assert.match(
     workflow,
@@ -189,7 +189,7 @@ test("runs Policy QA and closure from two distinct reviewed prior-run artifacts"
   );
   assert.match(
     subjectDownload,
-    /run-id: \$\{\{ inputs\.policy_qa_execution_subject_run_id \}\}/,
+    /run-id: \$\{\{ env\.REQUESTED_POLICY_QA_EXECUTION_SUBJECT_RUN_ID \}\}/,
   );
   const execution = stepBody(
     "Execute reviewed nonproduction Policy QA and recovery drills",
@@ -204,7 +204,11 @@ test("runs Policy QA and closure from two distinct reviewed prior-run artifacts"
   );
   assert.match(
     executionDownload,
-    /run-id: \$\{\{ inputs\.policy_qa_execution_run_id \}\}/,
+    /run-id: \$\{\{ env\.REQUESTED_POLICY_QA_EXECUTION_RUN_ID \}\}/,
+  );
+  assert.match(
+    executionDownload,
+    /env\.REQUESTED_POLICY_QA_EXECUTION_RUN_ID != ''/,
   );
   assert.match(
     workflow,
@@ -214,6 +218,32 @@ test("runs Policy QA and closure from two distinct reviewed prior-run artifacts"
     workflow,
     /REQUESTED_POLICY_QA_EXECUTION_RUN_ID -eq \$env:GITHUB_RUN_ID/,
   );
+});
+
+test("routes the P8 floor-only chain through the formal predecessor verifier", () => {
+  const predecessor = stepBody(
+    "Require immutable formal predecessor exit",
+    "Verify protected source identity",
+  );
+  for (const operation of [
+    "produce-policy-activation-closure",
+    "produce-policy-activation-subject",
+    "activate-policy-floor",
+  ]) {
+    assert.match(predecessor, new RegExp(operation));
+  }
+  assert.match(predecessor, /release:verify-operation-predecessor/);
+
+  const closure = stepBody(
+    "Produce authoritative policy activation closure",
+    "Upload authoritative policy activation closure",
+  );
+  assert.match(
+    closure,
+    /if \(-not \[string\]::IsNullOrEmpty\(\$env:REQUESTED_POLICY_QA_EXECUTION_RUN_ID\)\)/,
+  );
+  assert.match(closure, /\$producerArguments \+= @\('--output'/);
+  assert.doesNotMatch(closure, /accepted-gate|minimum-safety-floor/);
 });
 
 test("downloads the exact prior reviewed subject before policy mutation", () => {
@@ -226,7 +256,7 @@ test("downloads the exact prior reviewed subject before policy mutation", () => 
     download,
     /name: foundation-policy-activation-subject-\$\{\{ inputs\.source_sha \}\}/,
   );
-  assert.match(download, /run-id: \$\{\{ inputs\.subject_run_id \}\}/);
+  assert.match(download, /run-id: \$\{\{ env\.REQUESTED_SUBJECT_RUN_ID \}\}/);
   assert.equal(
     (workflow.match(/REQUESTED_SUBJECT_RUN_ID -eq \$env:GITHUB_RUN_ID/g) ?? [])
       .length >= 5,

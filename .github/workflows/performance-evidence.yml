@@ -45,6 +45,14 @@ jobs:
             throw "Exact npm dependency installation failed with exit code $LASTEXITCODE"
           }
 
+      - name: Verify exact toolchain
+        shell: pwsh
+        run: |
+          npm exec --yes --package=npm@11.19.0 -- npm run verify:toolchain
+          if ($LASTEXITCODE -ne 0) {
+            throw "Exact toolchain verification failed with exit code $LASTEXITCODE"
+          }
+
       - name: Verify source performance policy
         shell: pwsh
         run: |
@@ -62,7 +70,7 @@ jobs:
           }
           New-Item -ItemType Directory -Path $outputDirectory | Out-Null
           $outputPath = Join-Path $outputDirectory 'raw-performance-samples.json'
-          npm exec --yes --package=npm@11.19.0 -- npm run performance:own-gate-samples:collect -- --namespace $env:RELEASE_STATE_NAMESPACE --output $outputPath
+          npm exec --yes --package=npm@11.19.0 -- npm run performance:own-gate-samples:collect -- -- --namespace $env:RELEASE_STATE_NAMESPACE --output $outputPath
           if ($LASTEXITCODE -ne 0) {
             throw "Authoritative performance collection failed with exit code $LASTEXITCODE"
           }
@@ -79,7 +87,7 @@ jobs:
       - name: Upload authoritative raw performance samples
         uses: actions/upload-artifact@v4
         with:
-          name: foundation-performance-raw-samples-${{ github.sha }}
+          name: foundation-performance-raw-samples-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/foundation-performance-raw-output/raw-performance-samples.json
           if-no-files-found: error
           overwrite: false

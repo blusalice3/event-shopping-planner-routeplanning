@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { ACCEPTANCE_PERFORMANCE_REQUIREMENTS } from "../lib/performance-evidence-identity.mjs";
+import { RELEASE_DISPATCH_OPERATION_SCHEMAS } from "./releaseDispatchRequest.mjs";
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -24,13 +25,22 @@ const stepBody = (name, nextName) => {
 };
 
 test("derives the accepted gate and performance requirement from Release State", () => {
-  assert.match(workflow, /^ {6}acceptance_requirements_run_id:$/m);
-  assert.match(workflow, /^ {6}acceptance_requirements_sha256:$/m);
-  assert.match(workflow, /^ {6}performance_evidence_run_id:$/m);
-  assert.match(workflow, /^ {6}performance_evidence_sha256:$/m);
-  assert.match(workflow, /^ {6}performance_raw_samples_run_id:$/m);
-  assert.match(workflow, /^ {6}performance_raw_samples_sha256:$/m);
-  assert.doesNotMatch(workflow, /^ {6}accepted_gate:$/m);
+  for (const operation of ["produce-acceptance-inputs", "accept-standard"]) {
+    const fields = RELEASE_DISPATCH_OPERATION_SCHEMAS[operation];
+    assert.ok(fields.required.includes("acceptance_requirements_sha256"));
+    assert.ok(fields.optional.includes("performance_evidence_run_id"));
+    assert.ok(fields.optional.includes("performance_evidence_run_attempt"));
+    assert.ok(fields.optional.includes("performance_evidence_sha256"));
+  }
+  assert.deepEqual(
+    RELEASE_DISPATCH_OPERATION_SCHEMAS["produce-own-gate-performance-evidence"]
+      .required,
+    [
+      "performance_raw_samples_run_id",
+      "performance_raw_samples_run_attempt",
+      "performance_raw_samples_sha256",
+    ],
+  );
 
   const resolver = stepBody(
     "Verify reviewed authoritative acceptance requirements",
@@ -71,11 +81,11 @@ test("derives the accepted gate and performance requirement from Release State",
   assert.match(ownDownload, /actions\/download-artifact@v4/);
   assert.match(
     ownDownload,
-    /name: foundation-performance-own-gate-evidence-\$\{\{ inputs\.source_sha \}\}/,
+    /name: foundation-performance-own-gate-evidence-\$\{\{ inputs\.source_sha \}\}-\$\{\{ env\.REQUESTED_PERFORMANCE_EVIDENCE_RUN_ATTEMPT \}\}/,
   );
   assert.match(
     ownDownload,
-    /run-id: \$\{\{ inputs\.performance_evidence_run_id \}\}/,
+    /run-id: \$\{\{ env\.REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID \}\}/,
   );
   const inheritedDownload = stepBody(
     "Download reviewed inherited performance closure",
@@ -92,7 +102,7 @@ test("derives the accepted gate and performance requirement from Release State",
   );
   assert.match(
     inheritedDownload,
-    /run-id: \$\{\{ inputs\.performance_evidence_run_id \}\}/,
+    /run-id: \$\{\{ env\.REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID \}\}/,
   );
   assert.ok(
     workflow.indexOf("Verify reviewed authoritative acceptance requirements") <
@@ -101,7 +111,12 @@ test("derives the accepted gate and performance requirement from Release State",
 });
 
 test("requires a separately reviewed authoritative requirements artifact", () => {
-  assert.match(workflow, /^ {10}- produce-acceptance-requirements$/m);
+  assert.ok(
+    Object.hasOwn(
+      RELEASE_DISPATCH_OPERATION_SCHEMAS,
+      "produce-acceptance-requirements",
+    ),
+  );
   const producer = stepBody(
     "Produce authoritative acceptance requirements",
     "Upload authoritative acceptance requirements",
@@ -123,7 +138,7 @@ test("requires a separately reviewed authoritative requirements artifact", () =>
   );
   assert.match(
     download,
-    /run-id: \$\{\{ inputs\.acceptance_requirements_run_id \}\}/,
+    /run-id: \$\{\{ env\.REQUESTED_ACCEPTANCE_REQUIREMENTS_RUN_ID \}\}/,
   );
   assert.equal(
     (
@@ -272,14 +287,15 @@ test("binds each acceptance collector continuation to reviewed run authority", (
 });
 
 test("builds the P8 inherited closure from four immutable accepted events", () => {
-  assert.match(workflow, /^ {10}- produce-performance-inherited-closure$/m);
+  const closureSchema =
+    RELEASE_DISPATCH_OPERATION_SCHEMAS["produce-performance-inherited-closure"];
   for (const input of [
     "p0_accepted_event_sha256",
     "p3_accepted_event_sha256",
     "p5d_accepted_event_sha256",
     "p5e_accepted_event_sha256",
   ]) {
-    assert.match(workflow, new RegExp(`^      ${input}:$`, "m"));
+    assert.ok(closureSchema.required.includes(input), input);
   }
   assert.match(workflow, /acceptedEventHashes \| Select-Object -Unique/);
 
@@ -313,7 +329,12 @@ test("builds the P8 inherited closure from four immutable accepted events", () =
 });
 
 test("produces own-gate evidence only from reviewed raw samples and live requirements", () => {
-  assert.match(workflow, /^ {10}- produce-own-gate-performance-evidence$/m);
+  assert.ok(
+    Object.hasOwn(
+      RELEASE_DISPATCH_OPERATION_SCHEMAS,
+      "produce-own-gate-performance-evidence",
+    ),
+  );
   const validation = stepBody("Validate reviewed dispatch inputs", "Pin npm");
   assert.match(
     validation,
@@ -331,11 +352,11 @@ test("produces own-gate evidence only from reviewed raw samples and live require
   assert.match(download, /actions\/download-artifact@v4/);
   assert.match(
     download,
-    /name: foundation-performance-raw-samples-\$\{\{ inputs\.source_sha \}\}/,
+    /name: foundation-performance-raw-samples-\$\{\{ inputs\.source_sha \}\}-\$\{\{ env\.REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ATTEMPT \}\}/,
   );
   assert.match(
     download,
-    /run-id: \$\{\{ inputs\.performance_raw_samples_run_id \}\}/,
+    /run-id: \$\{\{ env\.REQUESTED_PERFORMANCE_RAW_SAMPLES_RUN_ID \}\}/,
   );
 
   const producer = stepBody(
@@ -362,7 +383,7 @@ test("produces own-gate evidence only from reviewed raw samples and live require
   );
   assert.match(
     upload,
-    /name: foundation-performance-own-gate-evidence-\$\{\{ inputs\.source_sha \}\}/,
+    /name: foundation-performance-own-gate-evidence-\$\{\{ inputs\.source_sha \}\}-\$\{\{ github\.run_attempt \}\}/,
   );
   assert.match(
     upload,

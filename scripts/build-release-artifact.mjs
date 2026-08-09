@@ -6,6 +6,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rename,
   rm,
   writeFile,
@@ -19,6 +20,7 @@ import {
   assertBootstrapStaticOutput,
   assertIndependentBuildReproducibility,
   assertProductionProviderContext,
+  buildArtifactDrillReleaseContext,
   buildBootstrapGeneratedFiles,
   buildRawDistManifest,
   buildReleaseContext,
@@ -41,6 +43,7 @@ import {
   projectContainmentDimensions,
 } from "./lib/release-policy.mjs";
 import {
+  ARTIFACT_DRILL_BUILD_PURPOSE,
   createReleaseBuildInput,
   RELEASE_BUILD_INPUT_ENV,
   releaseBuildInputEnvironment,
@@ -51,10 +54,19 @@ import {
   OUTER_AGENT_BUNDLE_ENV,
   OUTER_AGENT_GRAPH_ENV,
 } from "./lib/outer-agent-contract.mjs";
-import { verifyReleasePackage } from "./verify-release-artifact.mjs";
+import {
+  verifyArtifactDrillBootstrapPackage,
+  verifyReleasePackage,
+} from "./verify-release-artifact.mjs";
 import { assertArtifactBuildRuntimeAuthority } from "./lib/artifact-build-runtime-authority.mjs";
 import { createPostgresReleaseStateStore } from "./release-state/postgresStore.mjs";
 import { validateAuthoritativeArtifactBuildRequirements } from "./release-state/artifactBuildAuthority.mjs";
+import {
+  ARTIFACT_DRILL_TARGET_GATE,
+  createArtifactDrillBuildAuthority,
+  writeArtifactDrillBuildAuthority,
+} from "./lib/artifact-drill-build-authority.mjs";
+import { buildClosedVercelCommandEnvironment } from "./provider/vercel-command-environment.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -189,13 +201,15 @@ const assertProviderCredentials = ({
   }
 };
 
-const runPinnedVercelBuild = ({
+export const runPinnedVercelBuild = ({
   vercelCliPath,
   cwd,
   environment,
+  additionalEnvironment = {},
   productionTarget,
+  execute = execFileSync,
 }) => {
-  execFileSync(
+  execute(
     process.execPath,
     [
       vercelCliPath,
@@ -205,7 +219,9 @@ const runPinnedVercelBuild = ({
     ],
     {
       cwd,
-      env: environment,
+      env: buildClosedVercelCommandEnvironment(environment, {
+        additionalEnvironment,
+      }),
       stdio: "inherit",
       windowsHide: true,
     },
@@ -325,6 +341,7 @@ const buildSourceHardenedPackage = async ({
   buildAuthority,
   cspPolicy,
   independentOuterAgent,
+  environment = process.env,
 }) => {
   const dimensions = {
     standard: standardDimensions,
@@ -346,7 +363,6 @@ const buildSourceHardenedPackage = async ({
       buildPurpose: buildAuthority.buildPurpose,
     });
     const buildEnvironment = {
-      ...process.env,
       ...publicBuildEnvironment.document.values,
       VITE_APP_BUILD_ID: sourceSha,
       VITE_PERSISTENCE_RELEASE_CHANNEL: "release-a",
@@ -370,7 +386,8 @@ const buildSourceHardenedPackage = async ({
         runPinnedVercelBuild({
           vercelCliPath,
           cwd: repositoryRoot,
-          environment: buildEnvironment,
+          environment,
+          additionalEnvironment: buildEnvironment,
           productionTarget: buildAuthority.promotable,
         });
         const outputRoot = path.join(vercelRoot, "output");
@@ -452,6 +469,7 @@ const buildBootstrapPackage = async ({
   releaseContext,
   archivePolicy,
   vercelCliPath,
+  environment = process.env,
 }) => {
   const sourceSha = foundationBaseline.bootstrapBaselineSourceSha;
   if (typeof sourceSha !== "string" || !/^[0-9a-f]{40}$/.test(sourceSha)) {
@@ -555,14 +573,14 @@ const buildBootstrapPackage = async ({
     windowsHide: true,
   });
   const buildEnvironment = {
-    ...process.env,
     VERCEL: "1",
     VERCEL_GIT_COMMIT_SHA: sourceSha,
   };
   runPinnedVercelBuild({
     vercelCliPath,
     cwd: stagingRoot,
-    environment: buildEnvironment,
+    environment,
+    additionalEnvironment: buildEnvironment,
   });
   const outputRoot = path.join(stagingRoot, ".vercel", "output");
   await assertBootstrapStaticOutput({ outputRoot, rawDistManifest });
@@ -625,6 +643,223 @@ const buildBootstrapPackage = async ({
     artifact: artifactReference,
   };
   await writePackageIndex(packageRoot, index);
+};
+
+const prepareEmptyDirectory = async (directory, label) => {
+  const resolved = assertPathOutsideRepository(directory);
+  try {
+    const entries = await readdir(resolved);
+    if (entries.length !== 0) {
+      throw new Error(`${label} must be absent or empty`);
+    }
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    await mkdir(resolved, { recursive: true });
+  }
+  return resolved;
+};
+
+const pathsOverlap = (left, right) => {
+  const relative = path.relative(left, right);
+  return (
+    relative === "" ||
+    (!relative.startsWith("..") && !path.isAbsolute(relative))
+  );
+};
+
+export const buildNonPromotableArtifactDrillPackage = async ({
+  packageRoot: packageRootArgument,
+  scratchRoot: scratchRootArgument,
+  rawDistRoot,
+  sourceSha,
+  foundationBaseline,
+  releasePolicy,
+  toolchainPolicy,
+  providerPolicy,
+  providerObservation,
+  dbContract,
+  archivePolicy,
+  cspPolicy,
+  environment = process.env,
+}) => {
+  if (
+    typeof packageRootArgument !== "string" ||
+    typeof scratchRootArgument !== "string" ||
+    typeof rawDistRoot !== "string" ||
+    !/^[0-9a-f]{40}$/.test(sourceSha ?? "")
+  ) {
+    throw new Error("Artifact drill build paths or source SHA are invalid");
+  }
+  const checkoutSourceSha = assertCleanCheckout();
+  if (checkoutSourceSha !== sourceSha) {
+    throw new Error("Artifact drill source differs from the clean checkout");
+  }
+  const resolvedPackageRoot = assertPathOutsideRepository(packageRootArgument);
+  const resolvedScratchRoot = assertPathOutsideRepository(scratchRootArgument);
+  if (
+    pathsOverlap(resolvedPackageRoot, resolvedScratchRoot) ||
+    pathsOverlap(resolvedScratchRoot, resolvedPackageRoot)
+  ) {
+    throw new Error(
+      "Artifact drill package and scratch roots must be disjoint",
+    );
+  }
+  const packageRoot = await prepareEmptyDirectory(
+    resolvedPackageRoot,
+    "Artifact drill package root",
+  );
+  const scratchRoot = await prepareEmptyDirectory(
+    resolvedScratchRoot,
+    "Artifact drill scratch root",
+  );
+  const resolvedRawDistRoot = path.resolve(rawDistRoot);
+  const releaseContext = buildArtifactDrillReleaseContext({
+    releasePolicy,
+    toolchainPolicy,
+    providerPolicy,
+    providerObservation,
+    dbContract,
+  });
+  assertExactRuntime(toolchainPolicy);
+  assertProviderCredentials({
+    providerPolicy,
+    providerObservation,
+    environment,
+  });
+  const vercelCliPath = await readPinnedVercelCli(toolchainPolicy);
+  const packageLockBytes = await readFile(
+    path.join(repositoryRoot, "package-lock.json"),
+  );
+  const buildInputClosure = calculateBuildInputClosure({
+    repositoryRoot,
+    sourceSha,
+  });
+  const effectivePublicEnvironment = {
+    ...environment,
+    VITE_APP_BUILD_ID: sourceSha,
+    VITE_PERSISTENCE_RELEASE_CHANNEL: "release-a",
+    VITE_PERSISTENCE_LEGACY_CLEANUP: "false",
+  };
+  const publicBuildEnvironment = collectPublicBuildEnvironment(
+    effectivePublicEnvironment,
+  );
+  const bootstrapPackageRoot = path.join(scratchRoot, "bootstrap-package");
+  const bootstrapScratchRoot = path.join(scratchRoot, "bootstrap-scratch");
+  const sourceScratchRoot = path.join(scratchRoot, "source-pair-scratch");
+  await Promise.all([
+    mkdir(bootstrapPackageRoot, { recursive: true }),
+    mkdir(bootstrapScratchRoot, { recursive: true }),
+    mkdir(sourceScratchRoot, { recursive: true }),
+  ]);
+  await buildBootstrapPackage({
+    packageRoot: bootstrapPackageRoot,
+    scratchRoot: bootstrapScratchRoot,
+    rawDistRoot: resolvedRawDistRoot,
+    foundationBaseline,
+    releasePolicy,
+    providerPolicy,
+    releaseContext,
+    archivePolicy,
+    vercelCliPath,
+    environment,
+  });
+  const bootstrapResult = await verifyArtifactDrillBootstrapPackage({
+    packageRoot: bootstrapPackageRoot,
+    releasePolicy,
+    toolchainPolicy,
+    providerPolicy,
+    providerObservation,
+    dbContract,
+    cspPolicy,
+    foundationBaseline,
+    root: repositoryRoot,
+    environment,
+  });
+  const authorityDocument = createArtifactDrillBuildAuthority({
+    sourceSha,
+    releasePolicy,
+    toolchainPolicy,
+    providerPolicy,
+    providerObservation,
+    dbContract,
+    cspPolicy,
+    foundationBaseline,
+    bootstrapVerification: bootstrapResult.bootstrapVerification,
+  });
+  const authorityReference = await writeArtifactDrillBuildAuthority({
+    packageRoot,
+    authority: authorityDocument,
+  });
+  const independentOuterAgent = await buildReproducibleIndependentOuterAgent({
+    scratchRoot: sourceScratchRoot,
+    sourceSha,
+  });
+  await buildSourceHardenedPackage({
+    packageRoot,
+    scratchRoot: sourceScratchRoot,
+    sourceSha,
+    releasePolicy,
+    releaseContext,
+    archivePolicy,
+    lockfileSha256: sha256Bytes(packageLockBytes),
+    buildInputClosureHash: buildInputClosure.sha256,
+    publicBuildEnvironment,
+    vercelCliPath,
+    standardDimensions: authorityDocument.standardDimensions,
+    containmentDimensions: authorityDocument.containmentDimensions,
+    buildAuthority: {
+      buildPurpose: ARTIFACT_DRILL_BUILD_PURPOSE,
+      promotable: false,
+      requirementsReference: authorityReference,
+      targetGate: ARTIFACT_DRILL_TARGET_GATE,
+    },
+    cspPolicy,
+    independentOuterAgent,
+    environment,
+  });
+  const verification = await verifyReleasePackage({
+    packageRoot,
+    releasePolicy,
+    toolchainPolicy,
+    providerPolicy,
+    providerObservation,
+    dbContract,
+    cspPolicy,
+    foundationBaseline,
+    requireProductionBindings: false,
+    root: repositoryRoot,
+    environment,
+    expectedBuildPurpose: ARTIFACT_DRILL_BUILD_PURPOSE,
+    artifactDrillBootstrapVerification: bootstrapResult.bootstrapVerification,
+  });
+  const packageIndexPath = path.join(packageRoot, "release-package-index.json");
+  const packageIndexBytes = await readFile(packageIndexPath);
+  assertCheckoutStillClean();
+  return {
+    packageRoot,
+    bootstrapPackageRoot,
+    bootstrapVerification: structuredClone(
+      bootstrapResult.bootstrapVerification,
+    ),
+    authority: {
+      document: structuredClone(authorityDocument),
+      reference: {
+        uri: authorityReference.uri,
+        sha256: authorityReference.sha256,
+      },
+    },
+    packageIndex: {
+      path: packageIndexPath,
+      bytes: packageIndexBytes,
+      sha256: verification.packageIndexSha256,
+    },
+    roles: [...verification.roles]
+      .sort(({ role: left }, { role: right }) =>
+        Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8")),
+      )
+      .map((role) => structuredClone(role)),
+    verification,
+  };
 };
 
 const run = async () => {

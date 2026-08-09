@@ -50,6 +50,25 @@ jobs:
       - name: Foundation policy
         run: npm run verify:foundation
 
+      - name: External phase exit prerequisites
+        run: npm run verify:external-prerequisites
+
+      - name: Artifact control-store drill prerequisites
+        run: npm run verify:artifact-control-store-drill-policy
+
+      - name: Release State static contract
+        run: npm run verify:release-state
+
+      - name: Formal phase exit readiness snapshot
+        run: node scripts/verify-phase-exit-readiness.mjs --output "${{ runner.temp }}/phase-exit-readiness.json"
+
+      - name: Upload formal phase exit readiness
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase-exit-readiness
+          path: ${{ runner.temp }}/phase-exit-readiness.json
+          if-no-files-found: error
+
       - name: Toolchain
         run: npm run verify:toolchain
 
@@ -132,7 +151,7 @@ jobs:
 
       - name: Release A browser preflight
         run: |
-          npm run preview -- --host 127.0.0.1 --port 4173 --strictPort &
+          node node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4173 --strictPort &
           preview_pid=$!
           trap 'kill "$preview_pid"' EXIT
           for attempt in $(seq 1 60); do
@@ -152,6 +171,21 @@ jobs:
 
       - name: Accessibility
         run: npm run test:a11y
+
+      - name: Produce canonical phase exit quality source
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: node scripts/produce-phase-exit-quality-run-source.mjs --output "${{ runner.temp }}/quality-run-source.json"
+
+      - name: Upload canonical phase exit quality source
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-phase-exit-quality-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/quality-run-source.json
+          if-no-files-found: error
+          compression-level: 9
+          overwrite: false
+          include-hidden-files: false
 
       - name: Audit all graphs
         continue-on-error: true
@@ -179,6 +213,10 @@ jobs:
       - name: Install
         shell: pwsh
         run: npm ci
+
+      - name: Provider and Windows file identity contracts
+        shell: pwsh
+        run: npm run test:provider
 
       - name: Release A rollback rehearsal
         shell: pwsh

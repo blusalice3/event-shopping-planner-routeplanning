@@ -365,12 +365,12 @@
     {
       "id": "P0-PERFORMANCE-MACHINE",
       "reason": "The canonical physical machine and browser version have not been externally bound.",
-      "blocksExit": "P0-TOOLCHAIN"
+      "blocksExit": "P0-RELEASE"
     },
     {
       "id": "P0-PERFORMANCE-SAMPLES",
       "reason": "Thirty-sample median and p95 measurements have not been collected on the canonical profile.",
-      "blocksExit": "P0-TOOLCHAIN"
+      "blocksExit": "P0-RELEASE"
     },
     {
       "id": "P3-PERFORMANCE-PROFILE",

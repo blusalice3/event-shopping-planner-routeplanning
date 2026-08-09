@@ -65,6 +65,22 @@
   },
   "remote": {
     "observationStatus": "unobserved",
+    "observationAuthority": {
+      "bindingStatus": "unconfigured",
+      "postgresMajor": 17,
+      "databaseUrlEnvironmentName": "DB_COMPATIBILITY_OBSERVER_DATABASE_URL",
+      "databaseCaEnvironmentName": "DB_COMPATIBILITY_OBSERVER_CA_PEM",
+      "tlsMode": "verify-full",
+      "allowedHosts": [],
+      "allowedDatabases": [],
+      "allowedObserverRoles": [],
+      "serviceRole": "service_role",
+      "productionCaSha256": null,
+      "connectTimeoutMilliseconds": 5000,
+      "statementTimeoutMilliseconds": 15000,
+      "maximumObservationAgeSeconds": 300,
+      "maximumFutureClockSkewSeconds": 30
+    },
     "requiredTables": [
       "public.persistence_release_a_metric_events",
       "public.csp_violation_reports"
@@ -73,6 +89,7 @@
       "public.read_persistence_release_a_metrics",
       "public.retain_persistence_release_a_metrics",
       "public.read_csp_violation_aggregates",
+      "public.read_csp_deployment_violation_aggregates",
       "public.retain_csp_violation_reports"
     ],
     "requiredPrivilegeFloor": {
@@ -85,7 +102,8 @@
     },
     "migrationChecksums": {
       "20260805000000_persistence_release_a_hardening.sql": "04a28f077af00d724dcd521c1d94fc85ae777f077cfc639adf1be200d213683b",
-      "20260808000000_csp_report_contract.sql": "7d0c2c053aaf6f7e75eea5297bb0a2b0759683e0b9065873408a0114dad82e03"
+      "20260808000000_csp_report_contract.sql": "7d0c2c053aaf6f7e75eea5297bb0a2b0759683e0b9065873408a0114dad82e03",
+      "20260809000000_csp_report_deployment_aggregate.sql": "1213ed7fffd71a85ef3a425159208185c46505bb37350d91db33a8a18480846b"
     }
   },
   "releaseA": {
@@ -96,6 +114,7 @@
   "blockerCodes": [
     "remote-schema-unobserved",
     "remote-privileges-unobserved",
-    "hardening-migration-unapplied"
+    "hardening-migration-unapplied",
+    "remote-observation-authority-unconfigured"
   ]
 }

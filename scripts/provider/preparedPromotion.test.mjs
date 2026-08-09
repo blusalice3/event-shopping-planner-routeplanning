@@ -106,6 +106,10 @@ const environment = {
   GITHUB_RUN_ID: "100",
   GITHUB_SHA: SOURCE_SHA,
   RELEASE_STATE_NAMESPACE: NAMESPACE,
+  RELEASE_STATE_DATABASE_URL: "postgresql://control-store-secret",
+  RELEASE_STATE_DATABASE_CA_PEM: "control-store-ca-secret",
+  GITHUB_TOKEN: "github-token-secret",
+  ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-request-secret",
   VERCEL_ORG_ID: TEAM_ID,
   VERCEL_PROJECT_ID: PROJECT_ID,
   VERCEL_TOKEN: TOKEN,
@@ -375,8 +379,23 @@ test("promotes one prepared standard target and writes canonical before/after ev
         "--yes",
       ],
       cwd: context.root,
-      environment,
+      environment: {
+        VERCEL_ORG_ID: TEAM_ID,
+        VERCEL_PROJECT_ID: PROJECT_ID,
+        VERCEL_TOKEN: TOKEN,
+      },
     });
+    for (const forbidden of [
+      "RELEASE_STATE_DATABASE_URL",
+      "RELEASE_STATE_DATABASE_CA_PEM",
+      "GITHUB_TOKEN",
+      "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    ]) {
+      assert.equal(
+        Object.hasOwn(context.commands[0].environment, forbidden),
+        false,
+      );
+    }
     assert.equal(context.commands[0].arguments.includes(TOKEN), false);
     const receiptBytes = await readFile(context.receiptPath);
     assert.equal(receiptBytes.equals(canonicalJsonBytes(result.receipt)), true);

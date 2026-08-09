@@ -50,8 +50,9 @@ const ownGateEnvelope = (gate) => {
     requirementsSha256: "f".repeat(64),
     artifactArchiveSha256: artifactSha256,
     rawSamplesArtifact: {
-      name: `foundation-performance-raw-samples-${sourceSha}`,
+      name: `foundation-performance-raw-samples-${sourceSha}-1`,
       runId: "1",
+      runAttempt: "1",
       sha256: "1".repeat(64),
       collectorIdentity: {
         uri: `release-state://performance-identity-test/evidence/${"2".repeat(64)}`,
@@ -63,8 +64,9 @@ const ownGateEnvelope = (gate) => {
       },
     },
     producerRunId: "2",
+    producerRunAttempt: "1",
     performanceEvidence: {
-      name: `foundation-performance-own-gate-evidence-${sourceSha}`,
+      name: `foundation-performance-own-gate-evidence-${sourceSha}-1`,
       envelopeSha256: sha256Bytes(canonicalJsonBytes(envelope)),
       evidenceSha256: envelope.evidenceSha256,
     },
@@ -183,6 +185,19 @@ test("rejects a missing, extra, wrong-gate, or wrong-kind artifact", () => {
         value: legacyEnvelope,
       }),
     /identity or content SHA-256 is invalid/,
+  );
+  const wrongAttempt = ownGateEnvelope("P3-XLSX");
+  wrongAttempt.producerReceipt.receipt.producerRunAttempt = "2";
+  wrongAttempt.producerReceipt.receiptSha256 = sha256Json(
+    wrongAttempt.producerReceipt.receipt,
+  );
+  assert.throws(
+    () =>
+      assertPerformanceArtifactValueForAcceptedGate({
+        acceptedGate: "P3-XLSX",
+        value: wrongAttempt,
+      }),
+    /producer receipt binding is invalid/u,
   );
 });
 

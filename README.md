@@ -601,32 +601,37 @@ npm run dev
 
 ### 主なコマンド
 
-| コマンド                          | 内容                                             |
-| --------------------------------- | ------------------------------------------------ |
-| `npm run dev`                     | Vite開発サーバーを起動                           |
-| `npm run typecheck`               | TypeScriptの型チェック                           |
-| `npm test`                        | Vitestを監視モードで起動                         |
-| `npm run test:run`                | Vitestを1回実行                                  |
-| `npm run quality`                 | protected CIと同じ静的検査・テスト群を実行       |
-| `npm run build`                   | cleanup強制OFFのRelease A build                  |
-| `npm run build:release-a`         | build後にsource SHA・capability・PWA生成物を検証 |
-| `npm run build:containment`       | recovery-only containmentを独立build             |
-| `npm run test:artifact`           | deterministic packageと改ざんfixtureを検証       |
-| `npm run verify:foundation`       | foundation policyと外部blockerを検証             |
-| `npm run preview`                 | ビルド結果をローカル確認                         |
-| `npm run test:release-a-browser`  | 隔離Chromeで複数tab・SW・offlineをpreflight      |
-| `npm run test:release-a-rollback` | 同一origin/profileで旧版rollbackと復帰を演習     |
-| `npm run lint`                    | ESLintでTypeScript/Reactソースを検査             |
-| `npm run lint:fix`                | ESLintで安全に自動修正できる違反を修正           |
-| `npm run format`                  | Prettierで対象ファイルを整形                     |
-| `npm run format:check`            | Prettierの整形状態を確認                         |
-| `npm run generate-icons`          | PWA用アイコンを生成                              |
+| コマンド                                           | 内容                                             |
+| -------------------------------------------------- | ------------------------------------------------ |
+| `npm run dev`                                      | Vite開発サーバーを起動                           |
+| `npm run typecheck`                                | TypeScriptの型チェック                           |
+| `npm test`                                         | Vitestを監視モードで起動                         |
+| `npm run test:run`                                 | Vitestを1回実行                                  |
+| `npm run quality`                                  | protected CIと同じ静的検査・テスト群を実行       |
+| `npm run build`                                    | cleanup強制OFFのRelease A build                  |
+| `npm run build:release-a`                          | build後にsource SHA・capability・PWA生成物を検証 |
+| `npm run build:containment`                        | recovery-only containmentを独立build             |
+| `npm run test:artifact`                            | deterministic packageと改ざんfixtureを検証       |
+| `npm run verify:foundation`                        | foundation policyと外部blockerを検証             |
+| `npm run verify:external-prerequisites`            | backup/deviceの外部bindingを検証                 |
+| `npm run verify:phase-readiness`                   | formal 16-gate readinessを機械判定               |
+| `npm run test:phase-exit-attestation`              | pre-init seedとphase attestationを検証           |
+| `npm run test:artifact-control-store-drill-policy` | P0C分離drill policyを検証                        |
+| `npm run test:backup-restore-rehearsal`            | backup/restore authorityを検証                   |
+| `npm run preview`                                  | ビルド結果をローカル確認                         |
+| `npm run test:release-a-browser`                   | 隔離Chromeで複数tab・SW・offlineをpreflight      |
+| `npm run test:release-a-rollback`                  | 同一origin/profileで旧版rollbackと復帰を演習     |
+| `npm run lint`                                     | ESLintでTypeScript/Reactソースを検査             |
+| `npm run lint:fix`                                 | ESLintで安全に自動修正できる違反を修正           |
+| `npm run format`                                   | Prettierで対象ファイルを整形                     |
+| `npm run format:check`                             | Prettierの整形状態を確認                         |
+| `npm run generate-icons`                           | PWA用アイコンを生成                              |
 
 依存関係を`npm ci`で導入した後、`npm run quality`を実行してください。ESLintはerrorとwarningのどちらも0件を必須にします。`npm run lint:fix`は自動修正できる違反だけを変更するため、実行後に差分を確認し、残った違反は手動で修正してください。
 
 本番ビルドは `dist` に出力されます。PWAを有効にするにはHTTPSで配信し、アプリはドメインのルートへ配置してください。`vercel.json` にはSPA用フォールバック、セキュリティヘッダー、および生成物 `/sw.js` 向けの再検証ヘッダーがあります。配布時は実レスポンスでも `Cache-Control: public, max-age=0, must-revalidate` が適用されることを確認してください。
 
-`npm run test:release-a-browser`を実行する前に、`npm run build:release-a`と`npm run preview -- --host 127.0.0.1 --port 4173 --strictPort`を実行してください。この試験は一時Chrome profileだけを使用し、通常tab、second tab、同一profileのstandalone app-window相当、install可能性、active Service Workerの実ソースhashとoffline build identity、offline reload、online復帰、およびsyntheticな旧原本への物理削除呼出しが0件であることを確認します。結果名は`PREFLIGHT_PASS`であり、desktop/Androidの実installed PWA試験やHTTPS canary観測の代替ではありません。
+`npm run test:release-a-browser`を実行する前に、`npm run build:release-a`と`npm run preview -- -- --host 127.0.0.1 --port 4173 --strictPort`を実行してください。この試験は一時Chrome profileだけを使用し、通常tab、second tab、同一profileのstandalone app-window相当、install可能性、active Service Workerの実ソースhashとoffline build identity、offline reload、online復帰、およびsyntheticな旧原本への物理削除呼出しが0件であることを確認します。結果名は`PREFLIGHT_PASS`であり、desktop/Androidの実installed PWA試験やHTTPS canary観測の代替ではありません。
 
 cleanなworktreeでpreviewを停止した後、`npm run test:release-a-rollback`を実行すると、検証済みRelease A成果物から既知の互換baselineへ戻し、同じorigin・同じChrome profileのまま再びRelease Aへ進める往復演習を自動実行します。実際のService Worker `controllerchange`とソースhash、checkpoint/journal/archive読取、rollback版UIからの通常autosaveとreload保持、旧原本hash不変・削除呼出し0件を確認し、一時source・profile・processを終了時に削除します。
 

@@ -165,8 +165,9 @@ const buildFixture = ({
       requirementsSha256: sha256Json(receiptRequirements),
       artifactArchiveSha256: evidenceArtifactSha256,
       rawSamplesArtifact: {
-        name: `foundation-performance-raw-samples-${sourceSha}`,
+        name: `foundation-performance-raw-samples-${sourceSha}-1`,
         runId: `${10 + gateIndex}`,
+        runAttempt: "1",
         sha256: "5".repeat(64),
         collectorIdentity: {
           uri: `release-state://${namespace}/evidence/${"6".repeat(64)}`,
@@ -178,8 +179,9 @@ const buildFixture = ({
         },
       },
       producerRunId: `${50 + gateIndex}`,
+      producerRunAttempt: "1",
       performanceEvidence: {
-        name: `foundation-performance-own-gate-evidence-${sourceSha}`,
+        name: `foundation-performance-own-gate-evidence-${sourceSha}-1`,
         envelopeSha256: sha256Bytes(canonicalJsonBytes(baseEnvelope)),
         evidenceSha256: baseEnvelope.evidenceSha256,
       },

@@ -13,11 +13,13 @@ export const RELEASE_BUILD_INPUT_ENV = "FOUNDATION_RELEASE_BUILD_INPUT_JSON";
 export const RELEASE_BUILD_PURPOSE_ENV = "FOUNDATION_CANONICAL_BUILD_PURPOSE";
 export const POLICY_ACTIVATION_QA_BUILD_PURPOSE =
   "non-promotable-policy-activation-qa";
+export const ARTIFACT_DRILL_BUILD_PURPOSE = "non-promotable-artifact-drill";
 export const RELEASE_BUILD_PURPOSES = Object.freeze([
   "production",
   "qa-xlsx-main",
   "qa-list-force-full",
   POLICY_ACTIVATION_QA_BUILD_PURPOSE,
+  ARTIFACT_DRILL_BUILD_PURPOSE,
 ]);
 
 const SOURCE_SHA_PATTERN = /^[0-9a-f]{40}$/;
@@ -128,7 +130,10 @@ export const assertReleaseBuildInput = (input, policy) => {
   if (
     input.nonPromotable &&
     input.releaseRole !== "standard" &&
-    input.buildPurpose !== POLICY_ACTIVATION_QA_BUILD_PURPOSE
+    ![
+      POLICY_ACTIVATION_QA_BUILD_PURPOSE,
+      ARTIFACT_DRILL_BUILD_PURPOSE,
+    ].includes(input.buildPurpose)
   ) {
     throw new Error("Nonproduction QA builds must use the standard role");
   }

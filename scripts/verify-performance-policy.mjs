@@ -102,6 +102,17 @@ const REQUIRED_VARIANTS = Object.freeze({
   },
 });
 
+// The P0 measurements remain the canonical P0-TOOLCHAIN performance profile,
+// but their physical-machine acceptance is deliberately deferred until the
+// deployed P0-RELEASE exit. Later performance profiles block their own exits.
+const PERFORMANCE_GATE_BLOCKING_EXITS = Object.freeze({
+  "P0-TOOLCHAIN": "P0-RELEASE",
+  "P3-XLSX": "P3-XLSX",
+  "P5-DUAL": "P5-DUAL",
+  "P5-LIST": "P5-LIST",
+  "P8-CLEAN": "P8-CLEAN",
+});
+
 const isRecord = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -782,7 +793,8 @@ export const verifyPerformancePolicy = async ({
       errors.push(`${id}: fixture telemetry does not match budget metrics`);
     }
     if (state === "pending") {
-      const requiredExit = scenarioMap.get(id).requiredFromExit;
+      const performanceGate = scenarioMap.get(id).requiredFromExit;
+      const requiredExit = PERFORMANCE_GATE_BLOCKING_EXITS[performanceGate];
       for (const blockerId of scenario.pendingState?.blockerIds ?? []) {
         const blocker = blockerMap.get(blockerId);
         if (!blocker) {
@@ -809,7 +821,11 @@ export const verifyPerformancePolicy = async ({
   errors.push(...gateResolutionErrors);
 
   for (const [id, blocker] of blockerMap) {
-    if (!Object.hasOwn(REQUIRED_GATES, blocker.blocksExit)) {
+    if (
+      !Object.values(PERFORMANCE_GATE_BLOCKING_EXITS).includes(
+        blocker.blocksExit,
+      )
+    ) {
       errors.push(`${id}: blocksExit is not a performance gate`);
     }
     if (typeof blocker.reason !== "string" || blocker.reason.length < 20) {
@@ -1365,8 +1381,9 @@ export const verifyPerformanceGate = async ({
       errors.push(`${gate}: ${id} is pending (${blockers})`);
     }
   }
+  const blockingExit = PERFORMANCE_GATE_BLOCKING_EXITS[gate];
   for (const blocker of context.blockerMap.values()) {
-    if (blocker.blocksExit === gate) {
+    if (blocker.blocksExit === blockingExit) {
       errors.push(`${gate}: explicit blocker ${blocker.id} remains`);
     }
   }

@@ -22,6 +22,7 @@ import {
 import { RELEASE_PHASE_GATES } from "./phaseGates.mjs";
 
 const RUN_ID_PATTERN = /^[1-9][0-9]{0,19}$/;
+const RUN_ATTEMPT_PATTERN = /^[1-9][0-9]{0,9}$/;
 const OWN_GATE_ARTIFACT_KIND = "own-gate-performance-evidence/v1";
 const PRODUCER_RECEIPT_KIND =
   "own-gate-performance-evidence-producer-receipt/v1";
@@ -119,11 +120,14 @@ export const assertAuthoritativeOwnGatePerformanceRequirements = ({
   return requirements;
 };
 
-export const ownGateRawSamplesArtifactName = (sourceSha) => {
-  if (!SOURCE_SHA_PATTERN.test(sourceSha ?? "")) {
+export const ownGateRawSamplesArtifactName = (sourceSha, runAttempt) => {
+  if (
+    !SOURCE_SHA_PATTERN.test(sourceSha ?? "") ||
+    !RUN_ATTEMPT_PATTERN.test(runAttempt ?? "")
+  ) {
     throw new Error("Own-gate raw samples artifact source SHA is invalid");
   }
-  return `foundation-performance-raw-samples-${sourceSha}`;
+  return `foundation-performance-raw-samples-${sourceSha}-${runAttempt}`;
 };
 
 export const ownGateRawSamplesEvidenceId = ({ performanceGate, runId }) => {
@@ -137,13 +141,19 @@ export const ownGateRawSamplesEvidenceId = ({ performanceGate, runId }) => {
   return `perf-own-gate-${performanceGate.toLowerCase()}-${runId}`;
 };
 
-export const ownGatePerformanceEvidenceArtifactName = (sourceSha) => {
-  if (!SOURCE_SHA_PATTERN.test(sourceSha ?? "")) {
+export const ownGatePerformanceEvidenceArtifactName = (
+  sourceSha,
+  runAttempt,
+) => {
+  if (
+    !SOURCE_SHA_PATTERN.test(sourceSha ?? "") ||
+    !RUN_ATTEMPT_PATTERN.test(runAttempt ?? "")
+  ) {
     throw new Error(
       "Own-gate performance evidence artifact source SHA is invalid",
     );
   }
-  return `foundation-performance-own-gate-evidence-${sourceSha}`;
+  return `foundation-performance-own-gate-evidence-${sourceSha}-${runAttempt}`;
 };
 
 export const produceAuthoritativeOwnGatePerformanceEvidence = async (
@@ -152,7 +162,9 @@ export const produceAuthoritativeOwnGatePerformanceEvidence = async (
     rawSamplesBytes,
     expectedRawSamplesSha256,
     rawSamplesRunId,
+    rawSamplesRunAttempt,
     currentRunId,
+    currentRunAttempt,
     sourceState,
     context,
     producedAtUtc,
@@ -165,7 +177,9 @@ export const produceAuthoritativeOwnGatePerformanceEvidence = async (
 ) => {
   if (
     !RUN_ID_PATTERN.test(rawSamplesRunId ?? "") ||
+    !RUN_ATTEMPT_PATTERN.test(rawSamplesRunAttempt ?? "") ||
     !RUN_ID_PATTERN.test(currentRunId ?? "") ||
+    !RUN_ATTEMPT_PATTERN.test(currentRunAttempt ?? "") ||
     rawSamplesRunId === currentRunId
   ) {
     throw new Error(
@@ -299,8 +313,12 @@ export const produceAuthoritativeOwnGatePerformanceEvidence = async (
     requirementsSha256: sha256Json(requirements),
     artifactArchiveSha256: requirements.expectedArtifactSha256,
     rawSamplesArtifact: {
-      name: ownGateRawSamplesArtifactName(requirements.sourceSha),
+      name: ownGateRawSamplesArtifactName(
+        requirements.sourceSha,
+        rawSamplesRunAttempt,
+      ),
       runId: rawSamplesRunId,
+      runAttempt: rawSamplesRunAttempt,
       sha256: expectedRawSamplesSha256,
       collectorIdentity: structuredClone(collectorAuthority.collectorIdentity),
       workflowRunAuthority: structuredClone(
@@ -308,8 +326,12 @@ export const produceAuthoritativeOwnGatePerformanceEvidence = async (
       ),
     },
     producerRunId: currentRunId,
+    producerRunAttempt: currentRunAttempt,
     performanceEvidence: {
-      name: ownGatePerformanceEvidenceArtifactName(requirements.sourceSha),
+      name: ownGatePerformanceEvidenceArtifactName(
+        requirements.sourceSha,
+        currentRunAttempt,
+      ),
       envelopeSha256: sha256Bytes(envelopeBytes),
       evidenceSha256: envelope.evidenceSha256,
     },

@@ -24,6 +24,7 @@ const namespace = "own-gate-performance-test";
 const sourceSha = "a".repeat(40);
 const sourceClosureSha256 = "b".repeat(64);
 const rawRunId = "1966";
+const rawRunAttempt = "1";
 const currentRunId = "1967";
 const producedAtUtc = "2026-08-09T12:00:00.000Z";
 const scenarioId = "xlsx-worker-import-valid";
@@ -169,6 +170,7 @@ const produce = async ({
   mutateInput = () => {},
   requirement = requirements,
   rawSamplesRunId = rawRunId,
+  rawSamplesRunAttempt = rawRunAttempt,
   activeRunId = currentRunId,
   expectedHash,
 } = {}) => {
@@ -180,7 +182,9 @@ const produce = async ({
     rawSamplesBytes,
     expectedRawSamplesSha256: expectedHash ?? sha256Bytes(rawSamplesBytes),
     rawSamplesRunId,
+    rawSamplesRunAttempt,
     currentRunId: activeRunId,
+    currentRunAttempt: "1",
     sourceState,
     context,
     producedAtUtc,
@@ -197,6 +201,8 @@ const cliArguments = [
   "2".repeat(64),
   "--raw-samples-run-id",
   rawRunId,
+  "--raw-samples-run-attempt",
+  "1",
   "--output",
   "performance-evidence.json",
   "--receipt-output",
@@ -230,15 +236,16 @@ test("builds and verifies canonical own-gate evidence with provenance", async ()
     eventHash: "d".repeat(64),
   });
   assert.deepEqual(result.receipt.receipt.rawSamplesArtifact, {
-    name: ownGateRawSamplesArtifactName(sourceSha),
+    name: ownGateRawSamplesArtifactName(sourceSha, rawRunAttempt),
     runId: rawRunId,
+    runAttempt: rawRunAttempt,
     sha256: result.receipt.receipt.rawSamplesArtifact.sha256,
     collectorIdentity: collectorAuthority.collectorIdentity,
     workflowRunAuthority: collectorAuthority.workflowRunAuthority,
   });
   assert.equal(
     result.receipt.receipt.performanceEvidence.name,
-    ownGatePerformanceEvidenceArtifactName(sourceSha),
+    ownGatePerformanceEvidenceArtifactName(sourceSha, "1"),
   );
   assert.equal(
     result.receipt.receipt.performanceEvidence.envelopeSha256,
@@ -323,7 +330,9 @@ test("rejects same-run, tampered, wrong-source, late, and noncanonical raw artif
       rawSamplesBytes: noncanonical,
       expectedRawSamplesSha256: sha256Bytes(noncanonical),
       rawSamplesRunId: rawRunId,
+      rawSamplesRunAttempt: rawRunAttempt,
       currentRunId,
+      currentRunAttempt: "1",
       sourceState,
       context,
       producedAtUtc,
@@ -453,6 +462,7 @@ test("raw producer rejects stored collector OIDC drift in workflow, head, ref, a
       resolveRawCollectorAuthority({
         rawArtifactBytes,
         rawSamplesRunId: rawRunId,
+        rawSamplesRunAttempt: "1",
         sourceSha,
         namespace,
         approvalPolicy: performanceApprovalPolicy,

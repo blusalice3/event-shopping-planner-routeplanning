@@ -9,11 +9,12 @@ import {
   sha256Json,
 } from "../lib/canonical-json.mjs";
 import {
-  buildAuthoritativeDbContractActivationSubject,
+  buildAuthoritativeDbContractActivationSubject as buildDbSubjectCore,
   buildAuthoritativeOperationAbortSubject,
-  buildAuthoritativeStateInitializationSubject,
-  executeAdministrativeTransition,
+  buildAuthoritativeStateInitializationSubject as buildInitializationSubjectCore,
+  executeAdministrativeTransition as executeAdministrativeTransitionCore,
 } from "./administrativeTransitions.mjs";
+import { REMOTE_DB_OBSERVATION_MEDIA_TYPE } from "../db/remote-db-observation-authority.mjs";
 import {
   hashReleaseEvent,
   reduceReleaseState,
@@ -39,6 +40,8 @@ const baseDbContract = JSON.parse(
 const namespace = "administrative-test";
 const sourceSha = "a".repeat(40);
 const sha = (character) => character.repeat(64);
+const remoteObservationTime = "2026-08-09T00:00:00.000Z";
+const remoteObservationNowMs = Date.parse("2026-08-09T00:04:00.000Z");
 
 const makeEvidenceStore = () => {
   const evidence = new Map();
@@ -58,6 +61,7 @@ const makeEvidenceStore = () => {
         sha256: digest,
         mediaType,
         byteLength: objectBytes.length,
+        committedAt: "2026-08-09T00:00:00.000Z",
         replayed,
       };
     },
@@ -79,14 +83,105 @@ const reference = (character) => ({
   sha256: sha(character),
 });
 
+const dbObservationRunAuthorityReference = reference("a");
+const currentWorkflowRunId = "12345";
+const validateDbObservationRun = async () => dbObservationRunAuthorityReference;
+const phaseExitAttestationReferences = [
+  reference("b"),
+  reference("c"),
+  reference("d"),
+];
+const phaseExitAttestationSeed = [
+  {
+    gate: "P0-BASELINE",
+    sourceSha,
+    subjectKind: "repository-phase-subject/v1",
+    attestation: phaseExitAttestationReferences[0],
+    predecessor: null,
+  },
+  {
+    gate: "P0-TOOLCHAIN",
+    sourceSha,
+    subjectKind: "repository-phase-subject/v1",
+    attestation: phaseExitAttestationReferences[1],
+    predecessor: phaseExitAttestationReferences[0],
+  },
+  {
+    gate: "P0-ARTIFACT",
+    sourceSha,
+    subjectKind: "disposable-drill-subject/v1",
+    attestation: phaseExitAttestationReferences[2],
+    predecessor: phaseExitAttestationReferences[1],
+  },
+];
+const validatePhaseExitSeed = async ({ references, currentSourceSha }) => {
+  assert.deepEqual(references, phaseExitAttestationReferences);
+  assert.equal(currentSourceSha, sourceSha);
+  return phaseExitAttestationSeed;
+};
+const buildAuthoritativeStateInitializationSubject = (options, dependencies) =>
+  buildInitializationSubjectCore(
+    {
+      ...options,
+      dbObservationRunAuthorityReference,
+      currentWorkflowRunId,
+      phaseExitAttestationReferences,
+    },
+    { validateDbObservationRun, validatePhaseExitSeed, ...dependencies },
+  );
+const buildAuthoritativeDbContractActivationSubject = (options, dependencies) =>
+  buildDbSubjectCore(
+    {
+      ...options,
+      dbObservationRunAuthorityReference,
+      currentWorkflowRunId,
+    },
+    { validateDbObservationRun, ...dependencies },
+  );
+const executeAdministrativeTransition = (options, dependencies) =>
+  executeAdministrativeTransitionCore(options, {
+    validateDbObservationRun,
+    validatePhaseExitSeed,
+    ...dependencies,
+  });
+
+const putDbObservation = (harness, value) =>
+  harness.putJson(value, REMOTE_DB_OBSERVATION_MEDIA_TYPE);
+
 const dbContract = (version) => {
   const contract = structuredClone(baseDbContract);
   contract.contractStatus = "remote-verified";
   contract.contractUri = `urn:test:db:v${version}`;
   contract.remote.observationStatus = "observed";
+  contract.remote.observationAuthority = {
+    ...contract.remote.observationAuthority,
+    bindingStatus: "configured",
+    allowedHosts: ["db.example.test"],
+    allowedDatabases: ["postgres"],
+    allowedObserverRoles: ["foundation_db_observer"],
+    productionCaSha256: sha("c"),
+  };
   contract.blockerCodes = [];
   return contract;
 };
+
+const dbObservation = (contract, overrides = {}) => ({
+  schemaVersion: 1,
+  contractFingerprint: sha256Json(contract),
+  migrationChecksums: { ...contract.remote.migrationChecksums },
+  migrationsApplied: true,
+  serviceRoleRawSelect: false,
+  serviceRoleRawInsert: true,
+  cspServiceRoleRawSelect: false,
+  cspServiceRoleRawInsert: true,
+  cspObjectsPresent: true,
+  operatorBoundedFunctionOnly: true,
+  cspApplicationCredentialReachable: false,
+  requiredTables: [...contract.remote.requiredTables],
+  requiredFunctions: [...contract.remote.requiredFunctions],
+  observedAt: remoteObservationTime,
+  ...overrides,
+});
 
 const binding = ({
   role = "containment",
@@ -128,6 +223,10 @@ test("derives state initialization exclusively from an empty store and immutable
   const providerPolicyReference = await harness.putJson({ configured: true });
   const finalDb = dbContract(1);
   const dbContractReference = await harness.putJson(finalDb);
+  const dbObservationReference = await putDbObservation(
+    harness,
+    dbObservation(finalDb),
+  );
   const currentDbCompatibility = {
     contractUri: finalDb.contractUri,
     fingerprint: sha256Json(finalDb),
@@ -155,6 +254,7 @@ test("derives state initialization exclusively from an empty store and immutable
       bootstrapRecoveryReference,
       legacyObservationReference,
       dbContractReference,
+      dbObservationReference,
       activeReleasePolicyReference: releasePolicyReference,
     },
     {
@@ -164,6 +264,7 @@ test("derives state initialization exclusively from an empty store and immutable
         observationReference: legacyObservationReference,
         providerReceiptChainReferences: [],
       }),
+      nowMs: remoteObservationNowMs,
     },
   );
   assert.equal(
@@ -173,6 +274,91 @@ test("derives state initialization exclusively from an empty store and immutable
   assert.equal(built.subject.bootstrapRecovery.bindingId, bootstrap.bindingId);
   assert.equal(built.subject.minimumSafetyFloors.styleSrcAttr, undefined);
   assert.equal(built.subject.expectedState.sequence, 0);
+  assert.deepEqual(
+    built.subject.dbObservationReference,
+    dbObservationReference,
+  );
+  assert.deepEqual(
+    built.subject.dbObservationRunAuthorityReference,
+    dbObservationRunAuthorityReference,
+  );
+  assert.ok(
+    built.subject.sourceEvidenceRefs.some(
+      ({ sha256 }) => sha256 === dbObservationReference.sha256,
+    ),
+  );
+  assert.ok(
+    built.subject.sourceEvidenceRefs.some(
+      ({ sha256 }) => sha256 === dbObservationRunAuthorityReference.sha256,
+    ),
+  );
+
+  let executionCurrent = structuredClone(emptyCurrent);
+  const executionStore = {
+    ...harness.store,
+    async readHead() {
+      return executionCurrent.head;
+    },
+    async readEvents() {
+      return executionCurrent.records;
+    },
+    async compareAndAppend({ expectedSequence, expectedHash, event }) {
+      assert.equal(expectedSequence, executionCurrent.head.sequence);
+      assert.equal(expectedHash, executionCurrent.head.eventHash);
+      const eventHash = hashReleaseEvent(event);
+      executionCurrent = {
+        head: { sequence: event.sequence, eventHash },
+        snapshot: reduceReleaseState(executionCurrent.snapshot, event),
+        records: [
+          {
+            sequence: event.sequence,
+            eventHash,
+            previousHash: event.previousEventHash,
+            event,
+            committedAt: remoteObservationTime,
+          },
+        ],
+      };
+      return {
+        namespace,
+        sequence: event.sequence,
+        eventHash,
+        committedAt: remoteObservationTime,
+        replayed: false,
+      };
+    },
+  };
+  const initialized = await executeAdministrativeTransition(
+    {
+      store: executionStore,
+      subjectBytes: built.subjectBytes,
+      expectedSubjectSha256: built.subjectSha256,
+      expectedExecutorSourceSha: sourceSha,
+      expectedRunId: "12345",
+    },
+    {
+      readState: async () => executionCurrent,
+      verifyBindingEvidence: async () => [],
+      validateProviderObservation: async () => ({
+        observationReference: legacyObservationReference,
+        providerReceiptChainReferences: [],
+      }),
+      nowMs: remoteObservationNowMs,
+    },
+  );
+  assert.equal(initialized.replayed, false);
+  assert.equal(
+    Object.hasOwn(
+      executionCurrent.records[0].event.payload,
+      "dbObservationReference",
+    ),
+    false,
+  );
+  assert.ok(
+    executionCurrent.records[0].event.evidenceRefs.some(
+      ({ sha256 }) => sha256 === dbObservationReference.sha256,
+    ),
+  );
 
   const proposedPolicy = {
     ...structuredClone(baseReleasePolicy),
@@ -199,6 +385,7 @@ test("derives state initialization exclusively from an empty store and immutable
         bootstrapRecoveryReference: proposedBootstrapReference,
         legacyObservationReference,
         dbContractReference,
+        dbObservationReference,
         activeReleasePolicyReference: proposedPolicyReference,
       },
       {
@@ -208,6 +395,7 @@ test("derives state initialization exclusively from an empty store and immutable
           observationReference: legacyObservationReference,
           providerReceiptChainReferences: [],
         }),
+        nowMs: remoteObservationNowMs,
       },
     ),
     /not explicitly active/,
@@ -228,6 +416,7 @@ test("derives state initialization exclusively from an empty store and immutable
         bootstrapRecoveryReference,
         legacyObservationReference,
         dbContractReference,
+        dbObservationReference,
         activeReleasePolicyReference: releasePolicyReference,
       },
       {
@@ -235,6 +424,9 @@ test("derives state initialization exclusively from an empty store and immutable
           ...emptyCurrent,
           head: { sequence: 1, eventHash: sha("f") },
         }),
+        validatePhaseExitSeed: async () => {
+          throw new Error("after-init seed validation must not run");
+        },
       },
     ),
     /empty namespace/,
@@ -268,11 +460,81 @@ const initializedCurrent = ({ nextDb, activeProduction = null } = {}) => {
   };
 };
 
+test("derives DB activation only from a distinct reviewed producer authority", async () => {
+  const harness = makeEvidenceStore();
+  const releasePolicyReference = await harness.putJson(baseReleasePolicy);
+  const nextContract = dbContract(2);
+  const dbContractReference = await harness.putJson(nextContract);
+  const dbObservationReference = await putDbObservation(
+    harness,
+    dbObservation(nextContract),
+  );
+  const producerRunId = "10001";
+  const runAuthorityReference = await harness.putJson({
+    authorityKind: "reviewed-remote-db-observation-production/v1",
+    producerRunId,
+  });
+  const validateProducerAuthority = async (options) => {
+    assert.deepEqual(options.reference, runAuthorityReference);
+    assert.deepEqual(options.observationReference, dbObservationReference);
+    assert.equal(options.sourceSha, sourceSha);
+    if (options.currentWorkflowRunId === producerRunId) {
+      throw new Error(
+        "Remote DB observation must come from a distinct completed prior run",
+      );
+    }
+    return { authority: { runId: producerRunId } };
+  };
+  const current = initializedCurrent({
+    nextDb: { releasePolicyReference },
+  });
+  const store = {
+    ...harness.store,
+    readHead: async () => current.head,
+    readEvents: async () => current.records,
+    compareAndAppend: async () => null,
+  };
+  const options = {
+    store,
+    namespace,
+    operationId: "activate-db-reviewed-producer",
+    executorSourceSha: sourceSha,
+    dbContractReference,
+    dbObservationReference,
+    dbObservationRunAuthorityReference: runAuthorityReference,
+    currentWorkflowRunId: "12345",
+  };
+  const built = await buildDbSubjectCore(options, {
+    readState: async () => current,
+    validateDbObservationRun: validateProducerAuthority,
+    nowMs: remoteObservationNowMs,
+  });
+  assert.deepEqual(
+    built.subject.dbObservationRunAuthorityReference,
+    runAuthorityReference,
+  );
+  await assert.rejects(
+    buildDbSubjectCore(
+      { ...options, currentWorkflowRunId: producerRunId },
+      {
+        readState: async () => current,
+        validateDbObservationRun: validateProducerAuthority,
+        nowMs: remoteObservationNowMs,
+      },
+    ),
+    /distinct completed prior run/u,
+  );
+});
+
 test("derives a forward DB transition and rejects stale or active-package-inexact contracts", async () => {
   const harness = makeEvidenceStore();
   const releasePolicyReference = await harness.putJson(baseReleasePolicy);
   const nextContract = dbContract(2);
   const dbContractReference = await harness.putJson(nextContract);
+  const dbObservationReference = await putDbObservation(
+    harness,
+    dbObservation(nextContract),
+  );
   const current = initializedCurrent({
     nextDb: { releasePolicyReference },
   });
@@ -289,8 +551,9 @@ test("derives a forward DB transition and rejects stale or active-package-inexac
       operationId: "activate-db-v2",
       executorSourceSha: sourceSha,
       dbContractReference,
+      dbObservationReference,
     },
-    { readState: async () => current },
+    { readState: async () => current, nowMs: remoteObservationNowMs },
   );
   assert.deepEqual(
     built.subject.previousDbCompatibility,
@@ -301,6 +564,14 @@ test("derives a forward DB transition and rejects stale or active-package-inexac
     dbContractReference.sha256,
   );
   assert.deepEqual(built.subject.rollbackInventory, []);
+  assert.deepEqual(
+    built.subject.dbObservationReference,
+    dbObservationReference,
+  );
+  assert.deepEqual(
+    built.subject.dbObservationRunAuthorityReference,
+    dbObservationRunAuthorityReference,
+  );
 
   await assert.rejects(
     buildAuthoritativeDbContractActivationSubject(
@@ -310,6 +581,7 @@ test("derives a forward DB transition and rejects stale or active-package-inexac
         operationId: "activate-db-v2",
         executorSourceSha: sourceSha,
         dbContractReference,
+        dbObservationReference,
       },
       {
         readState: async () => ({
@@ -324,10 +596,64 @@ test("derives a forward DB transition and rejects stale or active-package-inexac
             }),
           },
         }),
+        nowMs: remoteObservationNowMs,
       },
     ),
     /Active production/,
   );
+});
+
+test("requires an immutable, exact, and fresh remote DB observation for activation", async () => {
+  const harness = makeEvidenceStore();
+  const releasePolicyReference = await harness.putJson(baseReleasePolicy);
+  const nextContract = dbContract(2);
+  const dbContractReference = await harness.putJson(nextContract);
+  const current = initializedCurrent({
+    nextDb: { releasePolicyReference },
+  });
+  const store = {
+    ...harness.store,
+    readHead: async () => current.head,
+    readEvents: async () => current.records,
+    compareAndAppend: async () => null,
+  };
+  const build = (dbObservationReference) =>
+    buildAuthoritativeDbContractActivationSubject(
+      {
+        store,
+        namespace,
+        operationId: "activate-db-observation-proof",
+        executorSourceSha: sourceSha,
+        dbContractReference,
+        dbObservationReference,
+      },
+      { readState: async () => current, nowMs: remoteObservationNowMs },
+    );
+
+  await assert.rejects(
+    build(reference("e")),
+    /Stored remote DB observation authority differs/,
+  );
+
+  const firstMigration = Object.keys(nextContract.remote.migrationChecksums)[0];
+  for (const evidence of [
+    dbObservation(nextContract, { contractFingerprint: sha("f") }),
+    dbObservation(nextContract, {
+      migrationChecksums: {
+        ...nextContract.remote.migrationChecksums,
+        [firstMigration]: sha("f"),
+      },
+    }),
+    dbObservation(nextContract, {
+      observedAt: "2026-08-08T23:54:59.000Z",
+    }),
+  ]) {
+    const observationReference = await putDbObservation(harness, evidence);
+    await assert.rejects(
+      build(observationReference),
+      /does not match the compatibility contract/,
+    );
+  }
 });
 
 const abortCurrent = ({ latestType = "promotion-prepared" } = {}) => {
@@ -647,6 +973,10 @@ test("executes DB activation once with two reviewed approvals and replays the sa
   const releasePolicyReference = await harness.putJson(baseReleasePolicy);
   const nextContract = dbContract(2);
   const dbContractReference = await harness.putJson(nextContract);
+  const dbObservationReference = await putDbObservation(
+    harness,
+    dbObservation(nextContract),
+  );
   let current = initializedCurrent({ nextDb: { releasePolicyReference } });
   const store = {
     ...harness.store,
@@ -690,8 +1020,9 @@ test("executes DB activation once with two reviewed approvals and replays the sa
       operationId: "activate-db-v2",
       executorSourceSha: sourceSha,
       dbContractReference,
+      dbObservationReference,
     },
-    { readState: async () => current },
+    { readState: async () => current, nowMs: remoteObservationNowMs },
   );
   const approval = (role, suffix) => ({
     uri: reference(suffix).uri,
@@ -726,13 +1057,31 @@ test("executes DB activation once with two reviewed approvals and replays the sa
         expectedRunId: "12345",
         approvalPolicy: {},
       },
-      { readState: async () => current, collectApprovals },
+      {
+        readState: async () => current,
+        collectApprovals,
+        nowMs: remoteObservationNowMs,
+      },
     );
   const first = await execute();
   assert.equal(first.replayed, false);
   assert.equal(
     current.snapshot.currentDbCompatibility.fingerprint,
     dbContractReference.sha256,
+  );
+  assert.equal(
+    Object.hasOwn(
+      current.records.at(-1).event.payload,
+      "dbObservationReference",
+    ),
+    false,
+  );
+  assert.ok(
+    current.records
+      .at(-1)
+      .event.evidenceRefs.some(
+        ({ sha256 }) => sha256 === dbObservationReference.sha256,
+      ),
   );
   const retry = await execute();
   assert.equal(retry.replayed, true);

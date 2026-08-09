@@ -14,6 +14,7 @@ import {
   assertBindingPolicyEligible,
   assertPolicyCompatibilityEntries,
 } from "./policyCompatibility.mjs";
+import { validateP8FloorActivationClosure } from "./p8FloorActivationClosure.mjs";
 import { NORMAL_POLICY_ACTIVATION_GATES } from "./phaseGates.mjs";
 import { collectAndStorePrePromotionApprovals } from "./promotionPreparation.mjs";
 import {
@@ -686,17 +687,24 @@ const assertCurrentBindingsRemainEligible = ({ snapshot, nextSnapshot }) => {
   }
 };
 
-const deriveSubject = async ({
-  store,
-  namespace,
-  operationId,
-  executorSourceSha,
-  proposedPolicyReference,
-  activePolicyReference,
-  closureBundleReference,
-  current,
-  nowMilliseconds,
-}) => {
+export const derivePolicyActivationSubject = async (
+  {
+    store,
+    namespace,
+    operationId,
+    executorSourceSha,
+    proposedPolicyReference,
+    activePolicyReference,
+    closureBundleReference,
+    current,
+    nowMilliseconds,
+  },
+  {
+    validateP8ClosureImpl = validateP8FloorActivationClosure,
+    validateNormalClosureImpl = validateClosureBundleDetails,
+    deriveRollbackInventoryImpl = deriveRollbackInventory,
+  } = {},
+) => {
   if (
     !NAMESPACE_PATTERN.test(namespace) ||
     !OPERATION_ID_PATTERN.test(operationId) ||
@@ -751,30 +759,62 @@ const deriveSubject = async ({
     proposedReleasePolicy: proposedPolicyReference,
     activeReleasePolicy: activePolicyReference,
   });
-  const activePolicyCompatibility = structuredClone(
+  const declaredPolicyCompatibility = structuredClone(
     activePolicy.compatiblePredecessorPolicies,
   );
-  assertPolicyCompatibilityEntries(activePolicyCompatibility, {
-    namespace,
-    minimumSafetyFloors: transition.minimumSafetyFloors,
-    currentDbCompatibility: snapshot.currentDbCompatibility,
-    nowMilliseconds,
-  });
-  const closureValidation = await validateClosureBundleDetails({
-    store,
-    namespace,
-    closureBundleReference,
-    previousReleasePolicy,
-    proposedReleasePolicy: proposedPolicyReference,
-    activeReleasePolicy: activePolicyReference,
-    transition,
-    blockers:
-      transition.activationGate === POLICY_ACTIVATION_GATE
-        ? []
-        : proposedPolicy.activationBlockers,
-    operationId,
-    activePolicyCompatibility,
-  });
+  let activePolicyCompatibility;
+  if (transition.activationGate === POLICY_ACTIVATION_GATE) {
+    if (
+      !sameCanonicalValue(
+        snapshot.activePolicyCompatibility,
+        declaredPolicyCompatibility,
+      )
+    ) {
+      throw new Error(
+        "P8 live predecessor compatibility differs from the active policy",
+      );
+    }
+    assertPolicyCompatibilityEntries(declaredPolicyCompatibility, {
+      namespace,
+      minimumSafetyFloors: snapshot.minimumSafetyFloors,
+      currentDbCompatibility: snapshot.currentDbCompatibility,
+    });
+    activePolicyCompatibility = [];
+  } else {
+    activePolicyCompatibility = declaredPolicyCompatibility;
+    assertPolicyCompatibilityEntries(activePolicyCompatibility, {
+      namespace,
+      minimumSafetyFloors: transition.minimumSafetyFloors,
+      currentDbCompatibility: snapshot.currentDbCompatibility,
+      nowMilliseconds,
+    });
+  }
+  const closureValidation =
+    transition.activationGate === POLICY_ACTIVATION_GATE
+      ? await validateP8ClosureImpl({
+          store,
+          namespace,
+          operationId,
+          executorSourceSha,
+          current,
+          releasePolicy: activePolicy,
+          releasePolicyReference: activePolicyReference,
+          transition,
+          closureBundleReference,
+          nowMilliseconds,
+        })
+      : await validateNormalClosureImpl({
+          store,
+          namespace,
+          closureBundleReference,
+          previousReleasePolicy,
+          proposedReleasePolicy: proposedPolicyReference,
+          activeReleasePolicy: activePolicyReference,
+          transition,
+          blockers: proposedPolicy.activationBlockers,
+          operationId,
+          activePolicyCompatibility,
+        });
   const closureEvidenceRefs = closureValidation.references;
   await assertArtifactArchiveAvailable({
     store,
@@ -804,13 +844,28 @@ const deriveSubject = async ({
     minimumSafetyFloors: transition.minimumSafetyFloors,
   };
   assertCurrentBindingsRemainEligible({ snapshot, nextSnapshot });
-  const rollbackInventory = await deriveRollbackInventory({
+  const rollbackInventory = await deriveRollbackInventoryImpl({
     store,
     current: { ...current, snapshot: nextSnapshot },
     releasePolicy: activePolicy,
     minimumAcceptedGate: snapshot.acceptedGate,
     minimumAcceptedFloors: snapshot.acceptedStandardFloors,
   });
+  if (
+    transition.activationGate === POLICY_ACTIVATION_GATE &&
+    (!sameCanonicalValue(
+      activePolicyCompatibility,
+      closureValidation.activePolicyCompatibility,
+    ) ||
+      !sameCanonicalValue(
+        rollbackInventory,
+        closureValidation.rollbackInventory,
+      ))
+  ) {
+    throw new Error(
+      "P8 floor closure eligibility differs from live Release State",
+    );
+  }
   return {
     schemaVersion: 1,
     subjectKind: POLICY_ACTIVATION_SUBJECT_KIND,
@@ -837,7 +892,7 @@ export const buildAuthoritativePolicyActivationSubject = async (
   options,
   {
     readState = readCurrentReleaseState,
-    deriveSubjectImpl = deriveSubject,
+    deriveSubjectImpl = derivePolicyActivationSubject,
     nowMilliseconds = Date.now(),
   } = {},
 ) => {
@@ -968,7 +1023,7 @@ export const activateReleasePolicy = async (
   {
     readState = readCurrentReleaseState,
     collectApprovals = collectAndStorePrePromotionApprovals,
-    deriveSubjectImpl = deriveSubject,
+    deriveSubjectImpl = derivePolicyActivationSubject,
     now = Date.now,
   } = {},
 ) => {

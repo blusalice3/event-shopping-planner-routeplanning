@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
+import { RELEASE_DISPATCH_OPERATION_SCHEMAS } from "./releaseDispatchRequest.mjs";
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -30,7 +31,9 @@ test("keeps the protected release workflow valid YAML", () => {
 });
 
 test("requires exact reviewed authority from three distinct prior runs", () => {
-  assert.match(workflow, /^ {10}- collect-prepromotion-evidence-source$/m);
+  const schema =
+    RELEASE_DISPATCH_OPERATION_SCHEMAS["collect-prepromotion-evidence-source"];
+  assert.ok(schema);
   for (const input of [
     "artifact_build_requirements_run_id",
     "artifact_build_requirements_sha256",
@@ -39,7 +42,7 @@ test("requires exact reviewed authority from three distinct prior runs", () => {
     "containment_deployment_run_id",
     "containment_deployment_binding_sha256",
   ]) {
-    assert.match(workflow, new RegExp(`^ {6}${input}:$`, "m"));
+    assert.ok(schema.required.includes(input), input);
   }
 
   const validation = stepBody("Validate reviewed dispatch inputs", "Pin npm");
@@ -82,7 +85,7 @@ test("downloads exact reviewed requirements and both immutable deployment bindin
   );
   assert.match(
     requirements,
-    /run-id: \$\{\{ inputs\.artifact_build_requirements_run_id \}\}/,
+    /run-id: \$\{\{ env\.REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_RUN_ID \}\}/,
   );
 
   for (const [role, runInput] of [
@@ -107,7 +110,9 @@ test("downloads exact reviewed requirements and both immutable deployment bindin
     );
     assert.match(
       download,
-      new RegExp(`run-id: \\$\\{\\{ inputs\\.${runInput} \\}\\}`),
+      new RegExp(
+        `run-id: \\$\\{\\{ env\\.REQUESTED_${runInput.toUpperCase()} \\}\\}`,
+      ),
     );
   }
 });
@@ -195,7 +200,7 @@ test("publishes one source file for a separately reviewed producer run", () => {
   );
   assert.match(
     reviewedDownload,
-    /run-id: \$\{\{ inputs\.prepromotion_evidence_source_run_id \}\}/,
+    /run-id: \$\{\{ env\.REQUESTED_PREPROMOTION_EVIDENCE_SOURCE_RUN_ID \}\}/,
   );
   const producer = stepBody(
     "Produce canonical pre-promotion evidence set",
@@ -220,6 +225,9 @@ test("publishes one source file for a separately reviewed producer run", () => {
     "produce-acceptance-inputs",
     "accept-standard",
   ]) {
-    assert.match(workflow, new RegExp(`^ {10}- ${preservedOperation}$`, "m"));
+    assert.ok(
+      Object.hasOwn(RELEASE_DISPATCH_OPERATION_SCHEMAS, preservedOperation),
+      preservedOperation,
+    );
   }
 });

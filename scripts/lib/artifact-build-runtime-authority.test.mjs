@@ -37,7 +37,7 @@ const fixture = async ({ purpose = "policy-activation-qa" } = {}) => {
   const releasePolicy = {
     ...basePolicy,
     activationStatus: purpose === "production" ? "active" : "proposed",
-    blockerCodes:
+    activationBlockers:
       purpose === "production" ? [] : ["policy-activation-review-required"],
   };
   const standardDimensions = {
@@ -145,7 +145,7 @@ test("rejects source, policy, DB, dimension, and reviewed hash drift", async () 
 test("rejects proposed production and promotable Policy QA identities", async () => {
   const production = await fixture({ purpose: "production" });
   production.input.releasePolicy.activationStatus = "proposed";
-  production.input.releasePolicy.blockerCodes = ["still-proposed"];
+  production.input.releasePolicy.activationBlockers = ["still-proposed"];
   production.input.requirements.releasePolicy = reference(
     production.input.releasePolicy,
   );
@@ -155,6 +155,19 @@ test("rejects proposed production and promotable Policy QA identities", async ()
   assert.throws(
     () => assertArtifactBuildRuntimeAuthority(production.input),
     /not active and promotable/,
+  );
+
+  const legacyBlockerField = await fixture({ purpose: "production" });
+  legacyBlockerField.input.releasePolicy.blockerCodes = [];
+  legacyBlockerField.input.requirements.releasePolicy = reference(
+    legacyBlockerField.input.releasePolicy,
+  );
+  legacyBlockerField.input.requirementsReference = reference(
+    legacyBlockerField.input.requirements,
+  );
+  assert.throws(
+    () => assertArtifactBuildRuntimeAuthority(legacyBlockerField.input),
+    /noncanonical blocker authority/,
   );
 
   const qa = await fixture();

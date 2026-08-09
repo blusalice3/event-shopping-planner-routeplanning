@@ -27,6 +27,7 @@ const migrationDirectory = path.join(
 const expectedMigrationPaths = [
   "ops/release-state/migrations/0001_release_state_store.sql",
   "ops/release-state/migrations/0002_acceptance_evidence_chains.sql",
+  "ops/release-state/migrations/0003_phase_exit_attestations.sql",
 ];
 const [
   storePolicy,
@@ -97,6 +98,50 @@ for (const requiredFragment of [
     throw new Error(`Release State base migration omits ${requiredFragment}`);
   }
 }
+if (migrationTexts[0].includes("'phase-exit-attested'")) {
+  throw new Error(
+    "Release State immutable base migration contains a later phase exit event",
+  );
+}
+for (const requiredFragment of [
+  "phase-exit-attested",
+  "compare_and_append prerequisite differs before phase exit migration",
+  "create or replace function foundation_release.compare_and_append",
+  "security definer",
+]) {
+  if (!migrationTexts[2].includes(requiredFragment)) {
+    throw new Error(
+      `Release State phase exit migration omits ${requiredFragment}`,
+    );
+  }
+}
+if (
+  /pg_get_functiondef|regexp_replace|execute\s+upgraded_definition/u.test(
+    migrationTexts[2],
+  )
+) {
+  throw new Error(
+    "Release State phase exit migration uses a dynamic function rewrite",
+  );
+}
+const compareAndAppendPattern =
+  /create or replace function foundation_release\.compare_and_append\([\s\S]*?\n\$\$;/u;
+const baseCompareAndAppend = migrationTexts[0].match(
+  compareAndAppendPattern,
+)?.[0];
+const upgradedCompareAndAppend = migrationTexts[2].match(
+  compareAndAppendPattern,
+)?.[0];
+if (
+  typeof baseCompareAndAppend !== "string" ||
+  typeof upgradedCompareAndAppend !== "string" ||
+  upgradedCompareAndAppend.replace("      'phase-exit-attested',\n", "") !==
+    baseCompareAndAppend
+) {
+  throw new Error(
+    "Release State phase exit migration is not the exact full base function plus its event",
+  );
+}
 for (const requiredFragment of [
   "create table if not exists foundation_release.acceptance_evidence_chains",
   "create or replace function foundation_release.append_acceptance_evidence_chain",
@@ -145,6 +190,10 @@ if (storePolicy.bindingStatus === "configured") {
     storePolicy.allowedHosts.length === 0 ||
     storePolicy.allowedDatabases.length === 0 ||
     storePolicy.allowedExecutorRoles.length === 0 ||
+    typeof storePolicy.backupOwner !== "string" ||
+    storePolicy.backupOwner.length === 0 ||
+    typeof storePolicy.restoreOwner !== "string" ||
+    storePolicy.restoreOwner.length === 0 ||
     typeof storePolicy.productionCaSha256 !== "string" ||
     !/^[0-9a-f]{64}$/.test(storePolicy.productionCaSha256) ||
     typeof storePolicy.localContainerImage !== "string" ||

@@ -10,6 +10,18 @@ const namespace = "administrative-cli-test";
 const operationId = "activate-db-v2";
 const sourceSha = "a".repeat(40);
 const digest = "b".repeat(64);
+const observationDigest = "c".repeat(64);
+const observationProductionDigest = "d".repeat(64);
+const observationProducerRunId = "10001";
+const observationProducerRunAttempt = "2";
+const reviewedWorkflowRunReference = {
+  uri: `release-state://${namespace}/evidence/${"8".repeat(64)}`,
+  sha256: "8".repeat(64),
+};
+const observationRunAuthorityReference = {
+  uri: `release-state://${namespace}/evidence/${"9".repeat(64)}`,
+  sha256: "9".repeat(64),
+};
 const common = [
   "--namespace",
   namespace,
@@ -29,16 +41,106 @@ test("parses only the exact administrative command flag set", () => {
     ...common,
     "--db-contract-sha256",
     digest,
+    "--db-observation-sha256",
+    observationDigest,
+    "--db-observation-production-sha256",
+    observationProductionDigest,
+    "--db-observation-run-id",
+    observationProducerRunId,
+    "--db-observation-run-attempt",
+    observationProducerRunAttempt,
   ]);
   assert.equal(parsed.command, "produce-db-contract-activated");
   assert.equal(parsed.values["--db-contract-sha256"], digest);
+  assert.equal(parsed.values["--db-observation-sha256"], observationDigest);
+  const initialization = parseAdministrativeArguments([
+    "produce-state-initialized",
+    ...common,
+    "--bootstrap-recovery-sha256",
+    "d".repeat(64),
+    "--db-contract-sha256",
+    digest,
+    "--db-observation-sha256",
+    observationDigest,
+    "--db-observation-production-sha256",
+    observationProductionDigest,
+    "--db-observation-run-id",
+    observationProducerRunId,
+    "--db-observation-run-attempt",
+    observationProducerRunAttempt,
+    "--legacy-observation-sha256",
+    "e".repeat(64),
+    "--p0-baseline-attestation-sha256",
+    "1".repeat(64),
+    "--p0-toolchain-attestation-sha256",
+    "2".repeat(64),
+    "--p0-artifact-attestation-sha256",
+    "3".repeat(64),
+    "--release-policy-sha256",
+    "f".repeat(64),
+  ]);
+  assert.equal(
+    initialization.values["--db-observation-sha256"],
+    observationDigest,
+  );
   for (const argv of [
     [],
     ["unknown", ...common],
-    ["produce-db-contract-activated", ...common, "--db-contract-sha256", "bad"],
+    [
+      "produce-db-contract-activated",
+      ...common,
+      "--db-contract-sha256",
+      "bad",
+      "--db-observation-sha256",
+      observationDigest,
+      "--db-observation-production-sha256",
+      observationProductionDigest,
+      "--db-observation-run-id",
+      observationProducerRunId,
+      "--db-observation-run-attempt",
+      observationProducerRunAttempt,
+    ],
+    [
+      "produce-state-initialized",
+      ...common,
+      "--bootstrap-recovery-sha256",
+      "d".repeat(64),
+      "--db-contract-sha256",
+      digest,
+      "--legacy-observation-sha256",
+      "e".repeat(64),
+      "--release-policy-sha256",
+      "f".repeat(64),
+    ],
     ["produce-db-contract-activated", ...common, "--output", "duplicate.json"],
   ]) {
     assert.throws(() => parseAdministrativeArguments(argv));
+  }
+  const exactDbActivation = [
+    "produce-db-contract-activated",
+    ...common,
+    "--db-contract-sha256",
+    digest,
+    "--db-observation-sha256",
+    observationDigest,
+    "--db-observation-production-sha256",
+    observationProductionDigest,
+    "--db-observation-run-id",
+    observationProducerRunId,
+    "--db-observation-run-attempt",
+    observationProducerRunAttempt,
+  ];
+  for (const forbiddenFlag of [
+    "--db-observation-json",
+    "--db-observation-status",
+  ]) {
+    assert.throws(() =>
+      parseAdministrativeArguments([
+        ...exactDbActivation,
+        forbiddenFlag,
+        "caller-supplied",
+      ]),
+    );
   }
 });
 
@@ -55,6 +157,7 @@ const env = {
   ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example.test",
   ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-token",
   GITHUB_TOKEN: "github-token",
+  GITHUB_REPOSITORY: "example/event-shopping-planner",
 };
 
 test("produces reviewed subject bytes with exclusive output and closes the store", async () => {
@@ -76,6 +179,14 @@ test("produces reviewed subject bytes with exclusive output and closes the store
         ...common,
         "--db-contract-sha256",
         digest,
+        "--db-observation-sha256",
+        observationDigest,
+        "--db-observation-production-sha256",
+        observationProductionDigest,
+        "--db-observation-run-id",
+        observationProducerRunId,
+        "--db-observation-run-attempt",
+        observationProducerRunAttempt,
       ],
       env,
       cwd: "D:\\fixture",
@@ -98,11 +209,45 @@ test("produces reviewed subject bytes with exclusive output and closes the store
       buildDbActivation: async (options) => {
         assert.equal(options.executorSourceSha, sourceSha);
         assert.equal(options.dbContractReference.sha256, digest);
+        assert.equal(options.dbObservationReference.sha256, observationDigest);
+        assert.deepEqual(
+          options.dbObservationRunAuthorityReference,
+          observationRunAuthorityReference,
+        );
+        assert.equal(options.currentWorkflowRunId, "12345");
         return {
           subject,
           subjectBytes,
           subjectSha256: sha256Bytes(subjectBytes),
         };
+      },
+      collectReviewedRun: async (options) => {
+        assert.equal(options.expectedRunId, observationProducerRunId);
+        assert.equal(options.expectedRunAttempt, observationProducerRunAttempt);
+        assert.equal(options.expectedSourceSha, sourceSha);
+        return { receipt: reviewedWorkflowRunReference };
+      },
+      bindReviewedDbObservationRun: async (options) => {
+        assert.equal(options.producerRunId, observationProducerRunId);
+        assert.equal(options.producerRunAttempt, observationProducerRunAttempt);
+        assert.equal(options.currentWorkflowRunId, "12345");
+        assert.equal(options.repository, env.GITHUB_REPOSITORY);
+        assert.equal(options.observationReference.sha256, observationDigest);
+        assert.equal(
+          options.productionReceiptReference.sha256,
+          observationProductionDigest,
+        );
+        assert.deepEqual(options.contract, policies[2]);
+        assert.deepEqual(options.approvalPolicy, policies[0]);
+        assert.deepEqual(
+          options.reviewedWorkflowRunReference,
+          reviewedWorkflowRunReference,
+        );
+        return { reference: observationRunAuthorityReference };
+      },
+      readDbContract: async (options) => {
+        assert.equal(options.reference.sha256, digest);
+        return policies[2];
       },
       writeFileImpl: async (filePath, bytes, options) => {
         write = { filePath, bytes: Buffer.from(bytes), options };
@@ -114,6 +259,47 @@ test("produces reviewed subject bytes with exclusive output and closes the store
   assert.deepEqual(write.bytes, subjectBytes);
   assert.equal(result.subjectSha256, sha256Bytes(subjectBytes));
   assert.match(output.join(""), /subjectSha256/);
+});
+
+test("rejects a same-run DB observation without trusting caller status", async () => {
+  let reviewed = false;
+  let closed = false;
+  const argv = [
+    "produce-db-contract-activated",
+    ...common,
+    "--db-contract-sha256",
+    digest,
+    "--db-observation-sha256",
+    observationDigest,
+    "--db-observation-production-sha256",
+    observationProductionDigest,
+    "--db-observation-run-id",
+    "12345",
+    "--db-observation-run-attempt",
+    observationProducerRunAttempt,
+  ];
+  await assert.rejects(
+    runAdministrativeTransitionsCli(
+      { argv, env, cwd: "D:\\fixture", stdout: { write: () => undefined } },
+      {
+        loadJson: async (filePath) =>
+          filePath.endsWith("approval-policy.json") ? policies[0] : policies[1],
+        assertEnvironment: () => undefined,
+        createStore: async () => ({
+          close: async () => {
+            closed = true;
+          },
+        }),
+        collectReviewedRun: async () => {
+          reviewed = true;
+          return { receipt: observationRunAuthorityReference };
+        },
+      },
+    ),
+    /distinct prior run/u,
+  );
+  assert.equal(reviewed, false);
+  assert.equal(closed, true);
 });
 
 test("execute binds the reviewed identity and refuses input/output aliasing", async () => {

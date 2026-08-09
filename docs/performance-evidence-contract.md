@@ -68,7 +68,7 @@ standard acceptance requirements、standard binding、live archive/availability�
 下記low-level collectorへ内部temporary pathを渡す。採取後にも同じauthorityを再読込し、state、binding、
 archive、manifestのいずれかがdriftした場合は最終raw fileを公開しない。
 
-workflow artifactは`foundation-performance-raw-samples-${sourceSha}`という名前で、
+workflow artifactは`foundation-performance-raw-samples-${sourceSha}-${runAttempt}`という名前で、
 `raw-performance-samples.json` 1ファイルだけをcreate-onlyでuploadする。同名artifactのupload producerは
 このworkflowのexact 1箇所だけである。raw `evidenceId`はperformance gateとcollector workflow run IDから
 決定し、後続own-gate producerがreviewed prior run ID/hashと一致しないrawを拒否する。
@@ -81,7 +81,7 @@ version/channelを事前にreviewする。power modeは同じ値を`FOUNDATION_P
 
 ```powershell
 $env:FOUNDATION_PERFORMANCE_POWER_MODE = "reviewed-fixed-performance-mode"
-npm run performance:samples:collect -- `
+npm run performance:samples:collect -- -- `
   --gate P3-XLSX `
   --evidence-id perf-p3-canonical-run-001 `
   --artifact <artifact.zip> `
@@ -118,7 +118,7 @@ transactionでpayload、metadata、checkpoint、50,000件の全field semantic di
 canonical machineで採取したraw sampleは、次のCLIでevidence envelopeへ変換する。
 
 ```powershell
-npm run performance:evidence:build -- --input <raw-samples.json> --output <evidence.json>
+npm run performance:evidence:build -- -- --input <raw-samples.json> --output <evidence.json>
 ```
 
 このCLIはscenarioを実行せず、sampleを生成・補間しない。入力はgateが要求するscenarioをexactに
@@ -167,7 +167,7 @@ OIDC collector identityとworkflow run authorityの両方が一致しなけれ�
 正式artifactは`config/own-gate-performance-evidence.schema.json`のexact 4-key shapeである。
 
 ```powershell
-npm run performance:own-gate-evidence:produce -- `
+npm run performance:own-gate-evidence:produce -- -- `
   --namespace <release-state-namespace> `
   --raw-samples <reviewed-raw-samples.json> `
   --raw-samples-sha256 <reviewed-sha256> `
@@ -222,7 +222,7 @@ state、source、package archive、acceptance workflow runより前のproducer r
 旧3-keyまたは自己申告receiptはclosureへ継承しない。
 
 ```powershell
-npm run performance:inherited-closure:build -- `
+npm run performance:inherited-closure:build -- -- `
   --namespace <release-state-namespace> `
   --closure-id perf-closure-p8-reviewed-001 `
   --p0-accepted-event-sha256 <release-accepted-event-sha256> `

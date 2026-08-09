@@ -10,6 +10,8 @@ export const GITHUB_OIDC_DISCOVERY_URL =
   "https://token.actions.githubusercontent.com/.well-known/openid-configuration";
 export const GITHUB_OIDC_JWKS_URL =
   "https://token.actions.githubusercontent.com/.well-known/jwks";
+export const GITHUB_OIDC_RECEIPT_MEDIA_TYPE =
+  "application/vnd.event-shopping-planner.github-oidc-receipt+json;version=1";
 
 const verifiedResults = new WeakSet();
 const MAX_TOKEN_BYTES = 16 * 1024;

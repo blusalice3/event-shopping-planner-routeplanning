@@ -51,6 +51,33 @@ const sourceSha = "a".repeat(40);
 const operationId = "promote-lifecycle-fixture";
 const completedAt = "2026-08-06T00:00:00.000Z";
 const observationEndedAt = "2026-08-07T00:00:00.000Z";
+const phaseExitAttestationReferences = ["1", "2", "3"].map((character) => ({
+  uri: `release-state://${namespace}/evidence/${character.repeat(64)}`,
+  sha256: character.repeat(64),
+}));
+const phaseExitAttestationSeed = [
+  {
+    gate: "P0-BASELINE",
+    sourceSha,
+    subjectKind: "repository-phase-subject/v1",
+    attestation: phaseExitAttestationReferences[0],
+    predecessor: null,
+  },
+  {
+    gate: "P0-TOOLCHAIN",
+    sourceSha,
+    subjectKind: "repository-phase-subject/v1",
+    attestation: phaseExitAttestationReferences[1],
+    predecessor: phaseExitAttestationReferences[0],
+  },
+  {
+    gate: "P0-ARTIFACT",
+    sourceSha,
+    subjectKind: "disposable-drill-subject/v1",
+    attestation: phaseExitAttestationReferences[2],
+    predecessor: phaseExitAttestationReferences[1],
+  },
+];
 const dbCompatibilityContract = {
   contractUri: "urn:test:db:v1",
   schemaVersion: 1,
@@ -932,6 +959,7 @@ const initializePromotionFixture = async ({
       previousEventHash: null,
       payload: {
         acceptedGate: null,
+        executorSourceSha: sourceSha,
         legacyObservedProduction: {
           observationUri: initialEvidence.uri,
           observationSha256: initialEvidence.sha256,
@@ -940,8 +968,9 @@ const initializePromotionFixture = async ({
         minimumSafetyFloors: { releaseChannel: "release-a" },
         currentDbCompatibility: dbCompatibility,
         activeReleasePolicy: policyReference,
+        phaseExitAttestationSeed,
       },
-      evidenceRefs: [initialEvidence],
+      evidenceRefs: [initialEvidence, ...phaseExitAttestationReferences],
     });
     store.seedEvent(initial);
   }
@@ -1522,8 +1551,9 @@ const acceptanceInputOptions = async ({
         artifactArchiveSha256:
           pendingAcceptance.standardBinding.artifactArchive.sha256,
         rawSamplesArtifact: {
-          name: `foundation-performance-raw-samples-${sourceSha}`,
+          name: `foundation-performance-raw-samples-${sourceSha}-1`,
           runId: "100",
+          runAttempt: "1",
           sha256: "8".repeat(64),
           collectorIdentity: {
             uri: `release-state://${namespace}/evidence/${"a".repeat(64)}`,
@@ -1535,8 +1565,9 @@ const acceptanceInputOptions = async ({
           },
         },
         producerRunId: "150",
+        producerRunAttempt: "1",
         performanceEvidence: {
-          name: `foundation-performance-own-gate-evidence-${sourceSha}`,
+          name: `foundation-performance-own-gate-evidence-${sourceSha}-1`,
           envelopeSha256: sha256Bytes(canonicalJsonBytes(performanceEnvelope)),
           evidenceSha256: performanceEnvelope.evidenceSha256,
         },

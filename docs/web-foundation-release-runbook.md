@@ -14,7 +14,9 @@ Release State event である。
 ## 現在の production blocker
 
 この repository に保存されている policy は production activation を許可しない。blocker の正本は
-`node scripts/verify-foundation-policy.mjs --json` の `blockerCodes` であり、現在は 28 件である。
+`node scripts/verify-foundation-policy.mjs --json`、
+`node scripts/verify-phase-exit-external-prerequisites.mjs --json`、
+`node scripts/verify-phase-exit-readiness.mjs --json` の machine-readable 出力である。
 
 - `config/provider-policy.json` の provider/team/project/domain/WAF/log-retention が未設定
 - `config/db-compatibility-contract.json` の remote observation と migration 適用が未完了
@@ -87,6 +89,8 @@ protected environment から次の credential/binding を渡す。
 - `RELEASE_STATE_DATABASE_URL` (`sslmode=verify-full`)
 - `RELEASE_STATE_DATABASE_CA_PEM`
 - `RELEASE_STATE_NAMESPACE`
+- `DB_COMPATIBILITY_OBSERVER_DATABASE_URL` (`sslmode=verify-full`、read-only observer)
+- `DB_COMPATIBILITY_OBSERVER_CA_PEM`
 - protected workflow の `GITHUB_TOKEN` / OIDC request binding
 
 builder は `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` と provider observation/policy の exact
@@ -104,6 +108,229 @@ node scripts/provider/verify-provider-policy.mjs
 
 期待結果は fixture test が PASS、provider policy の表示が `unconfigured` である。
 production build を成功させるために policy check を迂回してはならない。
+
+## Phase 0A baseline closure
+
+正式な採取は protected `Foundation release` workflow を使い、入力は常に
+`source_sha`、`operation`、`request_json` の3件だけにする。
+
+1. `collect-foundation-external-bindings` を `request_json={}` で実行し、provider、application DB
+   read-only binding、sequence/headが0の未初期化 control store、approval/OIDCを採取する。
+2. 別 run の `collect-foundation-bootstrap-recovery` を `request_json={}` で実行し、historical
+   bootstrap sourceのraw dist/archiveをbuildせずpreviewへforward deployし、同じarchiveからrecovery
+   redeploy、route/provider再観測、全preview cleanupまで実行する。
+3. 2 runのRun API、Artifact API digest、ZIP、exact fileをreviewし、`P0-BASELINE`用の
+   `produce-phase-exit-authority-bundle` → `publish-phase-exit-authority-bundle`へ渡す。
+
+workflow が呼ぶ下位CLIは次のとおりである。local実行結果はformal authorityに昇格しない。
+
+```powershell
+npm run provider:foundation-external-bindings:collect -- `
+  --namespace $env:RELEASE_STATE_NAMESPACE `
+  --output $externalBindingsPath
+
+npm run provider:foundation-bootstrap-recovery:collect -- `
+  --namespace $env:RELEASE_STATE_NAMESPACE `
+  --output $bootstrapRecoveryPath
+```
+
+`config/foundation-baseline.json` は historical baseline の正本であり、production binding が
+確定しても書き換えない。Phase 0A の解消結果は、clean closure producer source と独立した
+provider-bound `bootstrapBaselineSourceSha`、historical `baselineEvidenceSha256`、provider
+observation/deployment binding、application DB provisioning binding、control store、raw-dist
+manifest、recovery rehearsal を束縛する immutable baseline closure として保存する。
+
+Phase 0A の application DB authority は configured host/database/read-only observer role/TLS/CA
+までを固定する。migration checksum、remote schema/privilege fingerprint、retention は Phase 0D
+の authority で後から確定するため、baseline closure の作成に `remote-verified` observation を
+要求しない。historical metrics DB fingerprint が `null` だった事実も closure に明示して残す。
+
+先行する別の protected run で、次を Release State store に保存して review する。
+
+1. fresh provider observation を使って作成した legacy bootstrap の deployment binding。producer が
+   保存した provider observation SHA-256 と binding 内の provider policy reference を記録する。
+2. deployment binding と同じ bootstrap source/raw-dist/archive を復元した recovery rehearsal。
+   rehearsal は別 run の trusted OIDC receipt と reviewed successful workflow run を参照し、binding ID、
+   deployment ID、archive SHA-256、raw-dist manifest SHA-256、復元時間、data-loss absence を exact に
+   束縛する。
+
+closure producer run は full history を checkout し、closure source の worktree が clean であること、
+bootstrap source commit/tree が存在することを確認する。両 source SHA は同一である必要はない。
+provider binding、package index、recovery rehearsal の source は bootstrap source と一致しなければ
+ならない。
+
+```powershell
+npm run release:produce-baseline-closure -- `
+  --namespace $env:RELEASE_STATE_NAMESPACE `
+  --source-sha $env:GITHUB_SHA `
+  --bootstrap-source-sha $bootstrapSourceSha `
+  --run-id $env:GITHUB_RUN_ID `
+  --provider-binding-sha256 $providerBindingSha256 `
+  --provider-observation-sha256 $providerObservationSha256 `
+  --provider-policy-sha256 $providerPolicySha256 `
+  --raw-dist-manifest $rawDistManifestPath `
+  --raw-dist-manifest-sha256 $rawDistManifestSha256 `
+  --recovery-rehearsal-sha256 $recoveryRehearsalSha256 `
+  --output $closureResultPath
+```
+
+下位の closure producerを診断する場合、protected environment には
+`REQUESTED_OPERATION=produce-foundation-baseline-closure`、Release State
+DB URL/CA、application DB observer URL/CA、GitHub OIDC request binding を設定する。CLI は provider
+や DB の secret/URL/CA を出力せず、content-addressed support objects と closure を create-only で
+保存して同じ media type/hash/bytes を readback する。結果 file も `wx` で作成する。
+
+caller の `passed`/`status`/boolean、手作業 JSON、存在しない SHA-256 は authority にならない。
+closure は1時間、provider observation は provider policy の freshness、recovery rehearsal は30日を
+超えたら失効する。失効時は provider observation/rehearsal を新しい protected prior run で再採取し、
+review 後に新しい closure を作る。同じ run で rehearsal と closure を自己承認しない。
+
+## Production remote DB observation
+
+Phase 0D の remote DB fingerprint は、local shell の `db:observe` 成功や手作業の JSON では
+確定しない。`config/db-compatibility-contract.json` の observation authority（host、database、
+observer role、production CA hash、freshness）と `config/release-state-store.json` を production 値へ
+構成した後、protected `Foundation release` workflow を次の三つの別 run に分ける。
+
+1. `collect-remote-db-observation` を protected `main` の exact `source_sha` だけで dispatch する。
+   `db_observation_sha256`、`db_observation_production_sha256`、`db_observation_run_id`、
+   `db_observation_run_attempt` は空のままにする。
+   workflow は provider API から fresh observation を取得し、CSP report credential が application
+   delivery edge に 0 件であることを検証してから、専用 read-only observer と pinned CA で production
+   PostgreSQL を観測する。
+2. collector は configured host/database/role、PostgreSQL major、migration checksum、required
+   table/function/privilege、freshness を検証する。canonical `remote-db-observation.json` は新規作成だけを
+   許し、secret、connection URL、CA、raw row を含めない。同じ canonical bytes を content-addressed
+   Release State store へ保存し、URI、SHA-256、media type、byte length、committed bytes を readback
+   検証する。CSP credential edge の判定に使用した exact provider observation bytes と configured
+   provider policy も、それぞれ専用 media type の canonical object として同じ immutable store に保存し、
+   readbackする。GitHub Actions OIDC token は trusted issuer/JWKS で検証し、protected environment、
+   workflow ref、source、run ID/attempt を束縛した receipt だけを保存する。最後に operation、source、
+   run ID/attempt、remote DB observation、provider observation/policy、OIDC receipt の全 reference を束縛した
+   canonical production receipt を保存・readbackした後だけ成功する。
+3. 完了した producer run の summary/artifact と GitHub Run API 上の `completed` / `success`、source、
+   workflow path を review し、observation SHA-256、production authority SHA-256、run ID、run attempt を
+   記録する。artifact に含まれる authority output は reference だけであり、secret や OIDC token を含まない。
+4. state 初期化では `produce-state-initialization-subject`、既存 state の DB 更新では
+   `produce-db-contract-activation-subject` を別の reviewed run で dispatch し、上記四値と DB contract
+   hash、operation ID、その他その操作に必要な evidence hash を渡す。CLI は GitHub Run API の raw
+   response と canonical reviewed-run receipt を immutable store に保存し、producer run が同じ source、
+   workflow、completed/success であり、現在 run とは異なることを再検証する。
+   production receipt、reviewed GitHub run receipt、observation reference の対応を閉じた canonical
+   authority bundle にして保存するため、別operationの成功runと任意observation hashの組合せは拒否する。
+5. subject bytes と SHA-256 を review した後、さらに別 run の `initialize-release-state` または
+   `activate-db-contract` で実行する。実行直前にも reviewed producer receipt、remote observation の
+   canonical bytes/media type/hash/freshness に加え、provider observation/policy と OIDC receipt の
+   canonical bytes/media type/hash/semantic binding/freshness、current Release State を再読込する。
+
+configured freshness window（既定 300 秒）を producer、subject review、execute の途中で超えた場合は、
+window を延長したり古い subject を再利用したりしない。古い subject と production authority を不採用にし、
+新しい `collect-remote-db-observation` run を dispatchして provider/DB observation と production authority を
+再収集・reviewし、その新しい四値から新しい subject を生成して review後に実行する。reviewer は各 run の
+完了直後に immutable hash を確認し、期限切れならこの再収集手順へ戻る。
+
+producer と subject consumer を同じ run にまとめない。caller supplied observation JSON、status、
+conclusion、任意の store URI、ローカルで生成した observation を代用しない。secret は workflow step の
+environment 以外へ渡さず、artifact や step summary に値を出力しない。
+
+## Formal phase exit external authority
+
+正式な phase exit 判定は Release State の live namespace と immutable evidence だけを読む。namespace や
+review済み package reference がない repository/quality snapshot は、安全側の `0/16` を維持する。
+repository mechanism は次の14 external authorityすべてで producer と readerを実装済みである。
+checked-in bindingは未構成で、live observationは `0/14` のため、実装済みという事実だけではgateを閉じない。
+
+| Gate           | Authority                                                                       | Collector                                |
+| -------------- | ------------------------------------------------------------------------------- | ---------------------------------------- |
+| `P0-BASELINE`  | `external-bindings`、`bootstrap-recovery-drill`                                 | protected release                        |
+| `P0-TOOLCHAIN` | `quality-run`                                                                   | protected main `quality.yml`             |
+| `P0-ARTIFACT`  | `artifact-provider-control-store-drill`                                         | protected release                        |
+| `P0-DATA`      | `remote-db`、`retention`、`backup-restore-rehearsal`、`startup-waf-observation` | protected release / retention workflow   |
+| `P0-RELEASE`   | `physical-performance`                                                          | protected release                        |
+| `P1-PWA`       | `pwa-multiclient-drill`                                                         | managed Windows runner、3 reviewed stage |
+| `P2A-LOCAL`    | `production-request-graph`                                                      | protected production observation job     |
+| `P2B-REPORT`   | `csp-report-observation`                                                        | protected production observation job     |
+| `P4-CSP`       | `deployed-csp-flow`                                                             | protected production observation job     |
+| `P7-IDB`       | `idb-device-compatibility`                                                      | managed Windows runner、3 reviewed stage |
+
+review/publishはgate単位に行う。
+
+1. exact sourceの必要collectorをそれぞれ別runで完了する。同じrunでproducerとreviewerを兼ねない。
+2. `produce-phase-exit-authority-bundle`をdispatchする。`request_json`には`target_gate`と、対象gateが
+   必要とするexact run ID/attemptまたはremote DBの4 referenceだけを含める。
+3. producerはGitHub Run API → Artifact API digest → downloaded ZIP bytes → ZIP内exact single file →
+   authority固有semantic verifierの順に照合する。API response、ZIP、file、closed receiptをimmutable
+   storeへ保存・readbackしてから`phase-exit-authority-package.json`を生成する。
+4. package SHA-256、bundle SHA-256、review receipt SHA-256、run ID/attemptを別担当者がreviewする。
+5. 別runの`publish-phase-exit-authority-bundle`へ`target_gate`、producer run ID/attempt、package SHA-256、
+   review receipt SHA-256を渡す。publisherは全上流とcurrent Release State subjectを再解決し、published
+   bundle referenceをcreate-only保存・readbackする。
+
+callerが作ったcandidate directory、collector manifest、手動downloadしたJSON、generic release eventの
+`evidenceRefs`は入力経路ではない。producer/publisherとcollectorを同じrunにせず、stale、future、wrong source、
+wrong workflow/gate/kind/media、duplicate、extra key、tamper、generic substitutionは新しいrunで再収集して解消する。
+
+## P0C artifact/control-store drill
+
+`config/artifact-control-store-drill.json`をproduction namespaceと分離したprovider/DB値で構成する。
+credentialはadministrator、drill executor、production readerの3種類を混用しない。
+
+protected releaseで`operation=collect-artifact-control-store-drill`、`request_json={}`を実行する。
+collectorは専用non-promotable build purpose、standard/containment二重build、preview deploy/route、
+CAS/idempotency、stale transaction、実SQLSTATE `40001` / `42501`、production readerからdrill objectが
+見えないこと、alias/deployment/schemaのcleanupと404/absenceを確認する。production alias/domainへの
+接触があれば失敗する。artifactをreview後、`P0-ARTIFACT`のauthority bundleへrun ID/attemptを渡す。
+
+## Backup/restore rehearsal
+
+`config/backup-restore-provider-contract.json`と`config/phase-exit-external-prerequisites.json`を構成し、
+restore targetはnonproductionに限定する。protected secretは設定が許可する環境変数名だけを使う。
+
+`operation=collect-backup-restore-rehearsal`、`request_json={}`で実行する。collectorはprovider APIの
+backup/PITR/restore status、RPOを照合し、restore DBへTLS接続してintegrityを検証した時点までをRTOとする。
+read-only証明はrole属性、membership、ownership、schema/table/function privilegeに加え、read-write
+transactionでの実DML/DDLがSQLSTATE `42501`になることを含む。restore resourceのcleanupとabsenceまでを
+一つのclosureにし、review後に`P0-DATA` bundleへrun ID/attemptを渡す。
+
+## Managed-device PWA / IDB drill
+
+`config/phase-exit-external-prerequisites.json`へmanaged Windows runner group/labels、exact Chromium、
+enrollment hash、distinct absolute profile root/path、installed PWA policy/app ID、Ed25519 public key
+fingerprintを構成する。秘密鍵はmanaged runner secretだけに置く。
+
+`collect-managed-device-live-stage`を3つの別runで A → B → A の順に実行する。各runは
+`request_json={}`で、通常browser tabは通常URL、installed PWAはOSの実shortcut/app IDから起動する。
+すべてのclient processをstage間でclose/reopenし、同じdevice/profile、current Release State history、
+accepted deployment、Service Worker/capability bytes、IndexedDB controller/raw observationをEd25519署名する。
+3 runのID/attemptを`P1-PWA`または`P7-IDB`のbundle producerへ渡す。単一run、standalone風browser window、
+loopback、異なるprofile、caller supplied stage/status/hashは正式証跡にならない。
+
+## 16-gate attestation と pre-initialization seed
+
+formal sequenceは `P0-BASELINE`、`P0-TOOLCHAIN`、`P0-ARTIFACT`、`P0-DATA`、`P0-PROMOTE`、
+`P0-RELEASE`、`P1-PWA`、`P2A-LOCAL`、`P2B-REPORT`、`P3-XLSX`、`P4-CSP`、
+`P5-DUAL`、`P5-LIST`、`P6-APP`、`P7-IDB`、`P8-CLEAN` の16件である。
+
+Release State初期化前は次の順序を厳守する。
+
+1. published `P0-BASELINE` bundleを指定して`attest-phase-exit`を実行する。
+2. そのattestation SHAをpredecessorにして`P0-TOOLCHAIN`をattestする。
+3. `P0-TOOLCHAIN` attestationをpredecessorにして`P0-ARTIFACT`をattestする。
+4. `produce-state-initialization-subject`へ上記3件のexact attestation SHAをそれぞれ渡す。
+5. subjectを別runでreviewし、`initialize-release-state`を実行する。seedのskip/reorder/substitutionは拒否される。
+
+初期化後は、対象gateのpublished bundle、直前gateのattestation、live supporting event/current accepted
+deploymentを再解決して`attest-phase-exit`を順に実行する。P0-PROMOTEはnormal
+`promotion-prepared` → `promote-standard` → `deployment-assigned` → `assignment-validated`の同一operation
+chainだけを許し、reconcile/recovery assignmentで代替しない。P0-RELEASE以降は対象gateのexact
+`release-accepted`とobservation startを使う。rollback後のstale accepted snapshotは再利用できない。
+
+P8はP7 attestationをpredecessorとするfloor QA/execution/closureからpolicy floorをactivateした後に
+`P8-CLEAN`をattestする。P8自身のattestationをfloor activationの前提にして循環させない。
+
+dispatchは`source_sha`、`operation`、canonical `request_json`の3入力だけである。現行registryの49
+operationはclosed schemaで検証され、unknown/unused/missing fieldを拒否する。operation数とworkflow
+coverageはtestがregistryから導出するため、文書の手作業一覧をdispatch正本にしない。
 
 ## Source-hardened pair の build
 
@@ -253,14 +480,14 @@ $receiptPath = Join-Path $env:TEMP "prebuilt-deployment-receipt.json"
 $bindingPath = Join-Path $env:TEMP "deployment-binding.json"
 $idempotencyKey = "deploy:<protected-run-id>:$sourceSha:standard"
 
-npm run release:deploy-prebuilt -- `
+npm run release:deploy-prebuilt -- -- `
   --package $packageRoot `
   --role standard `
   --provider-observation $providerObservation `
   --idempotency-key $idempotencyKey `
   --receipt $receiptPath
 
-npm run release:produce-deployment-binding -- deployment-binding `
+npm run release:produce-deployment-binding -- -- deployment-binding `
   --namespace $env:RELEASE_STATE_NAMESPACE `
   --package $packageRoot `
   --role standard `
@@ -380,8 +607,8 @@ evidence store に保存し、保存後の再読取まで一致した場合だ�
     二回実行し、完全一致した candidate event だけを CAS appendして standard だけを
     `release-accepted` にする。
 
-collectorの下位CLIは`npm run release:acceptance-collector -- initialize|append|finalize`、final inputの
-下位CLIは`npm run release:acceptance-input -- continuous-probe|companion-recovery`である。productionでは
+collectorの下位CLIは`npm run release:acceptance-collector -- -- initialize|append|finalize`、final inputの
+下位CLIは`npm run release:acceptance-input -- -- continuous-probe|companion-recovery`である。productionでは
 上記workflow operationからだけ呼び、local shellの成功、fixture、同一run生成物をacceptanceへ流用しない。
 
 workflow の `source_sha` は protected `main` の dispatch head と exact 一致しなければならない。

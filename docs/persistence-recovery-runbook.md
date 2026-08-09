@@ -525,7 +525,7 @@ archiveはbrowser profile内では暗号化されない前提です。exportし�
 
 ```powershell
 npm run build:release-a
-npm run preview -- --host 127.0.0.1 --port 4173 --strictPort
+npm run preview -- -- --host 127.0.0.1 --port 4173 --strictPort
 # 別のPowerShellで
 npm run test:release-a-browser
 ```
@@ -596,7 +596,7 @@ app-window相当の自動試験を`installedPwaChecks`へ転記してはいけ�
 
 ```powershell
 Copy-Item -LiteralPath docs\release-a-evidence.template.json -Destination <release-evidence-path>
-npm run verify:release-a-evidence -- <release-evidence-path>
+npm run verify:release-a-evidence -- -- <release-evidence-path>
 ```
 
 templateは未実施を誤って合格させないため、そのままでは必ず不合格になります。validatorは少なくとも次を検証します。
@@ -612,7 +612,7 @@ templateは未実施を誤って合格させないため、そのままでは必
 `d2389a0`専用E2Eは次でも単独確認できます。
 
 ```powershell
-npm run test:run -- src/utils/indexedDB.recoveryAdoption.integration.test.ts -t "d2389a0 orphan recovery E2E fixture"
+npm run test:run -- -- src/utils/indexedDB.recoveryAdoption.integration.test.ts -t "d2389a0 orphan recovery E2E fixture"
 ```
 
 実測していない24時間canary、installed PWA、provider監査、承認を`PASS`として記入してはいけません。validatorのPASSはproduction配布を自動実行するものではなく、Release ownerのgo判断に必要な入力です。

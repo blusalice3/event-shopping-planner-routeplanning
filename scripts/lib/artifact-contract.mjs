@@ -18,9 +18,11 @@ import {
   RELEASE_DIMENSION_KEYS,
 } from "./release-policy.mjs";
 import {
+  ARTIFACT_DRILL_BUILD_PURPOSE,
   POLICY_ACTIVATION_QA_BUILD_PURPOSE,
   RELEASE_BUILD_PURPOSES,
 } from "./release-build-input.mjs";
+import { parseContentAddressedUri } from "./content-addressed-store.mjs";
 import {
   OUTER_AGENT_GRAPH_URL,
   OUTER_AGENT_URL,
@@ -45,6 +47,7 @@ const RELEASE_BUILD_PURPOSE_SET = new Set([
 const SOURCE_HARDENED_BUILD_PURPOSES = new Set([
   "production",
   POLICY_ACTIVATION_QA_BUILD_PURPOSE,
+  ARTIFACT_DRILL_BUILD_PURPOSE,
 ]);
 const RELEASE_PHASE_GATE_SET = new Set(RELEASE_PHASE_GATES);
 const POLICY_ACTIVATION_GATE_SET = new Set(NORMAL_POLICY_ACTIVATION_GATES);
@@ -122,8 +125,18 @@ const assertImmutableReference = (value, label) => {
   return value;
 };
 
-const assertBuildAuthorityReference = (value, label) => {
+const assertBuildAuthorityReference = (value, label, buildPurpose) => {
   assertImmutableReference(value, label);
+  if (buildPurpose === ARTIFACT_DRILL_BUILD_PURPOSE) {
+    const parsed = parseContentAddressedUri(
+      value.uri,
+      "artifact-drill-build-authority.json",
+    );
+    if (parsed.sha256 !== value.sha256) {
+      throw new Error(`${label} content-addressed hash differs`);
+    }
+    return value;
+  }
   const match = RELEASE_STATE_EVIDENCE_URI_PATTERN.exec(value.uri);
   if (match === null || match[2] !== value.sha256) {
     throw new Error(
@@ -193,8 +206,13 @@ const assertArtifactBuildAuthority = (
   assertBuildAuthorityReference(
     value.buildAuthority,
     `${label}.buildAuthority`,
+    value.buildPurpose,
   );
-  if (!RELEASE_PHASE_GATE_SET.has(value.targetGate)) {
+  if (
+    value.buildPurpose === ARTIFACT_DRILL_BUILD_PURPOSE
+      ? value.targetGate !== "P0-ARTIFACT"
+      : !RELEASE_PHASE_GATE_SET.has(value.targetGate)
+  ) {
     throw new Error(`${label}.targetGate is invalid`);
   }
   if (
