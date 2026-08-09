@@ -983,10 +983,24 @@ const waitForNaturalServiceWorkerActivation = async (
   }
 };
 
-const requestTargetServiceWorkerUpdate = async (client) =>
-  evaluate(
+const requestTargetServiceWorkerUpdate = async (
+  client,
+  { allowExistingPostBaselineCandidate = false } = {},
+) => {
+  assert(
+    typeof allowExistingPostBaselineCandidate === "boolean",
+    "Existing post-baseline candidate authority must be boolean.",
+  );
+  assert(
+    !allowExistingPostBaselineCandidate || STAGE_FORWARD_UPDATE_AFTER_BASELINE,
+    "Existing candidate adoption is limited to staged historical forward transitions.",
+  );
+  return await evaluate(
     client,
     `(() => (async () => {
+      const allowExistingPostBaselineCandidate = ${JSON.stringify(
+        allowExistingPostBaselineCandidate,
+      )};
       const previousRegistration =
         await navigator.serviceWorker.getRegistration();
       if (!previousRegistration) {
@@ -994,6 +1008,19 @@ const requestTargetServiceWorkerUpdate = async (client) =>
       }
       const previousInstalling = previousRegistration.installing;
       const previousWaiting = previousRegistration.waiting;
+      if (
+        allowExistingPostBaselineCandidate &&
+        previousInstalling &&
+        previousWaiting
+      ) {
+        throw new Error(
+          "Existing post-baseline Service Worker candidate is ambiguous.",
+        );
+      }
+      const existingPostBaselineCandidate =
+        allowExistingPostBaselineCandidate
+          ? previousInstalling ?? previousWaiting
+          : null;
       let updateFoundCount = 0;
       const onUpdateFound = () => {
         updateFoundCount += 1;
@@ -1016,6 +1043,14 @@ const requestTargetServiceWorkerUpdate = async (client) =>
             }
             if (waiting && waiting !== previousWaiting) {
               resolve(waiting);
+              return;
+            }
+            if (
+              existingPostBaselineCandidate &&
+              (installing === existingPostBaselineCandidate ||
+                waiting === existingPostBaselineCandidate)
+            ) {
+              resolve(existingPostBaselineCandidate);
               return;
             }
             if (Date.now() >= deadline) {
@@ -1071,6 +1106,7 @@ const requestTargetServiceWorkerUpdate = async (client) =>
       }
     })())`,
   );
+};
 
 const waitForControlledApplication = async (client) => {
   await evaluate(client, "navigator.serviceWorker.ready.then(() => true)");
@@ -1984,32 +2020,9 @@ try {
     primary.client,
     PROMPT_CLOSE_DRILL_MODE === "required" ? "save-blocker" : "none",
   );
-  if (STAGE_FORWARD_UPDATE_AFTER_BASELINE) {
-    await browserContext.setOffline(true);
-  }
-  await navigate(primary.client, PREVIEW_URL);
-  await ensureControlledApplication(primary.client);
-  if (STAGE_FORWARD_UPDATE_AFTER_BASELINE) {
-    const stagedRegistration = await evaluate(
-      primary.client,
-      `navigator.serviceWorker.getRegistration().then((registration) => ({
-        activeState: registration?.active?.state ?? null,
-        controlled: Boolean(navigator.serviceWorker.controller),
-        installing: Boolean(registration?.installing),
-        offline: navigator.onLine === false,
-        waiting: Boolean(registration?.waiting),
-      }))`,
-    );
-    assert(
-      stagedRegistration.activeState === "activated" &&
-        stagedRegistration.controlled &&
-        !stagedRegistration.installing &&
-        stagedRegistration.offline &&
-        !stagedRegistration.waiting,
-      `Historical forward staging differs: ${JSON.stringify(
-        stagedRegistration,
-      )}`,
-    );
+  if (!STAGE_FORWARD_UPDATE_AFTER_BASELINE) {
+    await navigate(primary.client, PREVIEW_URL);
+    await ensureControlledApplication(primary.client);
   }
   if (TRANSITION_MODE === "rollback") {
     assert(
@@ -2431,15 +2444,15 @@ try {
       new URL("/sw.js", PREVIEW_URL).href,
       async () => {
         if (STAGE_FORWARD_UPDATE_AFTER_BASELINE) {
-          await browserContext.setOffline(false);
-          const restoredOnline = await evaluate(
-            primary.client,
-            "navigator.onLine === true",
-          );
           assert(
-            restoredOnline,
-            "Historical forward staging did not restore network access.",
+            primary.page.url() === "about:blank",
+            "Historical forward primary navigated before baseline freeze.",
           );
+          await navigate(primary.client, PREVIEW_URL);
+          await ensureControlledApplication(primary.client);
+          return await requestTargetServiceWorkerUpdate(primary.client, {
+            allowExistingPostBaselineCandidate: true,
+          });
         }
         return await requestTargetServiceWorkerUpdate(primary.client);
       },

@@ -121,16 +121,22 @@ test("forward transition waits for one target worker to activate naturally", () 
   const forwardStart = verifierSource.indexOf(
     '} else if (TRANSITION_MODE === "forward")',
   );
+  const reopenCallbackStart = verifierSource.indexOf(
+    "const collectRegistrationState = (client)",
+    forwardStart,
+  );
   const primaryReopen = verifierSource.indexOf(
     "await navigate(primary.client, PREVIEW_URL)",
-    forwardStart,
+    reopenCallbackStart,
   );
   const standaloneReopen = verifierSource.indexOf(
     "await navigate(standaloneTarget.client, PREVIEW_URL)",
     primaryReopen,
   );
   assert.ok(
-    primaryReopen > forwardStart && standaloneReopen > primaryReopen,
+    reopenCallbackStart > forwardStart &&
+      primaryReopen > reopenCallbackStart &&
+      standaloneReopen > primaryReopen,
     "Forward clients must reopen in primary-then-standalone order.",
   );
   const stagedReopenSource = verifierSource.slice(
@@ -150,31 +156,74 @@ test("forward transition waits for one target worker to activate naturally", () 
     verifierSource,
     /const STAGE_FORWARD_UPDATE_AFTER_BASELINE =\s*TRANSITION_MODE === "forward" && PROMPT_CLOSE_DRILL_MODE === "disabled";/,
   );
-  const offlineStageIndex = verifierSource.indexOf(
-    "await browserContext.setOffline(true)",
+  const commonPrimaryStart = verifierSource.indexOf(
+    "const primary = await createTarget(browserContext)",
   );
   const forwardActivationIndex = verifierSource.indexOf(
     "const naturalActivation = await waitForNaturalServiceWorkerActivation(",
     forwardStart,
   );
-  const onlineRestoreIndex = verifierSource.indexOf(
-    "await browserContext.setOffline(false)",
+  const stagedNavigateIndex = verifierSource.indexOf(
+    "await navigate(primary.client, PREVIEW_URL)",
     forwardActivationIndex,
   );
-  const requestedUpdateIndex = verifierSource.indexOf(
-    "return await requestTargetServiceWorkerUpdate(primary.client)",
-    onlineRestoreIndex,
+  const stagedEnsureIndex = verifierSource.indexOf(
+    "await ensureControlledApplication(primary.client)",
+    stagedNavigateIndex,
+  );
+  const stagedRequestIndex = verifierSource.indexOf(
+    "allowExistingPostBaselineCandidate: true",
+    stagedEnsureIndex,
   );
   assert.ok(
-    offlineStageIndex >= 0 &&
-      offlineStageIndex < forwardActivationIndex &&
-      onlineRestoreIndex > forwardActivationIndex &&
-      requestedUpdateIndex > onlineRestoreIndex,
-    "Historical forward navigation must remain offline until the tracker freezes its baseline.",
+    commonPrimaryStart >= 0 &&
+      forwardActivationIndex > commonPrimaryStart &&
+      stagedNavigateIndex > forwardActivationIndex &&
+      stagedEnsureIndex > stagedNavigateIndex &&
+      stagedRequestIndex > stagedEnsureIndex,
+    "Historical forward navigation must start inside the post-baseline update callback.",
+  );
+  const commonPrimarySource = verifierSource.slice(
+    commonPrimaryStart,
+    verifierSource.indexOf(
+      'if (TRANSITION_MODE === "rollback")',
+      commonPrimaryStart,
+    ),
   );
   assert.match(
-    verifierSource.slice(offlineStageIndex, forwardActivationIndex),
-    /activeState === "activated"[\s\S]*controlled[\s\S]*!stagedRegistration\.installing[\s\S]*stagedRegistration\.offline[\s\S]*!stagedRegistration\.waiting/,
+    commonPrimarySource,
+    /if \(!STAGE_FORWARD_UPDATE_AFTER_BASELINE\) \{\s*await navigate\(primary\.client, PREVIEW_URL\);\s*await ensureControlledApplication\(primary\.client\);\s*\}/,
+  );
+  assert.doesNotMatch(verifierSource, /browserContext\.setOffline\(/);
+  assert.match(
+    verifierSource.slice(forwardActivationIndex, stagedNavigateIndex),
+    /primary\.page\.url\(\) === "about:blank"/,
+  );
+  const requestHelperEnd = verifierSource.indexOf(
+    "const waitForControlledApplication",
+    helperEnd,
+  );
+  const targetRequestSource = verifierSource.slice(helperEnd, requestHelperEnd);
+  assert.match(
+    targetRequestSource,
+    /allowExistingPostBaselineCandidate &&\s*previousInstalling &&\s*previousWaiting/,
+  );
+  assert.match(
+    targetRequestSource,
+    /!allowExistingPostBaselineCandidate \|\| STAGE_FORWARD_UPDATE_AFTER_BASELINE/,
+  );
+  assert.match(
+    targetRequestSource,
+    /allowExistingPostBaselineCandidate\s*\? previousInstalling \?\? previousWaiting\s*: null/,
+  );
+  assert.match(
+    targetRequestSource,
+    /existingPostBaselineCandidate &&\s*\(installing === existingPostBaselineCandidate \|\|\s*waiting === existingPostBaselineCandidate\)/,
+  );
+  assert.equal(
+    verifierSource.match(/allowExistingPostBaselineCandidate: true/g)?.length,
+    1,
+    "Only the post-baseline historical forward callback may adopt an existing candidate.",
   );
 
   const promptPrepareStart = verifierSource.indexOf(
