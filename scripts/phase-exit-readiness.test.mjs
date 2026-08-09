@@ -295,20 +295,7 @@ const createLiveReleaseStateFixture = () => {
       acceptedStandardFloors: {
         pwaLifecycle: "legacy-auto-update-v1",
       },
-      rollbackInventory: [
-        {
-          binding: standard,
-          acceptedEvent: objectRef("4"),
-          acceptedGate: "P0-RELEASE",
-          acceptedStandardFloors: {
-            pwaLifecycle: "legacy-auto-update-v1",
-          },
-          evaluatedPolicy: policyRef,
-          eligibleActions: ["package-redeploy", "rollback"],
-          eligibility: "eligible",
-          reasonCodes: [],
-        },
-      ],
+      rollbackInventory: [],
       clearBootstrapRecovery: false,
     },
     approvalRefs: acceptanceApprovals,

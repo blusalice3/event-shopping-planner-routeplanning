@@ -12,6 +12,7 @@ import {
 } from "./phaseExitAttestation.mjs";
 import { createPostgresReleaseStateStore } from "./postgresStore.mjs";
 import { resolveRequiredPhaseExitForOperation } from "./releaseOperationPhaseExit.mjs";
+import { RELEASE_PHASE_GATES } from "./phaseGates.mjs";
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -20,6 +21,11 @@ const root = path.resolve(
 );
 const SOURCE_SHA = /^[0-9a-f]{40}$/u;
 const NAMESPACE = /^[a-z0-9][a-z0-9-]{2,62}$/u;
+const CANDIDATE_GATE_OPERATIONS = new Set([
+  "produce-acceptance-requirements",
+  "produce-acceptance-inputs",
+  "accept-standard",
+]);
 
 const gitIsAncestor = (ancestor, descendant) =>
   spawnSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], {
@@ -28,7 +34,7 @@ const gitIsAncestor = (ancestor, descendant) =>
   }).status === 0;
 
 export const assertReleaseOperationPhaseExit = async (
-  { store, operation, sourceSha },
+  { store, operation, sourceSha, candidateGate = null },
   {
     readState = readCurrentReleaseState,
     readLedger = readPhaseExitAttestationLedger,
@@ -36,13 +42,19 @@ export const assertReleaseOperationPhaseExit = async (
     isSourceAncestor = gitIsAncestor,
   } = {},
 ) => {
-  if (!SOURCE_SHA.test(sourceSha ?? "")) {
-    throw new Error("Release operation predecessor source is invalid");
+  const requiresCandidateGate = CANDIDATE_GATE_OPERATIONS.has(operation);
+  if (
+    !SOURCE_SHA.test(sourceSha ?? "") ||
+    requiresCandidateGate !== (candidateGate !== null) ||
+    (candidateGate !== null && !RELEASE_PHASE_GATES.includes(candidateGate))
+  ) {
+    throw new Error("Release operation predecessor identity is invalid");
   }
   const current = await readState({ store });
   const requiredGate = resolveRequiredPhaseExitForOperation({
     operation,
     acceptedGate: current.snapshot.acceptedGate,
+    candidateGate,
   });
   if (requiredGate === null) {
     return Object.freeze({ operation, requiredGate: null, status: "exempt" });
@@ -73,6 +85,7 @@ const parseArguments = (argv) => {
     ["--namespace", "namespace"],
     ["--source-sha", "sourceSha"],
     ["--operation", "operation"],
+    ["--candidate-gate", "candidateGate"],
   ]);
   for (let index = 0; index < argv.length; index += 1) {
     const property = fields.get(argv[index]);
@@ -90,9 +103,13 @@ const parseArguments = (argv) => {
     index += 1;
   }
   if (
-    Object.keys(values).length !== 3 ||
+    ![3, 4].includes(Object.keys(values).length) ||
     !NAMESPACE.test(values.namespace ?? "") ||
-    !SOURCE_SHA.test(values.sourceSha ?? "")
+    !SOURCE_SHA.test(values.sourceSha ?? "") ||
+    CANDIDATE_GATE_OPERATIONS.has(values.operation) !==
+      Object.hasOwn(values, "candidateGate") ||
+    (Object.hasOwn(values, "candidateGate") &&
+      !RELEASE_PHASE_GATES.includes(values.candidateGate))
   ) {
     throw new Error("Release predecessor arguments are incomplete");
   }

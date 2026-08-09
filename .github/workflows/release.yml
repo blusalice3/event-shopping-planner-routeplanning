@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   release:
-    if: ${{ github.ref == 'refs/heads/main' && github.ref_protected == true && github.sha == inputs.source_sha && inputs.operation != 'collect-production-request-graph' && inputs.operation != 'collect-csp-report-observation' && inputs.operation != 'collect-deployed-csp-flow' && inputs.operation != 'collect-startup-waf-observation' && inputs.operation != 'collect-managed-device-live-stage' }}
+    if: ${{ github.ref == 'refs/heads/main' && github.ref_protected == true && github.sha == inputs.source_sha && inputs.operation != 'collect-production-request-graph' && inputs.operation != 'collect-csp-report-observation' && inputs.operation != 'collect-deployed-csp-flow' && inputs.operation != 'collect-startup-waf-observation' && inputs.operation != 'collect-managed-device-live-stage' && inputs.operation != 'collect-pwa-multiclient-drill' }}
     runs-on: ubuntu-latest
     environment: foundation-release-state
     timeout-minutes: 60
@@ -81,6 +81,24 @@ jobs:
         run: |
           $runIdPattern = '^[1-9][0-9]*$'
           $sha256Pattern = '^[0-9a-f]{64}$'
+          $releasePhaseGates = @(
+            'P0-RELEASE', 'P1-PWA', 'P2A-LOCAL', 'P2B-REPORT',
+            'P3-XLSX', 'P4-CSP', 'P5-DUAL', 'P5-LIST',
+            'P6-APP', 'P7-IDB', 'P8-CLEAN'
+          )
+          $candidateGateOperations = @(
+            'produce-artifact-build-requirements',
+            'produce-acceptance-requirements',
+            'produce-acceptance-inputs',
+            'accept-standard'
+          )
+          $hasCandidateGate = -not [string]::IsNullOrEmpty($env:REQUESTED_CANDIDATE_GATE)
+          if (
+            $candidateGateOperations -notcontains $env:REQUESTED_OPERATION -and
+            $hasCandidateGate
+          ) {
+            throw "candidate_gate is forbidden for this operation"
+          }
           if ($env:REQUESTED_SOURCE_SHA -notmatch '^[0-9a-f]{40}$') {
             throw "source_sha must be a full lowercase commit SHA"
           }
@@ -203,6 +221,8 @@ jobs:
             $env:REQUESTED_PHASE_AUTHORITY_CSP_REPORT_RUN_ATTEMPT,
             $env:REQUESTED_PHASE_AUTHORITY_DEPLOYED_CSP_RUN_ID,
             $env:REQUESTED_PHASE_AUTHORITY_DEPLOYED_CSP_RUN_ATTEMPT,
+            $env:REQUESTED_PHASE_AUTHORITY_PWA_RECEIPT_RUN_ID,
+            $env:REQUESTED_PHASE_AUTHORITY_PWA_RECEIPT_RUN_ATTEMPT,
             $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_1_ID,
             $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_1_ATTEMPT,
             $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_2_ID,
@@ -219,8 +239,11 @@ jobs:
 
           switch ($env:REQUESTED_OPERATION) {
             'produce-artifact-build-requirements' {
-              if ($env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$') {
-                throw "production artifact build requirements require operation_id"
+              if (
+                $env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' -or
+                $releasePhaseGates -notcontains $env:REQUESTED_CANDIDATE_GATE
+              ) {
+                throw "production artifact build requirements require operation_id and candidate_gate"
               }
             }
             'produce-policy-activation-qa-build-requirements' {
@@ -458,7 +481,11 @@ jobs:
                 throw "companion_recovery_source_sha256 must be empty or a reviewed SHA-256"
               }
             }
-            'produce-acceptance-requirements' {}
+            'produce-acceptance-requirements' {
+              if ($releasePhaseGates -notcontains $env:REQUESTED_CANDIDATE_GATE) {
+                throw "acceptance requirements require an exact candidate_gate"
+              }
+            }
             'produce-own-gate-performance-evidence' {
               if (
                 -not $hasPerformanceRawRun -or
@@ -471,6 +498,7 @@ jobs:
             }
             'produce-acceptance-inputs' {
               if (
+                $releasePhaseGates -notcontains $env:REQUESTED_CANDIDATE_GATE -or
                 $env:REQUESTED_ACCEPTANCE_EVIDENCE_RUN_ID -notmatch $runIdPattern -or
                 $env:REQUESTED_ACCEPTANCE_EVIDENCE_RUN_ID -eq $env:GITHUB_RUN_ID -or
                 $env:REQUESTED_ACCEPTANCE_REQUIREMENTS_RUN_ID -notmatch $runIdPattern -or
@@ -501,6 +529,7 @@ jobs:
             }
             'accept-standard' {
               if (
+                $releasePhaseGates -notcontains $env:REQUESTED_CANDIDATE_GATE -or
                 $env:REQUESTED_ACCEPTANCE_EVIDENCE_RUN_ID -notmatch $runIdPattern -or
                 $env:REQUESTED_ACCEPTANCE_EVIDENCE_RUN_ID -eq $env:GITHUB_RUN_ID -or
                 $env:REQUESTED_ACCEPTANCE_INPUTS_RUN_ID -notmatch $runIdPattern -or
@@ -669,6 +698,8 @@ jobs:
                 -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_STARTUP_WAF_RUN_ATTEMPT) -or
                 -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_CSP_REPORT_RUN_ID) -or
                 -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_CSP_REPORT_RUN_ATTEMPT) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_PWA_RECEIPT_RUN_ID) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_PWA_RECEIPT_RUN_ATTEMPT) -or
                 -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_1_ID) -or
                 -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_1_ATTEMPT) -or
                 -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_2_ID) -or
@@ -723,10 +754,27 @@ jobs:
           RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
           RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
         run: |
-          npm run release:verify-operation-predecessor -- `
-            --namespace $env:RELEASE_STATE_NAMESPACE `
-            --source-sha $env:REQUESTED_SOURCE_SHA `
-            --operation $env:REQUESTED_OPERATION
+          $predecessorArguments = @(
+            'run',
+            'release:verify-operation-predecessor',
+            '--',
+            '--namespace',
+            $env:RELEASE_STATE_NAMESPACE,
+            '--source-sha',
+            $env:REQUESTED_SOURCE_SHA,
+            '--operation',
+            $env:REQUESTED_OPERATION
+          )
+          if (
+            @(
+              'produce-acceptance-requirements',
+              'produce-acceptance-inputs',
+              'accept-standard'
+            ) -contains $env:REQUESTED_OPERATION
+          ) {
+            $predecessorArguments += @('--candidate-gate', $env:REQUESTED_CANDIDATE_GATE)
+          }
+          & npm @predecessorArguments
           if ($LASTEXITCODE -ne 0) {
             throw "formal predecessor verification failed with exit code $LASTEXITCODE"
           }
@@ -782,6 +830,7 @@ jobs:
               --namespace $env:RELEASE_STATE_NAMESPACE `
               --operation-id $env:REQUESTED_OPERATION_ID `
               --source-sha $env:REQUESTED_SOURCE_SHA `
+              --target-gate $env:REQUESTED_CANDIDATE_GATE `
               --target-source-sha $env:REQUESTED_SOURCE_SHA `
               --output $requirementsPath
             if ($LASTEXITCODE -ne 0) {
@@ -1144,6 +1193,8 @@ jobs:
             }
             'P1-PWA' {
               $phaseArguments += @(
+                '--pwa-receipt-run-id', $env:REQUESTED_PHASE_AUTHORITY_PWA_RECEIPT_RUN_ID,
+                '--pwa-receipt-run-attempt', $env:REQUESTED_PHASE_AUTHORITY_PWA_RECEIPT_RUN_ATTEMPT,
                 '--managed-device-run-1-id', $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_1_ID,
                 '--managed-device-run-1-attempt', $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_1_ATTEMPT,
                 '--managed-device-run-2-id', $env:REQUESTED_PHASE_AUTHORITY_MANAGED_DEVICE_RUN_2_ID,
@@ -1843,6 +1894,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "authoritative acceptance requirements production failed with exit code $LASTEXITCODE"
           }
+          $requirements = Get-Content -LiteralPath $requirementsPath -Raw -Encoding utf8 | ConvertFrom-Json
+          if ($requirements.acceptedGate -ne $env:REQUESTED_CANDIDATE_GATE) {
+            throw "acceptance requirements acceptedGate differs from candidate_gate"
+          }
           $requirementsHash = (Get-FileHash -LiteralPath $requirementsPath -Algorithm SHA256).Hash.ToLowerInvariant()
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Acceptance requirements SHA-256: ``$requirementsHash``" -Encoding utf8
 
@@ -2196,6 +2251,9 @@ jobs:
             throw "reviewed acceptance requirements no longer match authoritative Release State"
           }
           $requirements = Get-Content -LiteralPath $reviewedRequirementsPath -Raw -Encoding utf8 | ConvertFrom-Json
+          if ($requirements.acceptedGate -ne $env:REQUESTED_CANDIDATE_GATE) {
+            throw "reviewed acceptance requirements acceptedGate differs from candidate_gate"
+          }
           $hasPerformanceRun = -not [string]::IsNullOrEmpty($env:REQUESTED_PERFORMANCE_EVIDENCE_RUN_ID)
           $hasPerformanceHash = -not [string]::IsNullOrEmpty($env:REQUESTED_PERFORMANCE_EVIDENCE_SHA256)
           if ($requirements.performanceEvidenceKind -eq 'none') {
@@ -2385,6 +2443,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "prepare-acceptance-bundle lifecycle failed with exit code $LASTEXITCODE"
           }
+          $bundleDocument = Get-Content -LiteralPath $bundlePath -Raw -Encoding utf8 | ConvertFrom-Json
+          $objectSetDocument = Get-Content -LiteralPath $objectSetPath -Raw -Encoding utf8 | ConvertFrom-Json
+          $releaseEventEntries = @(
+            $objectSetDocument.objects | Where-Object {
+              $_.sha256 -eq $bundleDocument.releaseStateEvent.sha256
+            }
+          )
+          if ($releaseEventEntries.Count -ne 1) {
+            throw "acceptance artifacts do not contain one exact release event"
+          }
+          $releaseEventBytes = [Convert]::FromBase64String($releaseEventEntries[0].bytesBase64)
+          $releaseEvent = [Text.Encoding]::UTF8.GetString($releaseEventBytes) | ConvertFrom-Json
+          if (
+            $releaseEvent.eventType -ne 'release-accepted' -or
+            $releaseEvent.payload.acceptedGate -ne $env:REQUESTED_CANDIDATE_GATE
+          ) {
+            throw "acceptance artifacts acceptedGate differs from candidate_gate"
+          }
           $bundleHash = (Get-FileHash -LiteralPath $bundlePath -Algorithm SHA256).Hash.ToLowerInvariant()
           $objectSetHash = (Get-FileHash -LiteralPath $objectSetPath -Algorithm SHA256).Hash.ToLowerInvariant()
           Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Acceptance-final bundle SHA-256: ``$bundleHash``" -Encoding utf8
@@ -2462,6 +2538,24 @@ jobs:
             $actualObjectSetHash -ne $env:REQUESTED_TERMINAL_OBJECT_SET_SHA256
           ) {
             throw "acceptance terminal bundle closure differs from its reviewed SHA-256"
+          }
+          $bundleDocument = Get-Content -LiteralPath $bundlePath -Raw -Encoding utf8 | ConvertFrom-Json
+          $objectSetDocument = Get-Content -LiteralPath $objectSetPath -Raw -Encoding utf8 | ConvertFrom-Json
+          $releaseEventEntries = @(
+            $objectSetDocument.objects | Where-Object {
+              $_.sha256 -eq $bundleDocument.releaseStateEvent.sha256
+            }
+          )
+          if ($releaseEventEntries.Count -ne 1) {
+            throw "reviewed acceptance artifacts do not contain one exact release event"
+          }
+          $releaseEventBytes = [Convert]::FromBase64String($releaseEventEntries[0].bytesBase64)
+          $releaseEvent = [Text.Encoding]::UTF8.GetString($releaseEventBytes) | ConvertFrom-Json
+          if (
+            $releaseEvent.eventType -ne 'release-accepted' -or
+            $releaseEvent.payload.acceptedGate -ne $env:REQUESTED_CANDIDATE_GATE
+          ) {
+            throw "reviewed acceptance artifacts acceptedGate differs from candidate_gate"
           }
           $outputPath = Join-Path $env:RUNNER_TEMP 'acceptance-output'
           New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
@@ -3212,7 +3306,7 @@ jobs:
           retention-days: 30
 
   browser-authority:
-    if: ${{ github.ref == 'refs/heads/main' && github.ref_protected == true && github.sha == inputs.source_sha && inputs.operation != 'collect-managed-device-live-stage' && (inputs.operation == 'collect-production-request-graph' || inputs.operation == 'collect-csp-report-observation' || inputs.operation == 'collect-deployed-csp-flow' || inputs.operation == 'collect-startup-waf-observation') }}
+    if: ${{ github.ref == 'refs/heads/main' && github.ref_protected == true && github.sha == inputs.source_sha && inputs.operation != 'collect-managed-device-live-stage' && inputs.operation != 'collect-pwa-multiclient-drill' && (inputs.operation == 'collect-production-request-graph' || inputs.operation == 'collect-csp-report-observation' || inputs.operation == 'collect-deployed-csp-flow' || inputs.operation == 'collect-startup-waf-observation') }}
     runs-on: ubuntu-latest
     environment: foundation-release-state
     timeout-minutes: 30
@@ -3381,7 +3475,7 @@ jobs:
           retention-days: 30
 
   managed-device-authority:
-    if: ${{ github.ref == 'refs/heads/main' && github.ref_protected == true && github.sha == inputs.source_sha && inputs.operation == 'collect-managed-device-live-stage' }}
+    if: ${{ github.ref == 'refs/heads/main' && github.ref_protected == true && github.sha == inputs.source_sha && (inputs.operation == 'collect-managed-device-live-stage' || inputs.operation == 'collect-pwa-multiclient-drill') }}
     runs-on:
       group: foundation-managed-devices
       labels:
@@ -3413,7 +3507,7 @@ jobs:
             $env:GITHUB_REF -ne 'refs/heads/main' -or
             $env:GITHUB_REF_PROTECTED -ne 'true' -or
             $env:GITHUB_SHA -ne $env:REQUESTED_SOURCE_SHA -or
-            $env:REQUESTED_OPERATION -ne 'collect-managed-device-live-stage'
+            @('collect-managed-device-live-stage', 'collect-pwa-multiclient-drill') -notcontains $env:REQUESTED_OPERATION
           ) {
             throw "managed device authority source is not the protected exact main commit"
           }
@@ -3466,6 +3560,7 @@ jobs:
           }
 
       - name: Collect exact managed device live stage
+        if: inputs.operation == 'collect-managed-device-live-stage'
         shell: pwsh
         env:
           RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
@@ -3481,10 +3576,39 @@ jobs:
           }
 
       - name: Upload exact managed device live stage
+        if: inputs.operation == 'collect-managed-device-live-stage'
         uses: actions/upload-artifact@v4
         with:
           name: foundation-managed-device-live-stage-${{ inputs.source_sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/managed-device-live-stage.json
+          if-no-files-found: error
+          compression-level: 9
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 30
+
+      - name: Collect exact PWA multiclient drill
+        if: inputs.operation == 'collect-pwa-multiclient-drill'
+        shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+          FOUNDATION_DEVICE_ATTESTATION_PRIVATE_KEY_PEM: ${{ secrets.FOUNDATION_DEVICE_ATTESTATION_PRIVATE_KEY_PEM }}
+          FOUNDATION_DEVICE_ATTESTATION_PUBLIC_KEY_PEM: ${{ secrets.FOUNDATION_DEVICE_ATTESTATION_PUBLIC_KEY_PEM }}
+          FOUNDATION_DEVICE_RUNNER_GROUP: foundation-managed-devices
+          FOUNDATION_DEVICE_RUNNER_LABELS: Windows,X64,foundation-device,managed,self-hosted
+        run: |
+          npm run browser:pwa-multiclient:collect -- --namespace $env:RELEASE_STATE_NAMESPACE --source-sha $env:REQUESTED_SOURCE_SHA --output (Join-Path $env:RUNNER_TEMP 'pwa-multiclient-drill.json')
+          if ($LASTEXITCODE -ne 0) {
+            throw "PWA multiclient drill collection failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload exact PWA multiclient drill
+        if: inputs.operation == 'collect-pwa-multiclient-drill'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-pwa-multiclient-drill-${{ inputs.source_sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pwa-multiclient-drill.json
           if-no-files-found: error
           compression-level: 9
           overwrite: false

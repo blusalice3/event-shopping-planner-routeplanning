@@ -1,4 +1,8 @@
-import { RELEASE_PHASE_GATES } from "./phaseGates.mjs";
+import {
+  RELEASE_PHASE_GATES,
+  nextReleasePhaseGate,
+  previousFormalPhaseExitGate,
+} from "./phaseGates.mjs";
 
 export const CURRENT_ACCEPTED_PHASE_EXIT = "current-accepted-phase-exit";
 export const P8_FLOOR_PREDECESSOR = "P7-IDB";
@@ -9,6 +13,11 @@ export const P8_FLOOR_PREPARATION_OPERATIONS = Object.freeze([
 const P8_FLOOR_PREPARATION_OPERATION_SET = new Set(
   P8_FLOOR_PREPARATION_OPERATIONS,
 );
+const CANDIDATE_GATE_ACCEPTANCE_OPERATION_SET = new Set([
+  "produce-acceptance-requirements",
+  "produce-acceptance-inputs",
+  "accept-standard",
+]);
 
 // null is a deliberate cycle-breaking exemption.  Every dispatch operation
 // must appear here; an absent operation is never treated as exempt.
@@ -54,6 +63,7 @@ export const RELEASE_OPERATION_REQUIRED_PREDECESSOR = Object.freeze({
   "collect-artifact-control-store-drill": null,
   "collect-backup-restore-rehearsal": null,
   "collect-managed-device-live-stage": null,
+  "collect-pwa-multiclient-drill": null,
   "produce-phase-exit-authority-bundle": null,
   "publish-phase-exit-authority-bundle": null,
   "attest-phase-exit": null,
@@ -79,10 +89,19 @@ export const assertReleaseOperationPredecessorCoverage = (operations) => {
 export const resolveRequiredPhaseExitForOperation = ({
   operation,
   acceptedGate,
+  candidateGate = null,
 }) => {
   if (!Object.hasOwn(RELEASE_OPERATION_REQUIRED_PREDECESSOR, operation)) {
     throw new Error(
       `Release operation has no formal predecessor policy: ${operation}`,
+    );
+  }
+  if (
+    !CANDIDATE_GATE_ACCEPTANCE_OPERATION_SET.has(operation) &&
+    candidateGate !== null
+  ) {
+    throw new Error(
+      "Candidate gate is forbidden outside acceptance predecessor routing",
     );
   }
   if (operation === "activate-policy-floor") {
@@ -98,6 +117,33 @@ export const resolveRequiredPhaseExitForOperation = ({
     P8_FLOOR_PREPARATION_OPERATION_SET.has(operation)
   ) {
     return P8_FLOOR_PREDECESSOR;
+  }
+  if (CANDIDATE_GATE_ACCEPTANCE_OPERATION_SET.has(operation)) {
+    if (!RELEASE_PHASE_GATES.includes(candidateGate)) {
+      throw new Error("Acceptance candidate gate is invalid or absent");
+    }
+    if (candidateGate === acceptedGate) {
+      if (candidateGate === "P8-CLEAN") {
+        throw new Error(
+          "Terminal P8-CLEAN does not permit same-floor acceptance routing",
+        );
+      }
+      return previousFormalPhaseExitGate(candidateGate);
+    }
+    let expectedCandidateGate;
+    try {
+      expectedCandidateGate = nextReleasePhaseGate(acceptedGate);
+    } catch {
+      throw new Error(
+        "Acceptance candidate gate must preserve the current floor or advance exactly one gate",
+      );
+    }
+    if (candidateGate !== expectedCandidateGate) {
+      throw new Error(
+        "Acceptance candidate gate must preserve the current floor or advance exactly one gate",
+      );
+    }
+    return acceptedGate ?? "P0-PROMOTE";
   }
   const requirement = RELEASE_OPERATION_REQUIRED_PREDECESSOR[operation];
   if (requirement !== CURRENT_ACCEPTED_PHASE_EXIT) return requirement;

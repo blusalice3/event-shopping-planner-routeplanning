@@ -1,7 +1,7 @@
 import { appendFile, open, readFile } from "node:fs/promises";
 import path from "node:path";
 import { canonicalJsonBytes, parseJsonStrict } from "../lib/canonical-json.mjs";
-import { FORMAL_PHASE_EXIT_GATES } from "./phaseGates.mjs";
+import { FORMAL_PHASE_EXIT_GATES, RELEASE_PHASE_GATES } from "./phaseGates.mjs";
 import { assertReleaseOperationPredecessorCoverage } from "./releaseOperationPhaseExit.mjs";
 
 const SOURCE_SHA = /^[0-9a-f]{40}$/u;
@@ -56,6 +56,8 @@ const PHASE_AUTHORITY_FIELDS_BY_GATE = Object.freeze({
     "phase_authority_performance_run_attempt",
   ]),
   "P1-PWA": Object.freeze([
+    "phase_authority_pwa_receipt_run_id",
+    "phase_authority_pwa_receipt_run_attempt",
     "phase_authority_managed_device_run_1_id",
     "phase_authority_managed_device_run_1_attempt",
     "phase_authority_managed_device_run_2_id",
@@ -89,7 +91,10 @@ const ALL_PHASE_AUTHORITY_FIELDS = Object.freeze([
 ]);
 
 export const RELEASE_DISPATCH_OPERATION_SCHEMAS = Object.freeze({
-  "produce-artifact-build-requirements": schema(["operation_id"]),
+  "produce-artifact-build-requirements": schema([
+    "operation_id",
+    "candidate_gate",
+  ]),
   "build-and-verify": schema([
     "artifact_build_requirements_run_id",
     "artifact_build_requirements_sha256",
@@ -164,9 +169,10 @@ export const RELEASE_DISPATCH_OPERATION_SCHEMAS = Object.freeze({
     "p5d_accepted_event_sha256",
     "p5e_accepted_event_sha256",
   ]),
-  "produce-acceptance-requirements": EMPTY,
+  "produce-acceptance-requirements": schema(["candidate_gate"]),
   "produce-acceptance-inputs": schema(
     [
+      "candidate_gate",
       "acceptance_evidence_run_id",
       "acceptance_requirements_run_id",
       "acceptance_requirements_sha256",
@@ -183,6 +189,7 @@ export const RELEASE_DISPATCH_OPERATION_SCHEMAS = Object.freeze({
   ),
   "accept-standard": schema(
     [
+      "candidate_gate",
       "acceptance_evidence_run_id",
       "acceptance_inputs_run_id",
       "acceptance_requirements_run_id",
@@ -254,6 +261,7 @@ export const RELEASE_DISPATCH_OPERATION_SCHEMAS = Object.freeze({
   "collect-artifact-control-store-drill": EMPTY,
   "collect-backup-restore-rehearsal": EMPTY,
   "collect-managed-device-live-stage": EMPTY,
+  "collect-pwa-multiclient-drill": EMPTY,
   "produce-phase-exit-authority-bundle": schema(
     ["target_gate"],
     ALL_PHASE_AUTHORITY_FIELDS,
@@ -328,6 +336,7 @@ const validateField = (name, value) => {
   if (SHA_FIELDS.has(name)) return SHA256.test(value);
   if (RUN_FIELDS.has(name)) return RUN_ID.test(value);
   if (name === "operation_id") return OPERATION_ID.test(value);
+  if (name === "candidate_gate") return RELEASE_PHASE_GATES.includes(value);
   if (name === "archive_recovery_binding_id") return BINDING_ID.test(value);
   if (name.endsWith("source_sha")) return SOURCE_SHA.test(value);
   if (name === "release_role")

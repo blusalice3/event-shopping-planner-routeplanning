@@ -146,6 +146,7 @@ test("derives every source-hardened build from a distinct reviewed requirements 
   assert.match(producer, /policy-activation-qa-build-requirements/);
   assert.match(producer, /--proposed-policy-sha256/);
   assert.match(producer, /--active-policy-sha256/);
+  assert.match(producer, /--target-gate \$env:REQUESTED_CANDIDATE_GATE/);
   assert.doesNotMatch(producer, /standard-dimensions/);
 
   const productionDownload = stepBody(

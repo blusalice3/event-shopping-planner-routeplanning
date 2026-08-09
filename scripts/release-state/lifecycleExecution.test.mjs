@@ -12,10 +12,8 @@ import {
 import { ACCEPTANCE_PERFORMANCE_REQUIREMENTS } from "../lib/performance-evidence-identity.mjs";
 import { providerConfigurationHash } from "../provider/providerConfiguration.mjs";
 import { readCurrentReleaseState } from "./currentReleaseState.mjs";
-import {
-  PROVIDER_ALIAS_OBSERVATION_KIND,
-  PROVIDER_ALIAS_OBSERVATION_MEDIA_TYPE,
-} from "./reconcileDecision.mjs";
+import { PROVIDER_ALIAS_OBSERVATION_KIND } from "./reconcileDecision.mjs";
+import { buildAuthoritativeProviderAliasObservation } from "./authoritativeInputProducers.mjs";
 import {
   produceCompanionRecoveryDrill,
   produceContinuousProductionProbe,
@@ -36,6 +34,7 @@ import {
   recordPreparedPromotionAssignment,
   recordPreparedPromotionLifecycle,
   resolveAcceptedStandardAuthority,
+  resolvePendingAcceptanceRequirements,
 } from "./lifecycleExecution.mjs";
 import {
   createReleaseEvent,
@@ -93,7 +92,7 @@ const providerPolicy = {
   expectedProjectId: "project-test",
   ownedProductionDomains: domains,
   observationPolicy: {
-    apiBaseUrl: "https://api.vercel.test",
+    apiBaseUrl: "https://api.vercel.com",
     maxResponseAgeSeconds: 300,
     maxFutureClockSkewSeconds: 30,
     requireEtag: false,
@@ -172,9 +171,23 @@ test("advances null-change P6 and P8 gates without collapsing equal floors", () 
         acceptedStandardFloors: initialFloors,
       },
       releasePolicy: policy,
+      candidateGate: "P6-APP",
       candidateFloors: initialFloors,
     }),
     "P6-APP",
+  );
+  assert.equal(
+    deriveAcceptedGateForCandidate({
+      snapshot: {
+        acceptedStandard: {},
+        acceptedGate: "P5-LIST",
+        acceptedStandardFloors: initialFloors,
+      },
+      releasePolicy: policy,
+      candidateGate: "P5-LIST",
+      candidateFloors: initialFloors,
+    }),
+    "P5-LIST",
   );
   const p7Floors = {
     ...initialFloors,
@@ -188,9 +201,24 @@ test("advances null-change P6 and P8 gates without collapsing equal floors", () 
         acceptedStandardFloors: p7Floors,
       },
       releasePolicy: policy,
+      candidateGate: "P8-CLEAN",
       candidateFloors: p7Floors,
     }),
     "P8-CLEAN",
+  );
+  assert.throws(
+    () =>
+      deriveAcceptedGateForCandidate({
+        snapshot: {
+          acceptedStandard: {},
+          acceptedGate: "P8-CLEAN",
+          acceptedStandardFloors: p7Floors,
+        },
+        releasePolicy: policy,
+        candidateGate: "P8-CLEAN",
+        candidateFloors: p7Floors,
+      }),
+    /Terminal P8-CLEAN does not permit a same-floor standard replacement/u,
   );
   assert.throws(
     () =>
@@ -201,9 +229,38 @@ test("advances null-change P6 and P8 gates without collapsing equal floors", () 
           acceptedStandardFloors: initialFloors,
         },
         releasePolicy: policy,
+        candidateGate: "P7-IDB",
         candidateFloors: p7Floors,
       }),
     /exactly one phase gate/,
+  );
+  assert.throws(
+    () =>
+      deriveAcceptedGateForCandidate({
+        snapshot: {
+          acceptedStandard: {},
+          acceptedGate: "P7-IDB",
+          acceptedStandardFloors: p7Floors,
+        },
+        releasePolicy: policy,
+        candidateGate: "P6-APP",
+        candidateFloors: initialFloors,
+      }),
+    /exactly one phase gate/,
+  );
+  assert.throws(
+    () =>
+      deriveAcceptedGateForCandidate({
+        snapshot: {
+          acceptedStandard: {},
+          acceptedGate: "P7-IDB",
+          acceptedStandardFloors: p7Floors,
+        },
+        releasePolicy: policy,
+        candidateGate: "P7-IDB",
+        candidateFloors: initialFloors,
+      }),
+    /differs from current accepted floors/,
   );
 });
 const approvalPolicy = {
@@ -447,7 +504,11 @@ const putJson = async (store, value, mediaType = "application/json") => {
   return { uri: receipt.uri, sha256: receipt.sha256 };
 };
 
-const putWorkflowRunAuthority = async (store, runId = "4000") => {
+const putWorkflowRunAuthority = async (
+  store,
+  runId = "4000",
+  workflowSourceSha = sourceSha,
+) => {
   const apiResponse = await putJson(
     store,
     {
@@ -457,7 +518,7 @@ const putWorkflowRunAuthority = async (store, runId = "4000") => {
       status: "completed",
       conclusion: "success",
       head_branch: "main",
-      head_sha: sourceSha,
+      head_sha: workflowSourceSha,
       path: ".github/workflows/release.yml",
       repository: { full_name: approvalPolicy.repository },
     },
@@ -476,14 +537,19 @@ const putWorkflowRunAuthority = async (store, runId = "4000") => {
       status: "completed",
       conclusion: "success",
       headBranch: "main",
-      headSha: sourceSha,
+      headSha: workflowSourceSha,
       apiResponse,
     },
     REVIEWED_WORKFLOW_RUN_RECEIPT_MEDIA_TYPE,
   );
 };
 
-const putAcceptanceCollectorIdentity = async ({ store, observedAt, runId }) => {
+const putAcceptanceCollectorIdentity = async ({
+  store,
+  observedAt,
+  runId,
+  collectorSourceSha = sourceSha,
+}) => {
   const expiresAt = new Date(
     Date.parse(observedAt) + 15 * 60 * 1000,
   ).toISOString();
@@ -505,11 +571,11 @@ const putAcceptanceCollectorIdentity = async ({ store, observedAt, runId }) => {
         repository: "example/event-shopping-planner",
         workflowRef:
           "example/event-shopping-planner/.github/workflows/release.yml@refs/heads/main",
-        workflowSha: sourceSha,
+        workflowSha: collectorSourceSha,
         environment: "production-release",
         runId,
         runAttempt: "1",
-        sourceSha,
+        sourceSha: collectorSourceSha,
         eventName: "workflow_dispatch",
         ref: "refs/heads/main",
         refProtected: true,
@@ -559,6 +625,8 @@ const createBinding = async ({
   publicIdentityKind = "release-identity-v1",
   dimensions = standardDimensions("legacy-auto-update-v1"),
   releasePolicyValue = releasePolicy,
+  bindingSourceSha = sourceSha,
+  targetGate = "P0-RELEASE",
 }) => {
   const packageIndex = await putJson(store, { kind: "package", suffix });
   if (publicIdentityKind === "legacy-bootstrap-v1") {
@@ -566,9 +634,24 @@ const createBinding = async ({
       kind: "manifest",
       suffix,
     });
+    const deploymentUrl = `https://${role}-${suffix}.example.test`;
     const providerEvidence = await putJson(store, {
-      kind: "provider-deployment",
-      suffix,
+      schemaVersion: 1,
+      providerProjectId: providerPolicy.expectedProjectId,
+      providerDeploymentId: `deployment-${role}-${suffix}`,
+      deploymentUrl,
+      sourceSha: bindingSourceSha,
+      variantId: suffix.repeat(64),
+      releaseRole: role,
+      artifactManifestHash: artifactManifest.sha256,
+      packageIndexHash: packageIndex.sha256,
+      providerConfigurationHash: configurationHash,
+      providerPolicyHash: providerPolicyReference.sha256,
+      releasePolicyHash: policyReference.sha256,
+      requiredDbCompatibility: dbCompatibility,
+      publicIdentity: { identityKind: publicIdentityKind },
+      routeProbeEvidenceHash: "5".repeat(64),
+      environmentPresenceEvidenceHash: "6".repeat(64),
     });
     const archiveBytes = Buffer.from(`archive:${role}:${suffix}\n`);
     const archiveReceipt = await store.putEvidence({
@@ -588,7 +671,7 @@ const createBinding = async ({
         availability: "available",
         namespace,
         bindingId: `${role}-${suffix}`,
-        sourceSha,
+        sourceSha: bindingSourceSha,
         variantId: suffix.repeat(64),
         releaseRole: role,
         artifactManifest,
@@ -604,14 +687,14 @@ const createBinding = async ({
     );
     return {
       bindingId: `${role}-${suffix}`,
-      sourceSha,
-      buildId: sourceSha,
+      sourceSha: bindingSourceSha,
+      buildId: bindingSourceSha,
       variantId: suffix.repeat(64),
       releaseRole: role,
       publicIdentityKind,
       providerProjectId: providerPolicy.expectedProjectId,
       providerDeploymentId: `deployment-${role}-${suffix}`,
-      deploymentUrl: `https://${role}-${suffix}.example.test`,
+      deploymentUrl,
       artifactArchive,
       artifactArchiveAvailability,
       packageIndex,
@@ -635,8 +718,8 @@ const createBinding = async ({
     dimensions.pwaLifecycle === "prompt-close-all-v1"
       ? {
           schemaVersion: 1,
-          sourceSha,
-          buildId: sourceSha,
+          sourceSha: bindingSourceSha,
+          buildId: bindingSourceSha,
           variantId,
           releaseRole: role,
           requiredDbCompatibilityFingerprint: dbCompatibility.fingerprint,
@@ -650,8 +733,8 @@ const createBinding = async ({
         }
       : {
           schemaVersion: 1,
-          sourceSha,
-          buildId: sourceSha,
+          sourceSha: bindingSourceSha,
+          buildId: bindingSourceSha,
           variantId,
           releaseRole: role,
           requiredDbCompatibilityFingerprint: dbCompatibility.fingerprint,
@@ -666,7 +749,7 @@ const createBinding = async ({
   const roleEntryGraph = {
     schemaVersion: 1,
     graphKind: "rollup-role-entry-v1",
-    sourceSha,
+    sourceSha: bindingSourceSha,
     releaseRole: role,
     variantId,
     entryModule,
@@ -701,17 +784,17 @@ const createBinding = async ({
     schemaVersion: 1,
     requirementsKind: "artifact-build-requirements/v1",
     operationId: `build-${role}-${suffix}`,
-    targetGate: "P0-RELEASE",
+    targetGate,
   });
   const manifest = {
     schemaVersion: 1,
-    sourceSha,
-    buildId: sourceSha,
+    sourceSha: bindingSourceSha,
+    buildId: bindingSourceSha,
     variantId,
     releaseRole: role,
     dimensions,
     buildAuthority,
-    targetGate: "P0-RELEASE",
+    targetGate,
     buildPurpose: "production",
     promotable: true,
     buildInputClosureHash: "1".repeat(64),
@@ -735,7 +818,7 @@ const createBinding = async ({
     providerProjectId: providerPolicy.expectedProjectId,
     providerDeploymentId: `deployment-${role}-${suffix}`,
     deploymentUrl,
-    sourceSha,
+    sourceSha: bindingSourceSha,
     variantId,
     releaseRole: role,
     artifactManifestHash: artifactManifest.sha256,
@@ -769,7 +852,7 @@ const createBinding = async ({
       evidenceKind: "artifact-archive-availability/v1",
       namespace,
       bindingId: `${role}-${suffix}`,
-      sourceSha,
+      sourceSha: bindingSourceSha,
       variantId,
       releaseRole: role,
       artifactManifest,
@@ -786,8 +869,8 @@ const createBinding = async ({
   );
   return {
     bindingId: `${role}-${suffix}`,
-    sourceSha,
-    buildId: sourceSha,
+    sourceSha: bindingSourceSha,
+    buildId: bindingSourceSha,
     variantId,
     releaseRole: role,
     publicIdentityKind,
@@ -908,6 +991,15 @@ const initializePromotionFixture = async ({
   releasePolicyValue = releasePolicy,
   operationKind = "promote-standard",
   fixtureOperationId = operationId,
+  fixtureSourceSha = sourceSha,
+  targetGate = "P0-RELEASE",
+  bootstrapSuffix = "b",
+  targetSuffix = "c",
+  companionSuffix = "e",
+  operationTargetOverride = null,
+  operationCompanionOverride = null,
+  operationOriginOverride = null,
+  operationOriginCompanionOverride = null,
   existingStore = null,
   withRecoveryHistory = false,
 } = {}) => {
@@ -918,6 +1010,11 @@ const initializePromotionFixture = async ({
       releasePolicyValue,
       operationKind: "redeploy-containment",
       fixtureOperationId: "independent-companion-recovery",
+      fixtureSourceSha,
+      targetGate,
+      bootstrapSuffix,
+      targetSuffix,
+      companionSuffix,
     });
     await runPromotionLifecycle(recoveryFixture);
     const recoveryTerminalRecord = recoveryFixture.store.records.find(
@@ -930,24 +1027,36 @@ const initializePromotionFixture = async ({
       pwaLifecycle,
       companionDimensions,
       releasePolicyValue,
+      fixtureOperationId,
+      fixtureSourceSha,
+      targetGate,
+      bootstrapSuffix,
+      targetSuffix,
+      companionSuffix,
       existingStore: recoveryFixture.store,
     });
     return { ...standardFixture, recoveryTerminalRecord };
   }
   const store = existingStore ?? new FakeReleaseStateStore();
+  store.commitAt = completedAt;
   const policyReference = await putJson(store, releasePolicyValue);
-  const providerPolicyReference = await putJson(store, providerPolicy);
+  const providerPolicyReference = await putJson(
+    store,
+    providerPolicy,
+    "application/vnd.event-shopping-planner.provider-policy+json;version=1",
+  );
   const configurationHash = providerConfigurationHash(
     providerObservation("stable"),
   );
   const bootstrap = await createBinding({
     store,
     role: "containment",
-    suffix: "b",
+    suffix: bootstrapSuffix,
     policyReference,
     providerPolicyReference,
     configurationHash,
     publicIdentityKind: "legacy-bootstrap-v1",
+    bindingSourceSha: fixtureSourceSha,
   });
   if (store.records.length === 0) {
     const initialEvidence = await putJson(store, { kind: "initial" });
@@ -959,7 +1068,7 @@ const initializePromotionFixture = async ({
       previousEventHash: null,
       payload: {
         acceptedGate: null,
-        executorSourceSha: sourceSha,
+        executorSourceSha: fixtureSourceSha,
         legacyObservedProduction: {
           observationUri: initialEvidence.uri,
           observationSha256: initialEvidence.sha256,
@@ -977,12 +1086,14 @@ const initializePromotionFixture = async ({
   const targetBinding = await createBinding({
     store,
     role: "standard",
-    suffix: "c",
+    suffix: targetSuffix,
     policyReference,
     providerPolicyReference,
     configurationHash,
     dimensions: standardDimensions(pwaLifecycle),
     releasePolicyValue,
+    bindingSourceSha: fixtureSourceSha,
+    targetGate,
   });
   const projectedCompanionDimensions = projectContainmentDimensions(
     releasePolicyValue,
@@ -991,19 +1102,21 @@ const initializePromotionFixture = async ({
   const companionBinding = await createBinding({
     store,
     role: "containment",
-    suffix: "e",
+    suffix: companionSuffix,
     policyReference,
     providerPolicyReference,
     configurationHash,
     dimensions: companionDimensions ?? projectedCompanionDimensions,
     releasePolicyValue,
+    bindingSourceSha: fixtureSourceSha,
+    targetGate,
   });
-  const operationTarget = operationKind.includes("containment")
-    ? companionBinding
-    : targetBinding;
-  const operationCompanion = operationKind.includes("containment")
-    ? null
-    : companionBinding;
+  const operationTarget =
+    operationTargetOverride ??
+    (operationKind.includes("containment") ? companionBinding : targetBinding);
+  const operationCompanion =
+    operationCompanionOverride ??
+    (operationKind.includes("containment") ? null : companionBinding);
   const subjectReference = await putJson(store, {
     kind: "promotion-subject",
     operationId: fixtureOperationId,
@@ -1031,11 +1144,14 @@ const initializePromotionFixture = async ({
     kind: operationKind,
     expectedState: structuredClone(current.head),
     targetBinding: operationTarget,
-    originBinding: operationKind === "redeploy-containment" ? bootstrap : null,
-    originCompanionBinding: null,
+    originBinding:
+      operationOriginOverride ??
+      (operationKind === "redeploy-containment" ? bootstrap : null),
+    originCompanionBinding: operationOriginCompanionOverride,
     companionBinding: operationCompanion,
-    previousBinding: null,
-    emergencyRecoveryBinding: bootstrap,
+    previousBinding: current.snapshot.activeProduction,
+    emergencyRecoveryBinding:
+      current.snapshot.containmentCompanion ?? bootstrap,
     approvalRefs: approvals,
     preparedAt: completedAt,
   };
@@ -1077,7 +1193,9 @@ const initializePromotionFixture = async ({
   };
   const before = domainObservation({
     phase: "before",
-    targetDeploymentId: operationTarget.providerDeploymentId,
+    targetDeploymentId:
+      current.snapshot.activeProduction?.providerDeploymentId ??
+      operationTarget.providerDeploymentId,
   });
   const after = domainObservation({
     phase: "after",
@@ -1091,7 +1209,9 @@ const initializePromotionFixture = async ({
     providerProjectId: providerPolicy.expectedProjectId,
     assignments: domains.map((productionDomain) => ({
       productionDomain,
-      previousDeploymentId: operationTarget.providerDeploymentId,
+      previousDeploymentId:
+        current.snapshot.activeProduction?.providerDeploymentId ??
+        operationTarget.providerDeploymentId,
       assignedDeploymentId: operationTarget.providerDeploymentId,
     })),
     assignmentApiReceiptSetHash: sha256Json({
@@ -1120,7 +1240,7 @@ const initializePromotionFixture = async ({
       operationId: fixtureOperationId,
       committedAt: completedAt,
     },
-    sourceSha,
+    sourceSha: fixtureSourceSha,
     target: {
       bindingId: operationTarget.bindingId,
       releaseRole: operationTarget.releaseRole,
@@ -1279,6 +1399,9 @@ const initializePromotionFixture = async ({
   return {
     store,
     releasePolicy: releasePolicyValue,
+    fixtureOperationId,
+    fixtureSourceSha,
+    targetGate,
     bootstrap,
     targetBinding,
     operationTarget,
@@ -1329,14 +1452,59 @@ const runPromotionLifecycle = async (
   );
 };
 
-const acceptanceEvidence = () => ({
+const buildProviderReconciliation = async ({ store, observedBinding }) =>
+  buildAuthoritativeProviderAliasObservation(
+    {
+      store,
+      namespace,
+      providerToken: "v".repeat(20),
+    },
+    {
+      now: () => Date.parse(completedAt),
+      collectAssignments: async ({ domains: ownedDomains }) =>
+        ownedDomains.map((productionDomain) => {
+          const bodyBytes = Buffer.from(
+            JSON.stringify({
+              alias: productionDomain,
+              projectId: observedBinding.providerProjectId,
+              deploymentId: observedBinding.providerDeploymentId,
+            }),
+          );
+          const requestUrl =
+            `https://api.vercel.com/v4/aliases/${encodeURIComponent(productionDomain)}` +
+            `?teamId=${providerPolicy.expectedTeamId}`;
+          return {
+            productionDomain,
+            providerProjectId: observedBinding.providerProjectId,
+            providerDeploymentId: observedBinding.providerDeploymentId,
+            requestUrl,
+            responseUrl: requestUrl,
+            status: 200,
+            providerDate: completedAt,
+            bodyBytes,
+            responseSha256: sha256Bytes(bodyBytes),
+          };
+        }),
+    },
+  );
+
+const appendReconciliation = (options, dependencies = {}) =>
+  appendReadyReconciliation(options, {
+    clock: () => Date.parse(completedAt),
+    ...dependencies,
+  });
+
+const acceptanceEvidence = (
+  evidenceSourceSha = sourceSha,
+  evidenceOperationId = operationId,
+) => ({
   schemaVersion: "release-a-evidence/v1",
   release: {
-    releaseId: operationId,
-    commitSha: sourceSha,
+    releaseId: evidenceOperationId,
+    commitSha: evidenceSourceSha,
   },
   canary: {
-    buildSha: sourceSha,
+    buildSha: evidenceSourceSha,
     startedAt: completedAt,
     endedAt: observationEndedAt,
   },
@@ -1344,7 +1512,7 @@ const acceptanceEvidence = () => ({
     rollback: {
       status: "PASS",
       command: "npm run test:release-a-rollback",
-      commitSha: sourceSha,
+      commitSha: evidenceSourceSha,
       completedAt,
       evidenceRef: "artifact://release-a/rollback-recovery-drill",
     },
@@ -1366,6 +1534,7 @@ const collectContinuousAcceptanceEvidence = async ({
     store,
     observedAt: completedAt,
     runId: "1000",
+    collectorSourceSha: binding.sourceSha,
   });
   let source = (
     await initializeContinuousProbeCollection({
@@ -1384,10 +1553,11 @@ const collectContinuousAcceptanceEvidence = async ({
       store,
       observedAt,
       runId: String(2000 + index),
+      collectorSourceSha: binding.sourceSha,
     });
     const fetchImpl = async (url) => {
       const parsed = new URL(url);
-      const providerLookup = parsed.hostname === "api.vercel.test";
+      const providerLookup = parsed.hostname === "api.vercel.com";
       const productionDomain = providerLookup
         ? decodeURIComponent(parsed.pathname.split("/").at(-1))
         : parsed.hostname;
@@ -1426,6 +1596,7 @@ const collectContinuousAcceptanceEvidence = async ({
     store,
     observedAt: observationEndedAt,
     runId: "3000",
+    collectorSourceSha: binding.sourceSha,
   });
   const evidenceUrl =
     "https://observability.example.test/release-a-evidence.json";
@@ -1450,7 +1621,11 @@ const collectContinuousAcceptanceEvidence = async ({
     clock: () => Date.parse(observationEndedAt),
   });
   const sourceBytes = canonicalJsonBytes(finalized.continuousSource);
-  const sourceWorkflowAuthority = await putWorkflowRunAuthority(store);
+  const sourceWorkflowAuthority = await putWorkflowRunAuthority(
+    store,
+    "4000",
+    binding.sourceSha,
+  );
   const produced = await produceContinuousProductionProbe({
     store,
     current,
@@ -1473,23 +1648,25 @@ const collectContinuousAcceptanceEvidence = async ({
 
 const acceptanceInputOptions = async ({
   fixture,
-  evidence = acceptanceEvidence(),
+  evidence = null,
   includeRecoveryDrill = false,
   collectApprovals = acceptanceCollector,
   prepareClock = () => Date.parse(observationEndedAt),
 }) => {
   const current = await readCurrentReleaseState({ store: fixture.store });
   const pendingAcceptance = current.snapshot.pendingAcceptance;
-  const evidenceBytes = canonicalJsonBytes(evidence);
+  const effectiveEvidence =
+    evidence ??
+    acceptanceEvidence(
+      pendingAcceptance.standardBinding.sourceSha,
+      pendingAcceptance.operationId,
+    );
+  const evidenceBytes = canonicalJsonBytes(effectiveEvidence);
   const expectedEvidenceSha256 = sha256Bytes(evidenceBytes);
-  const currentGateIndex =
-    current.snapshot.acceptedGate === null
-      ? -1
-      : fixture.releasePolicy.phaseSequence.findIndex(
-          ({ gate }) => gate === current.snapshot.acceptedGate,
-        );
-  const acceptedGate =
-    fixture.releasePolicy.phaseSequence[currentGateIndex + 1].gate;
+  const acceptanceRequirements = await resolvePendingAcceptanceRequirements({
+    store: fixture.store,
+  });
+  const acceptedGate = acceptanceRequirements.acceptedGate;
   const performanceRequirement =
     ACCEPTANCE_PERFORMANCE_REQUIREMENTS[acceptedGate];
   let performanceEvidenceBytes = null;
@@ -1497,7 +1674,9 @@ const acceptanceInputOptions = async ({
     if (performanceRequirement === "performance-inherited-closure/v1") {
       const closure = {
         kind: performanceRequirement,
-        p8Source: { gitCommitSha: sourceSha },
+        p8Source: {
+          gitCommitSha: pendingAcceptance.standardBinding.sourceSha,
+        },
       };
       performanceEvidenceBytes = canonicalJsonBytes({
         schemaVersion: 1,
@@ -1510,7 +1689,7 @@ const acceptanceInputOptions = async ({
         gate: performanceRequirement,
         collectedAtUtc: completedAt,
         source: {
-          gitCommitSha: sourceSha,
+          gitCommitSha: pendingAcceptance.standardBinding.sourceSha,
           sourceClosureSha256: "9".repeat(64),
           treeState: "clean",
           artifactSha256:
@@ -1522,19 +1701,7 @@ const acceptanceInputOptions = async ({
         evidence: performanceEvidenceBody,
         evidenceSha256: sha256Json(performanceEvidenceBody),
       };
-      const performanceRequirements = {
-        schemaVersion: 1,
-        requirementKind: "standard-acceptance-requirements/v1",
-        namespace,
-        operationId: pendingAcceptance.operationId,
-        sourceSha,
-        expectedArtifactSha256:
-          pendingAcceptance.standardBinding.artifactArchive.sha256,
-        expectedState: structuredClone(current.head),
-        acceptedGate,
-        performanceEvidenceKind: "own-gate-performance-evidence/v1",
-        performanceGate: performanceRequirement,
-      };
+      const performanceRequirements = acceptanceRequirements;
       const producerReceiptBody = {
         kind: "own-gate-performance-evidence-producer-receipt/v1",
         namespace,
@@ -1542,7 +1709,7 @@ const acceptanceInputOptions = async ({
         acceptedGate,
         performanceGate: performanceRequirement,
         source: {
-          gitCommitSha: sourceSha,
+          gitCommitSha: pendingAcceptance.standardBinding.sourceSha,
           sourceClosureSha256: "9".repeat(64),
           treeState: "clean",
         },
@@ -1551,7 +1718,9 @@ const acceptanceInputOptions = async ({
         artifactArchiveSha256:
           pendingAcceptance.standardBinding.artifactArchive.sha256,
         rawSamplesArtifact: {
-          name: `foundation-performance-raw-samples-${sourceSha}-1`,
+          name:
+            "foundation-performance-raw-samples-" +
+            `${pendingAcceptance.standardBinding.sourceSha}-1`,
           runId: "100",
           runAttempt: "1",
           sha256: "8".repeat(64),
@@ -1567,7 +1736,9 @@ const acceptanceInputOptions = async ({
         producerRunId: "150",
         producerRunAttempt: "1",
         performanceEvidence: {
-          name: `foundation-performance-own-gate-evidence-${sourceSha}-1`,
+          name:
+            "foundation-performance-own-gate-evidence-" +
+            `${pendingAcceptance.standardBinding.sourceSha}-1`,
           envelopeSha256: sha256Bytes(canonicalJsonBytes(performanceEnvelope)),
           evidenceSha256: performanceEnvelope.evidenceSha256,
         },
@@ -1669,6 +1840,7 @@ const acceptanceCollector = async ({
   store,
   operationId: boundOperationId,
   subjectSha256,
+  expectedSourceSha,
   observedThrough,
 }) => {
   const expiresAt = new Date(
@@ -1680,7 +1852,7 @@ const acceptanceCollector = async ({
     issuer: approvalPolicy.trustedIssuer,
     verifiedAt: observedThrough,
     claims: {
-      sourceSha,
+      sourceSha: expectedSourceSha,
       runId: "200",
       environment: approvalPolicy.protectedEnvironment,
       repository: approvalPolicy.repository,
@@ -1737,65 +1909,36 @@ const acceptanceCollector = async ({
 
 test("appends a ready reconcile plan once and replays the deterministic event", async () => {
   const fixture = await initializePromotionFixture();
-  const providerReceipt = await putJson(fixture.store, {
-    kind: "provider-receipt",
+  const { decision } = await buildProviderReconciliation({
+    store: fixture.store,
+    observedBinding: fixture.targetBinding,
   });
-  const observationReference = await putJson(
-    fixture.store,
-    {
-      schemaVersion: 1,
-      observationKind: PROVIDER_ALIAS_OBSERVATION_KIND,
-      namespace,
-      providerProjectId: fixture.targetBinding.providerProjectId,
-      assignments: [
-        {
-          productionDomain: domains[0],
-          assignedDeploymentId: fixture.targetBinding.providerDeploymentId,
-        },
-      ],
-      observedBinding: fixture.targetBinding,
-      providerReceiptReferences: [providerReceipt],
-    },
-    PROVIDER_ALIAS_OBSERVATION_MEDIA_TYPE,
-  );
-  const current = await readCurrentReleaseState({ store: fixture.store });
-  const decision = {
-    schemaVersion: 1,
-    decisionKind: "release-state-reconcile-decision/v1",
-    status: "ready",
-    action: "append-state-reconciled",
-    operationId,
-    observationSha256: observationReference.sha256,
-    terminalPlan: null,
-    eventPlan: {
-      eventType: "state-reconciled",
-      operationId,
-      expectedState: current.head,
-      payload: {
-        reconciliationKind: "provider-target-assigned/v1",
-        observedBinding: fixture.targetBinding,
-        providerObservation: observationReference,
+  await assert.rejects(
+    appendReconciliation(
+      {
+        store: fixture.store,
+        decision,
       },
-      evidenceRefs: [
-        observationReference,
-        providerReceipt,
-        fixture.targetBinding.providerEvidence,
-      ],
-    },
-  };
-  const first = await appendReadyReconciliation({
+      {
+        clock: () => Date.parse(completedAt) + 24 * 60 * 60 * 1000,
+      },
+    ),
+    /Provider alias receipt binding is invalid/,
+  );
+  assert.equal(fixture.store.compareAndAppendCalls, 0);
+  const first = await appendReconciliation({
     store: fixture.store,
     decision,
   });
   const calls = fixture.store.compareAndAppendCalls;
-  const replay = await appendReadyReconciliation({
+  const replay = await appendReconciliation({
     store: fixture.store,
     decision,
   });
   const tamperedRetry = structuredClone(decision);
   tamperedRetry.eventPlan.expectedState.eventHash = "0".repeat(64);
   await assert.rejects(
-    appendReadyReconciliation({
+    appendReconciliation({
       store: fixture.store,
       decision: tamperedRetry,
     }),
@@ -1814,9 +1957,41 @@ test("appends a ready reconcile plan once and replays the deterministic event", 
   );
 });
 
+test("rejects a fresh target reconciliation terminal-type substitution before the first CAS", async () => {
+  const fixture = await initializePromotionFixture({
+    operationKind: "activate-containment",
+    fixtureOperationId: "reconcile-target-terminal-substitution",
+  });
+  const produced = await buildProviderReconciliation({
+    store: fixture.store,
+    observedBinding: fixture.operationTarget,
+  });
+  assert.equal(
+    produced.decision.terminalPlan.eventType,
+    "containment-activated",
+  );
+  const substitutedDecision = structuredClone(produced.decision);
+  substitutedDecision.terminalPlan.eventType = "operation-aborted";
+
+  await assert.rejects(
+    appendReconciliation({
+      store: fixture.store,
+      decision: substitutedDecision,
+    }),
+    /terminal event type differs from replayed operation authority/,
+  );
+  assert.equal(fixture.store.compareAndAppendCalls, 0);
+  assert.equal(
+    fixture.store.records.some(
+      ({ event }) => event.eventType === "state-reconciled",
+    ),
+    false,
+  );
+});
+
 test("never appends a blocked reconcile decision", async () => {
   const fixture = await initializePromotionFixture();
-  const result = await appendReadyReconciliation({
+  const result = await appendReconciliation({
     store: fixture.store,
     decision: {
       schemaVersion: 1,
@@ -1849,7 +2024,7 @@ test("rejects a reconcile decision whose observation has the wrong immutable med
   });
   const current = await readCurrentReleaseState({ store: fixture.store });
   await assert.rejects(
-    appendReadyReconciliation({
+    appendReconciliation({
       store: fixture.store,
       decision: {
         status: "ready",
@@ -1876,71 +2051,19 @@ test("rejects a reconcile decision whose observation has the wrong immutable med
 
 test("reconciles a verified bootstrap emergency through assignment validation and a six-hour terminal", async () => {
   const fixture = await initializePromotionFixture();
-  const providerReceipt = await putJson(fixture.store, {
-    kind: "provider-receipt",
+  const produced = await buildProviderReconciliation({
+    store: fixture.store,
+    observedBinding: fixture.bootstrap,
   });
-  const providerObservation = await putJson(
-    fixture.store,
-    {
-      schemaVersion: 1,
-      observationKind: PROVIDER_ALIAS_OBSERVATION_KIND,
-      namespace,
-      providerProjectId: fixture.bootstrap.providerProjectId,
-      assignments: [
-        {
-          productionDomain: domains[0],
-          assignedDeploymentId: fixture.bootstrap.providerDeploymentId,
-        },
-      ],
-      observedBinding: fixture.bootstrap,
-      providerReceiptReferences: [providerReceipt],
-    },
-    PROVIDER_ALIAS_OBSERVATION_MEDIA_TYPE,
-  );
-  const current = await readCurrentReleaseState({ store: fixture.store });
-  const activatedAt = "2026-08-06T01:00:00.000Z";
-  const recoveryDeadline = "2026-08-06T07:00:00.000Z";
-  const decision = {
-    schemaVersion: 1,
-    decisionKind: "release-state-reconcile-decision/v1",
-    status: "ready",
-    action: "append-state-reconciled",
-    operationId,
-    observationSha256: providerObservation.sha256,
-    observationReference: providerObservation,
-    terminalPlan: {
-      eventType: "temporary-containment-activated",
-      targetBinding: fixture.bootstrap,
-      payload: {
-        binding: fixture.bootstrap,
-        activatedAt,
-        recoveryDeadline,
-        targetStandard: null,
-      },
-      approvalRefs: current.snapshot.pendingOperation.approvalRefs,
-    },
-    eventPlan: {
-      eventType: "state-reconciled",
-      operationId,
-      expectedState: current.head,
-      payload: {
-        reconciliationKind: "provider-emergency-assigned/v1",
-        observedBinding: fixture.bootstrap,
-        providerObservation,
-      },
-      evidenceRefs: [
-        providerObservation,
-        providerReceipt,
-        fixture.bootstrap.providerEvidence,
-      ],
-    },
-  };
-  const first = await appendReadyReconciliation({
+  const decision = structuredClone(produced.decision);
+  decision.terminalPlan.payload.activatedAt = "2099-01-01T00:00:00.000Z";
+  decision.terminalPlan.payload.recoveryDeadline = "2099-01-01T06:00:00.000Z";
+  const first = await appendReconciliation({
     store: fixture.store,
     decision,
   });
   const calls = fixture.store.compareAndAppendCalls;
-  const replay = await appendReadyReconciliation({
+  const replay = await appendReconciliation({
     store: fixture.store,
     decision,
   });
@@ -1958,9 +2081,249 @@ test("reconciles a verified bootstrap emergency through assignment validation an
     fixture.bootstrap.bindingId,
   );
   assert.equal(
+    finalState.snapshot.containmentIncident.activatedAt,
+    completedAt,
+  );
+  assert.equal(
     Date.parse(finalState.snapshot.containmentIncident.recoveryDeadline) -
       Date.parse(finalState.snapshot.containmentIncident.activatedAt),
     6 * 60 * 60 * 1000,
+  );
+});
+
+test("reconciles rollback previous as a no-op abort and target as an atomic inventory swap", async () => {
+  const firstFixture = await initializePromotionFixture();
+  await runPromotionLifecycle(firstFixture);
+  await acceptPendingStandardRelease(
+    await acceptanceInputOptions({ fixture: firstFixture }),
+    {
+      validateEvidence: () => [],
+      validatePerformanceEvidence: async () => ({ errors: [] }),
+      collectApprovals: acceptanceCollector,
+      clock: () => Date.parse(observationEndedAt),
+    },
+  );
+  const secondSourceSha = "b".repeat(40);
+  const secondFixture = await initializePromotionFixture({
+    fixtureOperationId: "reconcile-source-b",
+    fixtureSourceSha: secondSourceSha,
+    bootstrapSuffix: "6",
+    targetSuffix: "7",
+    companionSuffix: "8",
+    existingStore: firstFixture.store,
+  });
+  await runPromotionLifecycle(secondFixture);
+  await acceptPendingStandardRelease(
+    await acceptanceInputOptions({ fixture: secondFixture }),
+    {
+      validateEvidence: () => [],
+      validatePerformanceEvidence: async () => ({ errors: [] }),
+      collectApprovals: acceptanceCollector,
+      clock: () => Date.parse(observationEndedAt),
+    },
+  );
+
+  const appendRollbackReconciliation = async ({
+    operationId: reconciliationOperationId,
+    observedBinding,
+  }) => {
+    const produced = await buildProviderReconciliation({
+      store: secondFixture.store,
+      observedBinding,
+    });
+    assert.equal(produced.decision.operationId, reconciliationOperationId);
+    return {
+      decision: produced.decision,
+      result: await appendReconciliation({
+        store: secondFixture.store,
+        decision: produced.decision,
+      }),
+    };
+  };
+
+  const abortedFixture = await initializePromotionFixture({
+    operationKind: "rollback-standard",
+    fixtureOperationId: "reconcile-rollback-previous",
+    fixtureSourceSha: firstFixture.targetBinding.sourceSha,
+    bootstrapSuffix: "9",
+    targetSuffix: "a",
+    companionSuffix: "b",
+    operationTargetOverride: firstFixture.targetBinding,
+    operationCompanionOverride: firstFixture.companionBinding,
+    existingStore: secondFixture.store,
+  });
+  const { result: aborted } = await appendRollbackReconciliation({
+    operationId: abortedFixture.fixtureOperationId,
+    observedBinding: secondFixture.targetBinding,
+  });
+  let current = await readCurrentReleaseState({ store: secondFixture.store });
+  assert.equal(aborted.terminalEvent.eventType, "operation-aborted");
+  assert.equal(
+    current.snapshot.acceptedStandard?.bindingId,
+    secondFixture.targetBinding.bindingId,
+  );
+  assert.deepEqual(
+    current.snapshot.rollbackInventory.map((entry) => entry.binding.bindingId),
+    [firstFixture.targetBinding.bindingId],
+  );
+
+  const activatedFixture = await initializePromotionFixture({
+    operationKind: "rollback-standard",
+    fixtureOperationId: "reconcile-rollback-target",
+    fixtureSourceSha: firstFixture.targetBinding.sourceSha,
+    bootstrapSuffix: "c",
+    targetSuffix: "d",
+    companionSuffix: "e",
+    operationTargetOverride: firstFixture.targetBinding,
+    operationCompanionOverride: firstFixture.companionBinding,
+    existingStore: secondFixture.store,
+  });
+  current = await readCurrentReleaseState({ store: secondFixture.store });
+  const targetAuthority = current.snapshot.rollbackInventory.find(
+    (entry) => entry.binding.bindingId === firstFixture.targetBinding.bindingId,
+  );
+  assert.ok(targetAuthority);
+  const { decision: activatedDecision, result: activated } =
+    await appendRollbackReconciliation({
+      operationId: activatedFixture.fixtureOperationId,
+      observedBinding: firstFixture.targetBinding,
+    });
+  const appendCalls = secondFixture.store.compareAndAppendCalls;
+  const activatedReplay = await appendReconciliation({
+    store: secondFixture.store,
+    decision: activatedDecision,
+  });
+  const abortSubstitution = structuredClone(activatedDecision);
+  abortSubstitution.terminalPlan = {
+    eventType: "operation-aborted",
+    targetBinding: structuredClone(firstFixture.targetBinding),
+    payload: {},
+    approvalRefs: [],
+  };
+  await assert.rejects(
+    appendReconciliation({
+      store: secondFixture.store,
+      decision: abortSubstitution,
+    }),
+    /terminal event type differs from replayed operation authority/,
+  );
+  current = await readCurrentReleaseState({ store: secondFixture.store });
+  assert.equal(activated.terminalEvent.eventType, "rollback-activated");
+  assert.equal(activatedReplay.replayed, true);
+  assert.equal(secondFixture.store.compareAndAppendCalls, appendCalls);
+  assert.equal(
+    current.snapshot.acceptedStandard?.bindingId,
+    firstFixture.targetBinding.bindingId,
+  );
+  assert.deepEqual(
+    current.snapshot.rollbackInventory.map((entry) => entry.binding.bindingId),
+    [secondFixture.targetBinding.bindingId],
+  );
+  assert.deepEqual(
+    activated.terminalEvent.payload.rollbackInventory,
+    current.snapshot.rollbackInventory,
+  );
+
+  const redeployFixture = await initializePromotionFixture({
+    operationKind: "redeploy-standard",
+    fixtureOperationId: "reconcile-redeploy-current",
+    fixtureSourceSha: firstFixture.targetBinding.sourceSha,
+    bootstrapSuffix: "f",
+    targetSuffix: "0",
+    companionSuffix: "1",
+    operationOriginOverride: firstFixture.targetBinding,
+    operationOriginCompanionOverride: firstFixture.companionBinding,
+    existingStore: secondFixture.store,
+  });
+  current = await readCurrentReleaseState({ store: secondFixture.store });
+  const unrelatedBeforeRedeploy = current.snapshot.rollbackInventory.find(
+    (entry) =>
+      entry.binding.bindingId === secondFixture.targetBinding.bindingId,
+  );
+  assert.ok(unrelatedBeforeRedeploy);
+  assert.equal(
+    current.snapshot.rollbackInventory.some(
+      (entry) =>
+        entry.binding.bindingId === firstFixture.targetBinding.bindingId,
+    ),
+    false,
+  );
+  const { result: redeployed } = await appendRollbackReconciliation({
+    operationId: redeployFixture.fixtureOperationId,
+    observedBinding: redeployFixture.targetBinding,
+  });
+  current = await readCurrentReleaseState({ store: secondFixture.store });
+  assert.equal(
+    current.snapshot.acceptedStandard?.bindingId,
+    redeployFixture.targetBinding.bindingId,
+  );
+  assert.deepEqual(
+    current.snapshot.rollbackInventory.find(
+      (entry) =>
+        entry.binding.bindingId === secondFixture.targetBinding.bindingId,
+    ),
+    unrelatedBeforeRedeploy,
+  );
+  const redeployedAuthority = current.snapshot.rollbackInventory.find(
+    (entry) =>
+      entry.binding.bindingId === redeployFixture.targetBinding.bindingId,
+  );
+  assert.ok(redeployedAuthority);
+  assert.deepEqual(
+    redeployedAuthority.acceptedEvent,
+    current.snapshot.acceptedStandardEvent,
+  );
+  assert.deepEqual(redeployedAuthority.eligibleActions, [
+    "package-redeploy",
+    "rollback",
+  ]);
+  assert.deepEqual(
+    redeployed.terminalEvent.payload.rollbackInventory,
+    current.snapshot.rollbackInventory,
+  );
+
+  const provenanceRedeployFixture = await initializePromotionFixture({
+    operationKind: "redeploy-standard",
+    fixtureOperationId: "reconcile-redeploy-provenance",
+    fixtureSourceSha: redeployFixture.targetBinding.sourceSha,
+    bootstrapSuffix: "2",
+    targetSuffix: "3",
+    companionSuffix: "4",
+    operationOriginOverride: redeployFixture.targetBinding,
+    operationOriginCompanionOverride: redeployFixture.companionBinding,
+    existingStore: secondFixture.store,
+  });
+  const provenanceObservation = await buildProviderReconciliation({
+    store: secondFixture.store,
+    observedBinding: provenanceRedeployFixture.targetBinding,
+  });
+  assert.deepEqual(
+    provenanceObservation.decision.terminalPlan.payload.originAcceptedEvent,
+    current.snapshot.acceptedStandardEvent,
+  );
+  const provenanceResult = await appendReconciliation({
+    store: secondFixture.store,
+    decision: provenanceObservation.decision,
+  });
+  current = await readCurrentReleaseState({ store: secondFixture.store });
+  assert.equal(
+    current.snapshot.acceptedStandard?.bindingId,
+    provenanceRedeployFixture.targetBinding.bindingId,
+  );
+  assert.deepEqual(
+    current.snapshot.acceptedStandardEvent,
+    redeployedAuthority.acceptedEvent,
+  );
+  assert.ok(
+    current.snapshot.rollbackInventory.some(
+      (entry) =>
+        entry.binding.bindingId ===
+        provenanceRedeployFixture.targetBinding.bindingId,
+    ),
+  );
+  assert.deepEqual(
+    provenanceResult.terminalEvent.payload.rollbackInventory,
+    current.snapshot.rollbackInventory,
   );
 });
 
@@ -2027,6 +2390,17 @@ test("records containment recovery terminal only after assignment validation and
     ),
     false,
   );
+  const recoveredAppendCalls = fixture.store.compareAndAppendCalls;
+  const recoveredReplay = await runPromotionLifecycle(
+    fixture,
+    {},
+    {
+      clock: () => Date.parse(completedAt) + 24 * 60 * 60 * 1000,
+    },
+  );
+  assert.equal(recoveredReplay.replayed, true);
+  assert.deepEqual(recoveredReplay.events, recovered.events);
+  assert.equal(fixture.store.compareAndAppendCalls, recoveredAppendCalls);
 });
 
 test("resumes an exact partial lifecycle after a CAS conflict", async () => {
@@ -2472,6 +2846,212 @@ test("derives prompt-close-all floors and clears bootstrap only with a passing r
     "prompt-close-all-v1",
   );
   assert.equal(acceptance.event.payload.clearBootstrapRecovery, true);
+});
+
+test("accepts a fresh same-floor prompt standard from a distinct source and keeps its predecessor as the sole eligible rollback", async () => {
+  const promptPolicy = {
+    ...releasePolicy,
+    initialStandard: standardDimensions("prompt-close-all-v1"),
+    targetStandard: standardDimensions("prompt-close-all-v1"),
+    phaseSequence: [{ gate: "P0-RELEASE", change: null }],
+  };
+  const firstFixture = await initializePromotionFixture({
+    pwaLifecycle: "prompt-close-all-v1",
+    releasePolicyValue: promptPolicy,
+    withRecoveryHistory: true,
+  });
+  await runPromotionLifecycle(firstFixture);
+  const firstInput = await acceptanceInputOptions({
+    fixture: firstFixture,
+    includeRecoveryDrill: true,
+  });
+  await acceptPendingStandardRelease(firstInput, {
+    validateEvidence: () => [],
+    validatePerformanceEvidence: async () => ({ errors: [] }),
+    collectApprovals: acceptanceCollector,
+    clock: () => Date.parse(observationEndedAt),
+  });
+
+  const secondSourceSha = "b".repeat(40);
+  const secondFixture = await initializePromotionFixture({
+    pwaLifecycle: "prompt-close-all-v1",
+    releasePolicyValue: promptPolicy,
+    fixtureOperationId: "same-floor-source-b",
+    fixtureSourceSha: secondSourceSha,
+    targetGate: "P0-RELEASE",
+    bootstrapSuffix: "8",
+    targetSuffix: "4",
+    companionSuffix: "5",
+    existingStore: firstFixture.store,
+  });
+  await runPromotionLifecycle(secondFixture);
+  const requirements = await resolvePendingAcceptanceRequirements({
+    store: secondFixture.store,
+  });
+  assert.equal(requirements.acceptedGate, "P0-RELEASE");
+  assert.equal(requirements.sourceSha, secondSourceSha);
+  const secondInput = await acceptanceInputOptions({ fixture: secondFixture });
+  await acceptPendingStandardRelease(secondInput, {
+    validateEvidence: () => [],
+    validatePerformanceEvidence: async () => ({ errors: [] }),
+    collectApprovals: acceptanceCollector,
+    clock: () => Date.parse(observationEndedAt),
+  });
+
+  const current = await readCurrentReleaseState({ store: secondFixture.store });
+  assert.equal(current.snapshot.acceptedGate, "P0-RELEASE");
+  assert.equal(current.snapshot.acceptedStandard?.sourceSha, secondSourceSha);
+  assert.deepEqual(
+    current.snapshot.acceptedStandardFloors,
+    Object.fromEntries(
+      Object.entries(promptPolicy.initialStandard).filter(
+        ([key]) => key !== "releaseRole",
+      ),
+    ),
+  );
+  const eligibleRollback = current.snapshot.rollbackInventory.filter(
+    ({ eligibility, eligibleActions }) =>
+      eligibility === "eligible" && eligibleActions.includes("rollback"),
+  );
+  assert.equal(eligibleRollback.length, 1);
+  assert.equal(
+    eligibleRollback[0].binding.bindingId,
+    firstFixture.targetBinding.bindingId,
+  );
+  assert.equal(eligibleRollback[0].acceptedGate, "P0-RELEASE");
+  assert.deepEqual(
+    eligibleRollback[0].acceptedStandardFloors,
+    current.snapshot.acceptedStandardFloors,
+  );
+  const acceptedRecords = secondFixture.store.records.filter(
+    ({ event }) => event.eventType === "release-accepted",
+  );
+  assert.equal(acceptedRecords.length, 2);
+  assert.deepEqual(
+    acceptedRecords.map(({ event }) => event.approvalRefs.length),
+    [3, 3],
+  );
+  assert.deepEqual(
+    acceptedRecords.map(({ event }) => event.operationId),
+    [operationId, "same-floor-source-b"],
+  );
+
+  const redeployedSecond = await initializePromotionFixture({
+    pwaLifecycle: "prompt-close-all-v1",
+    releasePolicyValue: promptPolicy,
+    operationKind: "redeploy-standard",
+    fixtureOperationId: "redeploy-managed-stage-current",
+    fixtureSourceSha: secondFixture.targetBinding.sourceSha,
+    targetGate: "P0-RELEASE",
+    bootstrapSuffix: "c",
+    targetSuffix: "d",
+    companionSuffix: "e",
+    operationOriginOverride: secondFixture.targetBinding,
+    operationOriginCompanionOverride: secondFixture.companionBinding,
+    existingStore: secondFixture.store,
+  });
+  await runPromotionLifecycle(redeployedSecond);
+  let rollbackCurrent = await readCurrentReleaseState({
+    store: secondFixture.store,
+  });
+  assert.equal(
+    rollbackCurrent.snapshot.acceptedStandard?.bindingId,
+    redeployedSecond.targetBinding.bindingId,
+  );
+
+  const rollbackToFirst = await initializePromotionFixture({
+    pwaLifecycle: "prompt-close-all-v1",
+    releasePolicyValue: promptPolicy,
+    operationKind: "rollback-standard",
+    fixtureOperationId: "managed-stage-rollback-to-first",
+    fixtureSourceSha: firstFixture.targetBinding.sourceSha,
+    targetGate: "P0-RELEASE",
+    bootstrapSuffix: "1",
+    targetSuffix: "2",
+    companionSuffix: "3",
+    operationTargetOverride: firstFixture.targetBinding,
+    operationCompanionOverride: firstFixture.companionBinding,
+    existingStore: secondFixture.store,
+  });
+  await runPromotionLifecycle(rollbackToFirst);
+  const rollbackAppendCalls = secondFixture.store.compareAndAppendCalls;
+  const rollbackReplay = await runPromotionLifecycle(
+    rollbackToFirst,
+    {},
+    {
+      clock: () => Date.parse(completedAt) + 24 * 60 * 60 * 1000,
+    },
+  );
+  assert.equal(rollbackReplay.replayed, true);
+  assert.equal(secondFixture.store.compareAndAppendCalls, rollbackAppendCalls);
+  rollbackCurrent = await readCurrentReleaseState({
+    store: secondFixture.store,
+  });
+  assert.equal(
+    rollbackCurrent.snapshot.acceptedStandard?.bindingId,
+    firstFixture.targetBinding.bindingId,
+  );
+  assert.deepEqual(
+    rollbackCurrent.snapshot.rollbackInventory.map(
+      (entry) => entry.binding.bindingId,
+    ),
+    [redeployedSecond.targetBinding.bindingId],
+  );
+
+  const rollbackToSecond = await initializePromotionFixture({
+    pwaLifecycle: "prompt-close-all-v1",
+    releasePolicyValue: promptPolicy,
+    operationKind: "rollback-standard",
+    fixtureOperationId: "managed-stage-rollback-to-second",
+    fixtureSourceSha: redeployedSecond.targetBinding.sourceSha,
+    targetGate: "P0-RELEASE",
+    bootstrapSuffix: "6",
+    targetSuffix: "7",
+    companionSuffix: "8",
+    operationTargetOverride: redeployedSecond.targetBinding,
+    operationCompanionOverride: redeployedSecond.companionBinding,
+    existingStore: secondFixture.store,
+  });
+  await runPromotionLifecycle(rollbackToSecond);
+  rollbackCurrent = await readCurrentReleaseState({
+    store: secondFixture.store,
+  });
+  assert.equal(
+    rollbackCurrent.snapshot.acceptedStandard?.bindingId,
+    redeployedSecond.targetBinding.bindingId,
+  );
+  assert.deepEqual(
+    rollbackCurrent.snapshot.rollbackInventory.map(
+      (entry) => entry.binding.bindingId,
+    ),
+    [firstFixture.targetBinding.bindingId],
+  );
+  assert.deepEqual(
+    secondFixture.store.records
+      .filter(({ event }) => event.eventType === "rollback-activated")
+      .map(({ event }) => event.payload.binding.bindingId),
+    [
+      firstFixture.targetBinding.bindingId,
+      redeployedSecond.targetBinding.bindingId,
+    ],
+  );
+
+  const reusedSourceFixture = await initializePromotionFixture({
+    pwaLifecycle: "prompt-close-all-v1",
+    releasePolicyValue: promptPolicy,
+    fixtureOperationId: "reject-reused-source",
+    fixtureSourceSha: secondSourceSha,
+    targetGate: "P0-RELEASE",
+    bootstrapSuffix: "9",
+    targetSuffix: "6",
+    companionSuffix: "7",
+    existingStore: secondFixture.store,
+  });
+  await runPromotionLifecycle(reusedSourceFixture);
+  await assert.rejects(
+    resolvePendingAcceptanceRequirements({ store: reusedSourceFixture.store }),
+    /not an independent source deployment/,
+  );
 });
 
 test("fails prompt-close-all bootstrap clearance without recovery PASS or an exact companion projection", async (t) => {

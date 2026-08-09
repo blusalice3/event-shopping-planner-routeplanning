@@ -15,6 +15,7 @@ import { canonicalJsonBytes, parseJsonStrict } from "../lib/canonical-json.mjs";
 import { assertConfiguredManagedDeviceExecution } from "./managed-device-authority.mjs";
 
 const execFileAsync = promisify(execFile);
+const MAXIMUM_ARTIFACT_DOCUMENT_BYTES = 1024 * 1024;
 const MAXIMUM_RECEIPT_BYTES = 32 * 1024 * 1024;
 const POWERSHELL_PATH = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
 const CHILD_ENVIRONMENT_NAMES = Object.freeze([
@@ -22,7 +23,6 @@ const CHILD_ENVIRONMENT_NAMES = Object.freeze([
   "ComSpec",
   "FOUNDATION_DEVICE_ATTESTATION_PRIVATE_KEY_PEM",
   "FOUNDATION_DEVICE_ATTESTATION_PUBLIC_KEY_PEM",
-  "FOUNDATION_DEVICE_PROFILE_ROOT",
   "FOUNDATION_DEVICE_RUNNER_GROUP",
   "FOUNDATION_DEVICE_RUNNER_LABELS",
   "LOCALAPPDATA",
@@ -67,7 +67,6 @@ export const projectManagedDeviceChildEnvironment = (environment) => {
     "APPDATA",
     "FOUNDATION_DEVICE_ATTESTATION_PRIVATE_KEY_PEM",
     "FOUNDATION_DEVICE_ATTESTATION_PUBLIC_KEY_PEM",
-    "FOUNDATION_DEVICE_PROFILE_ROOT",
     "FOUNDATION_DEVICE_RUNNER_GROUP",
     "FOUNDATION_DEVICE_RUNNER_LABELS",
     "PATH",
@@ -82,6 +81,157 @@ export const projectManagedDeviceChildEnvironment = (environment) => {
     }
   }
   return Object.freeze(projected);
+};
+
+const assertExactDirectory = async (directoryPath, label) => {
+  if (typeof directoryPath !== "string" || !path.isAbsolute(directoryPath)) {
+    throw new Error(`${label} path is invalid`);
+  }
+  const resolved = path.resolve(directoryPath);
+  const metadata = await lstat(resolved);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+    throw new Error(`${label} is not a regular directory`);
+  }
+  if (comparablePath(await realpath(resolved)) !== comparablePath(resolved)) {
+    throw new Error(`${label} resolves through an alias`);
+  }
+  return resolved;
+};
+
+const readCanonicalArtifactDocument = async ({ distRoot, fileName, label }) => {
+  const documentPath = path.join(distRoot, fileName);
+  const metadata = await lstat(documentPath);
+  if (
+    !metadata.isFile() ||
+    metadata.isSymbolicLink() ||
+    metadata.size < 1 ||
+    metadata.size > MAXIMUM_ARTIFACT_DOCUMENT_BYTES
+  ) {
+    throw new Error(`${label} is not a bounded regular file`);
+  }
+  if (
+    comparablePath(await realpath(documentPath)) !==
+    comparablePath(documentPath)
+  ) {
+    throw new Error(`${label} resolves through an alias`);
+  }
+  const bytes = await readFile(documentPath);
+  const value = parseJsonStrict(bytes.toString("utf8"), label);
+  if (!bytes.equals(canonicalJsonBytes(value))) {
+    throw new Error(`${label} is not canonical`);
+  }
+  return Object.freeze({ bytes, value });
+};
+
+const assertStrictPwaArtifact = async ({
+  artifact,
+  expectedSourceSha,
+  label,
+}) => {
+  if (
+    artifact?.binding?.releaseRole !== "standard" ||
+    artifact.binding.sourceSha !== expectedSourceSha
+  ) {
+    throw new Error(`${label} binding source differs`);
+  }
+  const distRoot = await assertExactDirectory(
+    artifact.distRoot,
+    `${label} dist`,
+  );
+  const [capabilityDocument, identityDocument] = await Promise.all([
+    readCanonicalArtifactDocument({
+      distRoot,
+      fileName: "release-capabilities.json",
+      label: `${label} capability`,
+    }),
+    readCanonicalArtifactDocument({
+      distRoot,
+      fileName: "release-identity.json",
+      label: `${label} identity`,
+    }),
+  ]);
+  const capability = capabilityDocument.value;
+  const identity = identityDocument.value;
+  if (
+    capability.kind !== "event-shopping-planner-release-capabilities" ||
+    capability.version !== 1 ||
+    capability.buildMode !== "release-a" ||
+    capability.buildId !== expectedSourceSha ||
+    capability.sourceSha !== expectedSourceSha ||
+    capability.sourceState !== "clean" ||
+    capability.releaseChannel !== "release-a" ||
+    capability.legacyLocalStorageCleanup !== "forced-off"
+  ) {
+    throw new Error(`${label} capability source differs`);
+  }
+  if (
+    identity.schemaVersion !== 1 ||
+    identity.buildId !== expectedSourceSha ||
+    identity.sourceSha !== expectedSourceSha ||
+    identity.releaseRole !== "standard" ||
+    identity.variantId !== artifact.binding.variantId ||
+    identity.pwaLifecycle !== "prompt-close-all-v1"
+  ) {
+    throw new Error(`${label} prompt-close identity differs`);
+  }
+  const [versionedCapability, versionedIdentity] = await Promise.all([
+    readCanonicalArtifactDocument({
+      distRoot,
+      fileName: `release-capabilities.${expectedSourceSha}.json`,
+      label: `${label} versioned capability`,
+    }),
+    readCanonicalArtifactDocument({
+      distRoot,
+      fileName: `release-identity.${expectedSourceSha}.${identity.variantId}.json`,
+      label: `${label} versioned identity`,
+    }),
+  ]);
+  if (
+    !capabilityDocument.bytes.equals(versionedCapability.bytes) ||
+    !identityDocument.bytes.equals(versionedIdentity.bytes)
+  ) {
+    throw new Error(`${label} stable/versioned identity bytes differ`);
+  }
+  return Object.freeze({ ...artifact, distRoot });
+};
+
+export const prepareManagedDevicePowerShellArtifacts = async ({
+  request,
+  artifacts,
+}) => {
+  if (request?.authority === "idb-device-compatibility") {
+    if (artifacts?.rollback !== null) {
+      throw new Error("Managed IDB collector rejects a rollback artifact");
+    }
+    const distRoot = await assertExactDirectory(
+      artifacts?.current?.distRoot,
+      "Managed current artifact",
+    );
+    return Object.freeze({
+      current: Object.freeze({ ...artifacts.current, distRoot }),
+      rollback: null,
+    });
+  }
+  if (
+    request?.authority !== "pwa-multiclient-drill" ||
+    request.sourceSha !== request.deployment?.sourceSha ||
+    request.rollbackDeployment?.sourceSha === request.sourceSha
+  ) {
+    throw new Error("Managed PWA artifact request identity differs");
+  }
+  const [current, rollback] = await Promise.all([
+    assertStrictPwaArtifact({
+      artifact: artifacts?.current,
+      expectedSourceSha: request.sourceSha,
+      label: "Managed current artifact",
+    }),
+    assertStrictPwaArtifact({
+      artifact: artifacts?.rollback,
+      expectedSourceSha: request.rollbackDeployment?.sourceSha,
+      label: "Managed rollback artifact",
+    }),
+  ]);
+  return Object.freeze({ current, rollback });
 };
 
 const assertExactPowerShell = async (configuredPath = POWERSHELL_PATH) => {
@@ -127,17 +277,12 @@ export const executeManagedDevicePowerShell = async (
   ) {
     throw new Error("Managed device execution paths are invalid");
   }
-  const currentDist = artifacts?.current?.distRoot;
-  const rollbackDist = artifacts?.rollback?.distRoot ?? null;
-  if (
-    typeof currentDist !== "string" ||
-    !path.isAbsolute(currentDist) ||
-    (request.authority === "pwa-multiclient-drill" &&
-      (typeof rollbackDist !== "string" || !path.isAbsolute(rollbackDist))) ||
-    (request.authority === "idb-device-compatibility" && rollbackDist !== null)
-  ) {
-    throw new Error("Managed device materialized artifacts are invalid");
-  }
+  const preparedArtifacts = await prepareManagedDevicePowerShellArtifacts({
+    request,
+    artifacts,
+  });
+  const currentDist = preparedArtifacts.current.distRoot;
+  const rollbackDist = preparedArtifacts.rollback?.distRoot ?? null;
   requireSecret(environment, "FOUNDATION_DEVICE_ATTESTATION_PRIVATE_KEY_PEM");
   requireSecret(environment, "FOUNDATION_DEVICE_ATTESTATION_PUBLIC_KEY_PEM");
   const childEnvironment = projectManagedDeviceChildEnvironment(environment);

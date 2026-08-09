@@ -748,55 +748,57 @@ test("rejects caller client/status/installed claims and incomplete PWA lifecycle
   }
 });
 
-test("rejects incomplete or tampered prompt-close browser evidence", () => {
+test("rejects incomplete or tampered per-profile prompt-close browser evidence", () => {
   const policy = configuredExternalPolicy();
-  for (const mutate of [
-    (value) => {
-      delete value.preflush.action;
-    },
-    (value) => {
-      value.postflush.unexpected = true;
-    },
-    (value) => {
-      value.failedClosed.closeGuidanceVisible = true;
-    },
-    (value) => {
-      value.snapshotRequests[1].flushCount = 0;
-    },
-    (value) => {
-      value.snapshotRequests[1].productionFlushResponseCount = 0;
-    },
-    (value) => {
-      value.interaction.eventAutosaveBlockerObserved = false;
-    },
-    (value) => {
-      value.interaction.eventAutosaveMutationPersistedAfterInitialAction = false;
-    },
-    (value) => {
-      value.controllerBeforeClose.clients[0].controllerChangeCountDelta = 1;
-    },
-    (value) => {
-      value.release.remainingOriginClientCount = 1;
-    },
-    (value) => {
-      value.naturalActivation.versionId = "substituted";
-    },
-  ]) {
-    const candidate = payload("pwa-multiclient-drill", policy);
-    const promptCloseAll =
-      candidate.evidence.profileTransitions[0].observations.finalForward
-        .naturalActivation.promptCloseAll;
-    mutate(promptCloseAll);
-    assert.throws(
-      () =>
-        createSignedManagedDeviceReceipt({
-          payload: candidate,
-          privateKeyPem,
-          publicKeyPem,
-          validation: validation("pwa-multiclient-drill", policy),
-        }),
-      /Prompt-close/,
-    );
+  for (const profileIndex of [0, 1]) {
+    for (const mutate of [
+      (value) => {
+        delete value.preflush.action;
+      },
+      (value) => {
+        value.postflush.unexpected = true;
+      },
+      (value) => {
+        value.failedClosed.closeGuidanceVisible = true;
+      },
+      (value) => {
+        value.snapshotRequests[1].flushCount = 0;
+      },
+      (value) => {
+        value.snapshotRequests[1].productionFlushResponseCount = 0;
+      },
+      (value) => {
+        value.interaction.eventAutosaveBlockerObserved = false;
+      },
+      (value) => {
+        value.interaction.eventAutosaveMutationPersistedAfterInitialAction = false;
+      },
+      (value) => {
+        value.controllerBeforeClose.clients[0].controllerChangeCountDelta = 1;
+      },
+      (value) => {
+        value.release.remainingOriginClientCount = 1;
+      },
+      (value) => {
+        value.naturalActivation.versionId = "substituted";
+      },
+    ]) {
+      const candidate = payload("pwa-multiclient-drill", policy);
+      const promptCloseAll =
+        candidate.evidence.profileTransitions[profileIndex].observations
+          .finalForward.naturalActivation.promptCloseAll;
+      mutate(promptCloseAll);
+      assert.throws(
+        () =>
+          createSignedManagedDeviceReceipt({
+            payload: candidate,
+            privateKeyPem,
+            publicKeyPem,
+            validation: validation("pwa-multiclient-drill", policy),
+          }),
+        /Prompt-close/,
+      );
+    }
   }
 });
 

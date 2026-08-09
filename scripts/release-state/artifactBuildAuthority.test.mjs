@@ -145,7 +145,10 @@ const makeCurrent = ({
     acceptedStandard:
       acceptedGate === null
         ? null
-        : { providerPolicy: structuredClone(providerPolicy) },
+        : {
+            providerPolicy: structuredClone(providerPolicy),
+            sourceSha: "0".repeat(40),
+          },
     acceptedStandardFloors: structuredClone(acceptedFloors),
     activeReleasePolicy: structuredClone(activeReleasePolicy),
     bootstrapRecovery: { providerPolicy: structuredClone(providerPolicy) },
@@ -189,12 +192,17 @@ const prepareProductionAuthority = async ({
   return { store, current, activeReleasePolicy, providerPolicy };
 };
 
-const productionOptions = (store, operationId = "build-production") => ({
+const productionOptions = (
+  store,
+  operationId = "build-production",
+  targetGate = "P0-RELEASE",
+) => ({
   store,
   namespace: store.namespace,
   operationId,
   executorSourceSha,
   targetSourceSha: executorSourceSha,
+  targetGate,
   purpose: "production",
   toolchainPolicyBytes,
   cspPolicyBytes,
@@ -210,7 +218,7 @@ test("production requirements bind every canonical predecessor/target gate", asy
       acceptedGate,
     });
     const built = await buildAuthoritativeArtifactBuildRequirements(
-      productionOptions(store, `build-${targetGate.toLowerCase()}`),
+      productionOptions(store, `build-${targetGate.toLowerCase()}`, targetGate),
       { readState: async () => current },
     );
     assert.equal(built.requirements.acceptedGate, acceptedGate);
@@ -242,6 +250,114 @@ test("production requirements bind every canonical predecessor/target gate", asy
     results[10].standardDimensions,
     results[9].standardDimensions,
     "P8 must be an explicit zero-delta gate",
+  );
+});
+
+test("production requirements authorize an exact distinct-source same-floor replacement", async () => {
+  const { store, current } = await prepareProductionAuthority({
+    targetGate: "P1-PWA",
+    acceptedGate: "P1-PWA",
+  });
+  const built = await buildAuthoritativeArtifactBuildRequirements(
+    productionOptions(store, "replace-p1-source", "P1-PWA"),
+    { readState: async () => current },
+  );
+  assert.equal(built.requirements.acceptedGate, "P1-PWA");
+  assert.equal(built.requirements.targetGate, "P1-PWA");
+  assert.deepEqual(
+    built.requirements.standardDimensions,
+    standardAtGate(basePolicy, "P1-PWA"),
+  );
+  const validated = await validateAuthoritativeArtifactBuildRequirements(
+    {
+      store,
+      requirementsBytes: built.requirementsBytes,
+      expectedSha256: built.requirementsSha256,
+      checkoutSourceSha: executorSourceSha,
+    },
+    { readState: async () => current },
+  );
+  assert.deepEqual(validated.requirements, built.requirements);
+});
+
+test("same-floor replacement rejects reused source, policy drift, regress, and missing gate", async () => {
+  const terminal = await prepareProductionAuthority({
+    targetGate: "P8-CLEAN",
+    acceptedGate: "P8-CLEAN",
+  });
+  await assert.rejects(
+    buildAuthoritativeArtifactBuildRequirements(
+      productionOptions(
+        terminal.store,
+        "reject-terminal-source-replacement",
+        "P8-CLEAN",
+      ),
+      { readState: async () => terminal.current },
+    ),
+    /Terminal P8-CLEAN does not permit a same-floor source replacement/u,
+  );
+
+  const sameFloor = await prepareProductionAuthority({
+    targetGate: "P1-PWA",
+    acceptedGate: "P1-PWA",
+  });
+  await assert.rejects(
+    buildAuthoritativeArtifactBuildRequirements(
+      {
+        ...productionOptions(sameFloor.store, "reuse-p1-source", "P1-PWA"),
+        executorSourceSha: "0".repeat(40),
+        targetSourceSha: "0".repeat(40),
+      },
+      { readState: async () => sameFloor.current },
+    ),
+    /distinct source and accepted standard/,
+  );
+
+  const unboundAcceptedSource = structuredClone(sameFloor.current);
+  delete unboundAcceptedSource.snapshot.acceptedStandard.sourceSha;
+  await assert.rejects(
+    buildAuthoritativeArtifactBuildRequirements(
+      productionOptions(sameFloor.store, "replace-unbound-p1-source", "P1-PWA"),
+      { readState: async () => unboundAcceptedSource },
+    ),
+    /distinct source and accepted standard/,
+  );
+
+  const policyAhead = await prepareProductionAuthority({
+    targetGate: "P4-CSP",
+    acceptedGate: "P3-XLSX",
+  });
+  await assert.rejects(
+    buildAuthoritativeArtifactBuildRequirements(
+      productionOptions(policyAhead.store, "replace-p3-source", "P3-XLSX"),
+      { readState: async () => policyAhead.current },
+    ),
+    /does not authorize the current production floor/,
+  );
+
+  const regressed = await prepareProductionAuthority({
+    targetGate: "P4-CSP",
+    acceptedGate: "P4-CSP",
+  });
+  await assert.rejects(
+    buildAuthoritativeArtifactBuildRequirements(
+      productionOptions(regressed.store, "regress-p4-source", "P3-XLSX"),
+      { readState: async () => regressed.current },
+    ),
+    /preserve the accepted floor or advance exactly one gate/,
+  );
+
+  const missingGate = productionOptions(
+    sameFloor.store,
+    "missing-replacement-gate",
+    "P1-PWA",
+  );
+  delete missingGate.targetGate;
+  await assert.rejects(
+    buildAuthoritativeArtifactBuildRequirements(missingGate, {
+      readState: async () => sameFloor.current,
+    }),
+    /unknown or missing fields/,
   );
 });
 
@@ -334,10 +450,10 @@ test("caller dimensions, proposed production, skipped gates, and pending state f
   });
   await assert.rejects(
     buildAuthoritativeArtifactBuildRequirements(
-      productionOptions(skipped.store),
+      productionOptions(skipped.store, "build-skipped", "P2A-LOCAL"),
       { readState: async () => skipped.current },
     ),
-    /does not authorize the next production gate/,
+    /preserve the accepted floor or advance exactly one gate/,
   );
 
   const pending = await prepareProductionAuthority({
@@ -347,7 +463,7 @@ test("caller dimensions, proposed production, skipped gates, and pending state f
   });
   await assert.rejects(
     buildAuthoritativeArtifactBuildRequirements(
-      productionOptions(pending.store),
+      productionOptions(pending.store, "build-pending", "P1-PWA"),
       { readState: async () => pending.current },
     ),
     /idle Release State/,
@@ -362,7 +478,7 @@ test("production accepts only an active policy and QA accepts only its exact suc
   });
   await assert.rejects(
     buildAuthoritativeArtifactBuildRequirements(
-      productionOptions(proposedProduction.store),
+      productionOptions(proposedProduction.store, "build-proposed", "P1-PWA"),
       { readState: async () => proposedProduction.current },
     ),
     /valid active authority/,
@@ -449,7 +565,7 @@ test("P8 floor activation cannot authorize an artifact rebuild", async () => {
       },
       { readState: async () => current },
     ),
-    /cannot advance outside the phase sequence/,
+    /valid proposed authority/,
   );
 });
 

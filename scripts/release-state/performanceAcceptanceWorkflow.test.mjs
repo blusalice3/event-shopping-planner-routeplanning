@@ -24,9 +24,23 @@ const stepBody = (name, nextName) => {
   return workflow.slice(start, end);
 };
 
+test("rejects candidate_gate outside the four candidate-aware operations", () => {
+  const validation = stepBody("Validate reviewed dispatch inputs", "Pin npm");
+  assert.match(
+    validation,
+    /\$candidateGateOperations = @\([\s\S]*'produce-artifact-build-requirements',[\s\S]*'produce-acceptance-requirements',[\s\S]*'produce-acceptance-inputs',[\s\S]*'accept-standard'[\s\S]*\)/u,
+  );
+  assert.match(
+    validation,
+    /\$candidateGateOperations -notcontains \$env:REQUESTED_OPERATION[\s\S]*\$hasCandidateGate/u,
+  );
+  assert.match(validation, /candidate_gate is forbidden for this operation/u);
+});
+
 test("derives the accepted gate and performance requirement from Release State", () => {
   for (const operation of ["produce-acceptance-inputs", "accept-standard"]) {
     const fields = RELEASE_DISPATCH_OPERATION_SCHEMAS[operation];
+    assert.ok(fields.required.includes("candidate_gate"));
     assert.ok(fields.required.includes("acceptance_requirements_sha256"));
     assert.ok(fields.optional.includes("performance_evidence_run_id"));
     assert.ok(fields.optional.includes("performance_evidence_run_attempt"));
@@ -57,6 +71,10 @@ test("derives the accepted gate and performance requirement from Release State",
   assert.match(
     resolver,
     /\$currentRequirementsHash -ne \$env:REQUESTED_ACCEPTANCE_REQUIREMENTS_SHA256/,
+  );
+  assert.match(
+    resolver,
+    /\$requirements\.acceptedGate -ne \$env:REQUESTED_CANDIDATE_GATE/,
   );
   assert.match(resolver, /\$requirements\.performanceEvidenceKind -eq 'none'/);
   assert.match(resolver, /performance evidence is forbidden for accepted gate/);
@@ -108,6 +126,11 @@ test("derives the accepted gate and performance requirement from Release State",
     workflow.indexOf("Verify reviewed authoritative acceptance requirements") <
       workflow.indexOf("Download reviewed own-gate performance evidence"),
   );
+  assert.deepEqual(
+    RELEASE_DISPATCH_OPERATION_SCHEMAS["produce-acceptance-requirements"]
+      .required,
+    ["candidate_gate"],
+  );
 });
 
 test("requires a separately reviewed authoritative requirements artifact", () => {
@@ -126,6 +149,10 @@ test("requires a separately reviewed authoritative requirements artifact", () =>
     /release:lifecycle -- describe-acceptance-requirements/,
   );
   assert.match(producer, /acceptance-requirements\.json/);
+  assert.match(
+    producer,
+    /\$requirements\.acceptedGate -ne \$env:REQUESTED_CANDIDATE_GATE/,
+  );
 
   const download = stepBody(
     "Download reviewed authoritative acceptance requirements",
@@ -181,10 +208,42 @@ test("rejects same-run and overlapping acceptance artifact producers", () => {
     validation,
     /'accept-standard' \{[\s\S]*acceptance artifacts must come from distinct producer runs/,
   );
+  for (const operation of [
+    "produce-acceptance-requirements",
+    "produce-acceptance-inputs",
+    "accept-standard",
+  ]) {
+    assert.match(
+      validation,
+      new RegExp(`'${operation}' \\{[\\s\\S]*REQUESTED_CANDIDATE_GATE`, "u"),
+    );
+  }
   assert.equal(
     (validation.match(/\$producerRunIds \| Select-Object -Unique/g) ?? [])
       .length,
     2,
+  );
+});
+
+test("binds produced and reviewed terminal artifacts to candidate_gate", () => {
+  const producer = stepBody(
+    "Produce canonical acceptance inputs from reviewed sources",
+    "Upload canonical acceptance inputs",
+  );
+  assert.match(producer, /\$bundleDocument\.releaseStateEvent\.sha256/);
+  assert.match(
+    producer,
+    /\$releaseEvent\.payload\.acceptedGate -ne \$env:REQUESTED_CANDIDATE_GATE/,
+  );
+
+  const acceptor = stepBody(
+    "Accept the standard release after fresh observation",
+    "Upload acceptance result",
+  );
+  assert.match(acceptor, /\$bundleDocument\.releaseStateEvent\.sha256/);
+  assert.match(
+    acceptor,
+    /\$releaseEvent\.payload\.acceptedGate -ne \$env:REQUESTED_CANDIDATE_GATE/,
   );
 });
 

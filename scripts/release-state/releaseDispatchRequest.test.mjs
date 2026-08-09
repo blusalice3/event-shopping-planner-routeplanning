@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -26,6 +26,7 @@ const valueFor = (name) => {
   if (name === "archive_recovery_action") return "rollback";
   if (name === "archive_recovery_binding_id") return "binding:1";
   if (name === "policy_activation_gate") return "P4-CSP";
+  if (name === "candidate_gate") return "P1-PWA";
   if (name === "target_gate") return "P0-DATA";
   if (name.endsWith("source_sha")) return "c".repeat(40);
   return "value-1";
@@ -201,17 +202,26 @@ test("closes P0 baseline collectors and pre-initialization attestation predecess
   }
 });
 
-test("managed-device phase bundles expose only three unordered prior-run selectors", () => {
-  for (const targetGate of ["P1-PWA", "P7-IDB"]) {
-    const request = {
-      target_gate: targetGate,
-      phase_authority_managed_device_run_1_id: "8103",
-      phase_authority_managed_device_run_1_attempt: "1",
-      phase_authority_managed_device_run_2_id: "8101",
-      phase_authority_managed_device_run_2_attempt: "2",
-      phase_authority_managed_device_run_3_id: "8102",
-      phase_authority_managed_device_run_3_attempt: "1",
-    };
+test("P1 requires a strict PWA receipt while P7 keeps only three stage selectors", () => {
+  const managedDeviceSelectors = {
+    phase_authority_managed_device_run_1_id: "8103",
+    phase_authority_managed_device_run_1_attempt: "1",
+    phase_authority_managed_device_run_2_id: "8101",
+    phase_authority_managed_device_run_2_attempt: "2",
+    phase_authority_managed_device_run_3_id: "8102",
+    phase_authority_managed_device_run_3_attempt: "1",
+  };
+  const pwaRequest = {
+    target_gate: "P1-PWA",
+    phase_authority_pwa_receipt_run_id: "8104",
+    phase_authority_pwa_receipt_run_attempt: "3",
+    ...managedDeviceSelectors,
+  };
+  const idbRequest = {
+    target_gate: "P7-IDB",
+    ...managedDeviceSelectors,
+  };
+  for (const request of [pwaRequest, idbRequest]) {
     assert.deepEqual(
       validateReleaseDispatchRequest({
         operation: "produce-phase-exit-authority-bundle",
@@ -242,6 +252,64 @@ test("managed-device phase bundles expose only three unordered prior-run selecto
       );
     }
   }
+  for (const missing of [
+    "phase_authority_pwa_receipt_run_id",
+    "phase_authority_pwa_receipt_run_attempt",
+  ]) {
+    const incomplete = { ...pwaRequest };
+    delete incomplete[missing];
+    assert.throws(
+      () =>
+        validateReleaseDispatchRequest({
+          operation: "produce-phase-exit-authority-bundle",
+          sourceSha: SOURCE_SHA,
+          requestBytes: canonicalJsonBytes(incomplete),
+        }),
+      /exact target gate/u,
+    );
+  }
+  assert.throws(
+    () =>
+      validateReleaseDispatchRequest({
+        operation: "produce-phase-exit-authority-bundle",
+        sourceSha: SOURCE_SHA,
+        requestBytes: canonicalJsonBytes({
+          ...idbRequest,
+          phase_authority_pwa_receipt_run_id: "8104",
+          phase_authority_pwa_receipt_run_attempt: "3",
+        }),
+      }),
+    /exact target gate/u,
+  );
+});
+
+test("strict PWA collector dispatch accepts only an empty request and known operation", () => {
+  assert.deepEqual(
+    validateReleaseDispatchRequest({
+      operation: "collect-pwa-multiclient-drill",
+      sourceSha: SOURCE_SHA,
+      requestBytes: canonicalJsonBytes({}),
+    }).request,
+    {},
+  );
+  assert.throws(
+    () =>
+      validateReleaseDispatchRequest({
+        operation: "collect-pwa-multiclient-drill",
+        sourceSha: SOURCE_SHA,
+        requestBytes: canonicalJsonBytes({ status: "passed" }),
+      }),
+    /fields differ/u,
+  );
+  assert.throws(
+    () =>
+      validateReleaseDispatchRequest({
+        operation: "collect-pwa-multiclient-drill-unknown",
+        sourceSha: SOURCE_SHA,
+        requestBytes: canonicalJsonBytes({}),
+      }),
+    /identity is invalid/u,
+  );
 });
 
 test("acceptance performance evidence requires run, attempt, and hash together", () => {
@@ -276,6 +344,43 @@ test("acceptance performance evidence requires run, attempt, and hash together",
         /prior-run authority/u,
       );
     }
+  }
+});
+
+test("candidate gate is required and limited to production release gates", () => {
+  for (const operation of [
+    "produce-artifact-build-requirements",
+    "produce-acceptance-requirements",
+    "produce-acceptance-inputs",
+    "accept-standard",
+  ]) {
+    const request = requiredRequest(operation);
+    assert.equal(request.candidate_gate, "P1-PWA");
+    const missing = { ...request };
+    delete missing.candidate_gate;
+    assert.throws(
+      () =>
+        validateReleaseDispatchRequest({
+          operation,
+          sourceSha: SOURCE_SHA,
+          requestBytes: canonicalJsonBytes(missing),
+        }),
+      /fields differ/u,
+      operation,
+    );
+    assert.throws(
+      () =>
+        validateReleaseDispatchRequest({
+          operation,
+          sourceSha: SOURCE_SHA,
+          requestBytes: canonicalJsonBytes({
+            ...request,
+            candidate_gate: "P0-TOOLCHAIN",
+          }),
+        }),
+      /fields differ/u,
+      operation,
+    );
   }
 });
 
@@ -383,6 +488,23 @@ test("validator writes only normalized fields and builder uses create-only outpu
   const normalized = await readFile(githubEnvironmentPath, "utf8");
   assert.match(normalized, /REQUESTED_ARCHIVE_RECOVERY_ACTION=rollback/u);
   assert.doesNotMatch(normalized, /INPUT_REQUEST_JSON/u);
+
+  const emptyEnvironmentPath = path.join(directory, "empty-github-env.txt");
+  await writeFile(emptyEnvironmentPath, "EXISTING=preserved\n", "utf8");
+  await runReleaseDispatchRequestCli({
+    argv: ["validate"],
+    env: {
+      INPUT_OPERATION: "collect-pwa-multiclient-drill",
+      INPUT_SOURCE_SHA: SOURCE_SHA,
+      INPUT_REQUEST_JSON: canonicalJsonBytes({}).toString("utf8"),
+      GITHUB_ENV: emptyEnvironmentPath,
+      GITHUB_RUN_ID: "999999",
+    },
+  });
+  assert.equal(
+    await readFile(emptyEnvironmentPath, "utf8"),
+    "EXISTING=preserved\n",
+  );
 
   const output = path.join(directory, "request.json");
   const flags = Object.entries(request).flatMap(([name, value]) => [

@@ -37,10 +37,15 @@ import { collectReviewedWorkflowRunAuthority } from "./reviewedWorkflowRunAuthor
 import {
   MANAGED_DEVICE_STAGE_ARTIFACT_NAME_TEMPLATE,
   MANAGED_DEVICE_STAGE_FILE_NAME,
+  PWA_STRICT_RECEIPT_ARTIFACT_NAME_TEMPLATE,
+  PWA_STRICT_RECEIPT_FILE_NAME,
   putManagedDeviceReviewedStageSetAuthority,
+  putPwaReviewedFormalClosureAuthority,
   readManagedDeviceReviewedStageSetAuthority,
+  readPwaReviewedFormalClosureAuthority,
 } from "./managedDeviceReviewedStageSetAuthority.mjs";
 import { MANAGED_DEVICE_STAGE_RECEIPT_MEDIA_TYPE } from "../browser/managed-device-stage-authority.mjs";
+import { MANAGED_DEVICE_SIGNED_RECEIPT_MEDIA_TYPES } from "../browser/managed-device-authority.mjs";
 
 export const PHASE_EXIT_AUTHORITY_PACKAGE_MEDIA_TYPE =
   "application/vnd.event-shopping-planner.phase-exit-authority-package+json;version=1";
@@ -134,6 +139,8 @@ const PRODUCE_ARGUMENTS_BY_GATE = Object.freeze({
     ["--performance-run-attempt", "performanceRunAttempt"],
   ]),
   "P1-PWA": Object.freeze([
+    ["--pwa-receipt-run-id", "pwaReceiptRunId"],
+    ["--pwa-receipt-run-attempt", "pwaReceiptRunAttempt"],
     ["--managed-device-run-1-id", "managedDeviceRun1Id"],
     ["--managed-device-run-1-attempt", "managedDeviceRun1Attempt"],
     ["--managed-device-run-2-id", "managedDeviceRun2Id"],
@@ -524,13 +531,19 @@ const buildBundleInputs = async ({
   ];
   const managedDeviceAuthority =
     MANAGED_DEVICE_AUTHORITY_BY_GATE[values.targetGate] ?? null;
+  const pwaStrictReceiptSelector =
+    values.targetGate === "P1-PWA"
+      ? [values.pwaReceiptRunId, values.pwaReceiptRunAttempt]
+      : null;
   const targetArtifactAuthorities = targetDefinitions
     .map(({ authority }) => authority)
     .filter((authority) => ARTIFACT_AUTHORITIES.includes(authority));
   const targetRuns =
     managedDeviceAuthority === null
       ? targetDefinitions.map(({ authority }) => runByAuthority[authority])
-      : managedDeviceSelectors;
+      : pwaStrictReceiptSelector === null
+        ? managedDeviceSelectors
+        : [pwaStrictReceiptSelector, ...managedDeviceSelectors];
   const runIds = targetRuns.map(([runId]) => runId);
   if (
     new Set(runIds).size !== runIds.length ||
@@ -568,29 +581,55 @@ const buildBundleInputs = async ({
     ),
   );
   let managedDeviceStageSet = null;
-  let managedDeviceStageSetReadback = null;
+  let managedDeviceCollectorAuthority = null;
+  let managedDeviceAuthorityReadback = null;
   if (managedDeviceAuthority !== null) {
-    const reviewedStages = await Promise.all(
-      managedDeviceSelectors.map(async ([expectedRunId, expectedRunAttempt]) =>
-        collectReviewedWorkflowArtifactAuthority({
-          githubToken,
-          namespace: store.namespace,
-          repository: policies.approvalPolicy.repository,
-          expectedRunId,
-          expectedRunAttempt,
-          expectedSourceSha: sourceSha,
-          expectedWorkflowPath: RELEASE_WORKFLOW_PATH,
-          expectedArtifactName:
-            MANAGED_DEVICE_STAGE_ARTIFACT_NAME_TEMPLATE.replace(
-              "{sourceSha}",
-              sourceSha,
-            ).replace("{runAttempt}", expectedRunAttempt),
-          expectedFileName: MANAGED_DEVICE_STAGE_FILE_NAME,
-          expectedFileMediaType: MANAGED_DEVICE_STAGE_RECEIPT_MEDIA_TYPE,
-          store,
-        }),
+    const [reviewedStages, strictPwaReceiptArtifact] = await Promise.all([
+      Promise.all(
+        managedDeviceSelectors.map(
+          async ([expectedRunId, expectedRunAttempt]) =>
+            collectReviewedWorkflowArtifactAuthority({
+              githubToken,
+              namespace: store.namespace,
+              repository: policies.approvalPolicy.repository,
+              expectedRunId,
+              expectedRunAttempt,
+              expectedSourceSha: sourceSha,
+              expectedWorkflowPath: RELEASE_WORKFLOW_PATH,
+              expectedArtifactName:
+                MANAGED_DEVICE_STAGE_ARTIFACT_NAME_TEMPLATE.replace(
+                  "{sourceSha}",
+                  sourceSha,
+                ).replace("{runAttempt}", expectedRunAttempt),
+              expectedFileName: MANAGED_DEVICE_STAGE_FILE_NAME,
+              expectedFileMediaType: MANAGED_DEVICE_STAGE_RECEIPT_MEDIA_TYPE,
+              store,
+            }),
+        ),
       ),
-    );
+      pwaStrictReceiptSelector === null
+        ? Promise.resolve(null)
+        : collectReviewedWorkflowArtifactAuthority({
+            githubToken,
+            namespace: store.namespace,
+            repository: policies.approvalPolicy.repository,
+            expectedRunId: pwaStrictReceiptSelector[0],
+            expectedRunAttempt: pwaStrictReceiptSelector[1],
+            expectedSourceSha: sourceSha,
+            expectedWorkflowPath: RELEASE_WORKFLOW_PATH,
+            expectedArtifactName:
+              PWA_STRICT_RECEIPT_ARTIFACT_NAME_TEMPLATE.replace(
+                "{sourceSha}",
+                sourceSha,
+              ).replace("{runAttempt}", pwaStrictReceiptSelector[1]),
+            expectedFileName: PWA_STRICT_RECEIPT_FILE_NAME,
+            expectedFileMediaType:
+              MANAGED_DEVICE_SIGNED_RECEIPT_MEDIA_TYPES[
+                "pwa-multiclient-drill"
+              ],
+            store,
+          }),
+    ]);
     managedDeviceStageSet = await putManagedDeviceReviewedStageSetAuthority({
       authority: managedDeviceAuthority,
       namespace: store.namespace,
@@ -600,19 +639,44 @@ const buildBundleInputs = async ({
       store,
       currentWorkflowRunId,
     });
-    managedDeviceStageSetReadback =
-      await readManagedDeviceReviewedStageSetAuthority({
-        authority: managedDeviceAuthority,
-        namespace: store.namespace,
-        reference: managedDeviceStageSet.reference,
-        store,
-        current,
-        expectedCollectorSourceSha: sourceSha,
-        externalPolicy: policies.backupRestorePrerequisitePolicy,
-        approvalPolicy: policies.approvalPolicy,
-        dbContract: policies.databaseContract,
-        currentWorkflowRunId,
-      });
+    const stageSetReadback = await readManagedDeviceReviewedStageSetAuthority({
+      authority: managedDeviceAuthority,
+      namespace: store.namespace,
+      reference: managedDeviceStageSet.reference,
+      store,
+      current,
+      expectedCollectorSourceSha: sourceSha,
+      externalPolicy: policies.backupRestorePrerequisitePolicy,
+      approvalPolicy: policies.approvalPolicy,
+      dbContract: policies.databaseContract,
+      currentWorkflowRunId,
+    });
+    managedDeviceCollectorAuthority = managedDeviceStageSet;
+    managedDeviceAuthorityReadback = stageSetReadback;
+    if (strictPwaReceiptArtifact !== null) {
+      managedDeviceCollectorAuthority =
+        await putPwaReviewedFormalClosureAuthority({
+          namespace: store.namespace,
+          repository: policies.approvalPolicy.repository,
+          sourceSha,
+          stageSetReference: managedDeviceStageSet.reference,
+          strictReceiptArtifactReference: strictPwaReceiptArtifact.reference,
+          store,
+          currentWorkflowRunId,
+        });
+      managedDeviceAuthorityReadback =
+        await readPwaReviewedFormalClosureAuthority({
+          namespace: store.namespace,
+          reference: managedDeviceCollectorAuthority.reference,
+          store,
+          current,
+          expectedCollectorSourceSha: sourceSha,
+          externalPolicy: policies.backupRestorePrerequisitePolicy,
+          approvalPolicy: policies.approvalPolicy,
+          dbContract: policies.databaseContract,
+          currentWorkflowRunId,
+        });
+    }
   }
   let reviewedRemote = null;
   let remoteProduction = null;
@@ -716,8 +780,8 @@ const buildBundleInputs = async ({
       ? null
       : buildManagedDevicePhaseExitEvidence({
           authority: managedDeviceAuthority,
-          stageSetReadback: managedDeviceStageSetReadback,
-          collectorAuthority: managedDeviceStageSet.reference,
+          authorityReadback: managedDeviceAuthorityReadback,
+          collectorAuthority: managedDeviceCollectorAuthority.reference,
           subject,
           sourceSha,
           databaseContract: policies.databaseContract,
@@ -815,7 +879,7 @@ const buildBundleInputs = async ({
       collectorAuthority: isRemote
         ? remoteProduction.authority.reviewedWorkflowRun
         : authority === managedDeviceAuthority
-          ? managedDeviceStageSet.reference
+          ? managedDeviceCollectorAuthority.reference
           : collectors.get(authority).reference,
       productionAuthority: isRemote ? reviewedRemote.reference : null,
       evidence: immutableReference(store.namespace, evidenceBytes),

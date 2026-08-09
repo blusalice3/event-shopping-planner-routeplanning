@@ -38,13 +38,20 @@ test("uses one npm separator on Ubuntu workflows", async () => {
   );
   assert.doesNotMatch(quality, /npm run preview/u);
 
-  const releaseRunArrayStarts = [
-    ...release.matchAll(/'run',\s*'[A-Za-z0-9:.-]+',\s*'--',/gu),
-  ];
+  const releaseRunArrayScripts = [
+    ...release.matchAll(/'run',\s*'([A-Za-z0-9:.-]+)',\s*'--',/gu),
+  ].map((match) => match[1]);
   const releaseRunArrayDoubles = [
     ...release.matchAll(/'run',\s*'[A-Za-z0-9:.-]+',\s*'--',\s*'--',/gu),
   ];
-  assert.equal(releaseRunArrayStarts.length, 5);
+  assert.deepEqual(releaseRunArrayScripts, [
+    "release:verify-operation-predecessor",
+    "release:acceptance-collector",
+    "release:lifecycle",
+    "release:lifecycle",
+    "release:produce-input",
+    "release:execute-archive-recovery",
+  ]);
   assert.equal(releaseRunArrayDoubles.length, 0);
 });
 

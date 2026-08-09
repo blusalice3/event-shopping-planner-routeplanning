@@ -93,6 +93,92 @@ function Resolve-ExactDirectory {
   throw "$Label must be a regular non-reparse directory."
 }
 
+function Read-CanonicalJsonExact {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+    [Parameter(Mandatory = $true)]
+    [string]$Label
+  )
+
+  $resolved = Resolve-ExactFile -Path $Path -Label $Label
+  $bytes = [IO.File]::ReadAllBytes($resolved)
+  if ($bytes.Length -lt 1 -or $bytes.Length -gt (1024 * 1024)) {
+    throw "$Label is empty or oversized."
+  }
+  $text = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+  $value = $text | ConvertFrom-Json -Depth 100
+  $canonicalText = $value | ConvertTo-Json -Depth 100 -Compress
+  $canonicalBytes = [Text.UTF8Encoding]::new($false).GetBytes($canonicalText)
+  if (
+    [Convert]::ToBase64String($bytes) -ne
+      [Convert]::ToBase64String($canonicalBytes)
+  ) {
+    throw "$Label is not canonical JSON."
+  }
+  return [pscustomobject]@{
+    Bytes = $bytes
+    Value = $value
+  }
+}
+
+function Assert-PromptCloseArtifact {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$DistRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$ExpectedSourceSha,
+    [Parameter(Mandatory = $true)]
+    [string]$Label
+  )
+
+  $capability = Read-CanonicalJsonExact `
+    -Path (Join-Path $DistRoot "release-capabilities.json") `
+    -Label "$Label capability"
+  $identity = Read-CanonicalJsonExact `
+    -Path (Join-Path $DistRoot "release-identity.json") `
+    -Label "$Label identity"
+  if (
+    [string]$capability.Value.kind -ne
+      "event-shopping-planner-release-capabilities" -or
+    [int]$capability.Value.version -ne 1 -or
+    [string]$capability.Value.buildMode -ne "release-a" -or
+    [string]$capability.Value.buildId -ne $ExpectedSourceSha -or
+    [string]$capability.Value.sourceSha -ne $ExpectedSourceSha -or
+    [string]$capability.Value.sourceState -ne "clean" -or
+    [string]$capability.Value.releaseChannel -ne "release-a" -or
+    [string]$capability.Value.legacyLocalStorageCleanup -ne "forced-off"
+  ) {
+    throw "$Label capability source differs."
+  }
+  if (
+    [int]$identity.Value.schemaVersion -ne 1 -or
+    [string]$identity.Value.buildId -ne $ExpectedSourceSha -or
+    [string]$identity.Value.sourceSha -ne $ExpectedSourceSha -or
+    [string]$identity.Value.releaseRole -ne "standard" -or
+    [string]$identity.Value.variantId -notmatch '^[0-9a-f]{64}$' -or
+    [string]$identity.Value.pwaLifecycle -ne "prompt-close-all-v1"
+  ) {
+    throw "$Label prompt-close identity differs."
+  }
+  $versionedCapability = Read-CanonicalJsonExact `
+    -Path (Join-Path $DistRoot "release-capabilities.$ExpectedSourceSha.json") `
+    -Label "$Label versioned capability"
+  $versionedIdentity = Read-CanonicalJsonExact `
+    -Path (Join-Path $DistRoot (
+      "release-identity.$ExpectedSourceSha.$($identity.Value.variantId).json"
+    )) `
+    -Label "$Label versioned identity"
+  if (
+    [Convert]::ToBase64String($capability.Bytes) -ne
+      [Convert]::ToBase64String($versionedCapability.Bytes) -or
+    [Convert]::ToBase64String($identity.Bytes) -ne
+      [Convert]::ToBase64String($versionedIdentity.Bytes)
+  ) {
+    throw "$Label stable/versioned identity bytes differ."
+  }
+}
+
 function Get-RequiredEnvironment {
   param(
     [Parameter(Mandatory = $true)]
@@ -225,6 +311,21 @@ if ($request.authority -eq "pwa-multiclient-drill") {
   $resolvedRollbackDist = Resolve-ExactDirectory `
     -Path $RollbackDistPath `
     -Label "Managed rollback artifact"
+  if (
+    [string]$request.deployment.sourceSha -ne [string]$request.sourceSha -or
+    [string]$request.rollbackDeployment.sourceSha -eq
+      [string]$request.sourceSha
+  ) {
+    throw "Managed PWA artifact request identity differs."
+  }
+  Assert-PromptCloseArtifact `
+    -DistRoot $resolvedCurrentDist `
+    -ExpectedSourceSha ([string]$request.sourceSha) `
+    -Label "Managed current artifact"
+  Assert-PromptCloseArtifact `
+    -DistRoot $resolvedRollbackDist `
+    -ExpectedSourceSha ([string]$request.rollbackDeployment.sourceSha) `
+    -Label "Managed rollback artifact"
 } else {
   if (-not [string]::IsNullOrWhiteSpace($RollbackDistPath)) {
     throw "Managed IDB collector rejects a rollback artifact."
@@ -348,9 +449,6 @@ if ($matchingPolicyEntries.Count -ne 1) {
   throw "Managed PWA install URL is not exact in policy."
 }
 
-$profileRoot = Resolve-ExactDirectory `
-  -Path (Get-RequiredEnvironment -Name "FOUNDATION_DEVICE_PROFILE_ROOT") `
-  -Label "Managed Chromium profile root"
 $profiles = @($device.deviceProfiles)
 if (
   $profiles.Count -ne 2 -or
@@ -359,14 +457,41 @@ if (
 ) {
   throw "Managed Chromium profile policy differs."
 }
+$profileRoots = @{}
 $profilePaths = @{}
 foreach ($profile in $profiles) {
-  $profilePath = Join-Path $profileRoot ([string]$profile.profileName)
-  $profilePaths[[string]$profile.id] = Resolve-ExactDirectory `
-    -Path $profilePath `
+  $profileId = [string]$profile.id
+  $configuredRoot = [string]$profile.profileRoot
+  $configuredPath = [string]$profile.profilePath
+  $resolvedRoot = Resolve-ExactDirectory `
+    -Path $configuredRoot `
+    -Label "Managed Chromium profile root $profileId"
+  $resolvedPath = Resolve-ExactDirectory `
+    -Path $configuredPath `
     -Label "Managed Chromium profile $($profile.id)"
+  if (
+    -not [string]::Equals(
+      $resolvedRoot,
+      $configuredRoot,
+      [StringComparison]::Ordinal
+    ) -or
+    -not [string]::Equals(
+      $resolvedPath,
+      $configuredPath,
+      [StringComparison]::Ordinal
+    )
+  ) {
+    throw "Managed Chromium profile $profileId differs from policy."
+  }
+  $profileRoots[$profileId] = $configuredRoot
+  $profilePaths[$profileId] = $configuredPath
 }
 if (
+  [string]::Equals(
+    $profileRoots["browser-tab"],
+    $profileRoots["installed-pwa"],
+    [StringComparison]::OrdinalIgnoreCase
+  ) -or
   [string]::Equals(
     $profilePaths["browser-tab"],
     $profilePaths["installed-pwa"],
@@ -399,6 +524,16 @@ try {
         ([string]$shortcut.Arguments).Contains(
           "--profile-directory=$($profiles[1].profileName)",
           [StringComparison]::Ordinal
+        ) -and
+        (
+          ([string]$shortcut.Arguments).Contains(
+            "--user-data-dir=$($profileRoots['installed-pwa'])",
+            [StringComparison]::Ordinal
+          ) -or
+          ([string]$shortcut.Arguments).Contains(
+            "--user-data-dir=`"$($profileRoots['installed-pwa'])`"",
+            [StringComparison]::Ordinal
+          )
         ) -and
         [string]::Equals(
           [IO.Path]::GetFullPath([string]$shortcut.TargetPath),
@@ -435,7 +570,7 @@ try {
   $observedProcessIds += [int]$installedProcess.ProcessId
 
   $tabArguments = @(
-    "--user-data-dir=$profileRoot",
+    "--user-data-dir=$($profileRoots['browser-tab'])",
     "--profile-directory=$($profiles[0].profileName)",
     "--new-window",
     [string]$request.deployment.deploymentUrl

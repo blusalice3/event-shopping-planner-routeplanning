@@ -561,29 +561,78 @@ const resolveAcceptedAuthority = ({ current, namespace, binding }) => {
     );
   }
   let replayed = null;
+  let accepted = null;
+  const authorizedBindings = [];
   for (const record of current.records) {
+    const previous = replayed;
     replayed = reduceReleaseState(replayed, record.event);
     const reference = releaseEventReference(namespace, record);
     if (sameCanonicalValue(reference, distinct[0])) {
       if (
+        accepted !== null ||
         record.event.eventType !== "release-accepted" ||
-        !sameCanonicalValue(replayed.acceptedStandard, binding) ||
-        !sameCanonicalValue(replayed.acceptedStandardEvent, reference)
+        !sameCanonicalValue(replayed.acceptedStandardEvent, reference) ||
+        replayed.acceptedGate !== record.event.payload.acceptedGate ||
+        !sameCanonicalValue(
+          replayed.acceptedStandardFloors,
+          record.event.payload.acceptedStandardFloors,
+        )
       ) {
         throw new Error(
           "Reconcile accepted event does not authorize the observed standard",
         );
       }
-      return {
+      accepted = {
         originAcceptedEvent: reference,
         originAcceptedGate: record.event.payload.acceptedGate,
         originAcceptedStandardFloors: structuredClone(
           record.event.payload.acceptedStandardFloors,
         ),
       };
+      authorizedBindings.push(structuredClone(replayed.acceptedStandard));
+      continue;
+    }
+    if (
+      accepted !== null &&
+      record.event.eventType === "package-redeploy-activated" &&
+      record.event.payload.releaseRole === "standard" &&
+      sameCanonicalValue(
+        record.event.payload.originAcceptedEvent,
+        distinct[0],
+      ) &&
+      authorizedBindings.some((candidate) =>
+        sameCanonicalValue(
+          candidate,
+          previous?.pendingOperation?.originBinding,
+        ),
+      ) &&
+      sameCanonicalValue(
+        replayed.acceptedStandard,
+        record.event.payload.standardBinding,
+      ) &&
+      sameCanonicalValue(replayed.acceptedStandardEvent, distinct[0]) &&
+      replayed.acceptedGate === accepted.originAcceptedGate &&
+      sameCanonicalValue(
+        replayed.acceptedStandardFloors,
+        accepted.originAcceptedStandardFloors,
+      )
+    ) {
+      authorizedBindings.push(
+        structuredClone(record.event.payload.standardBinding),
+      );
     }
   }
-  throw new Error("Reconcile rollback accepted event cannot be read back");
+  if (
+    accepted === null ||
+    !authorizedBindings.some((candidate) =>
+      sameCanonicalValue(candidate, binding),
+    )
+  ) {
+    throw new Error(
+      "Reconcile accepted event does not authorize the observed standard",
+    );
+  }
+  return accepted;
 };
 
 const containmentTerminalPlan = ({
@@ -663,15 +712,6 @@ const buildReconciliationTerminalPlan = ({
         namespace,
         binding: pending.originBinding,
       });
-      const rollbackInventory = current.snapshot.rollbackInventory
-        .map((entry) =>
-          sameCanonicalValue(entry.binding, pending.originBinding)
-            ? { ...structuredClone(entry), binding: pending.targetBinding }
-            : structuredClone(entry),
-        )
-        .sort((left, right) =>
-          compareUtf8(left.binding.bindingId, right.binding.bindingId),
-        );
       return {
         eventType: "package-redeploy-activated",
         targetBinding: pending.targetBinding,
@@ -679,7 +719,6 @@ const buildReconciliationTerminalPlan = ({
           releaseRole: "standard",
           standardBinding: pending.targetBinding,
           companionBinding: pending.companionBinding,
-          rollbackInventory,
           ...accepted,
         },
         approvalRefs: pending.approvalRefs,
@@ -691,27 +730,11 @@ const buildReconciliationTerminalPlan = ({
     observedKind === "previous" &&
     observedBinding.releaseRole === "standard"
   ) {
-    const companionBinding =
-      pending.originBinding !== null &&
-      sameCanonicalValue(observedBinding, pending.originBinding)
-        ? pending.originCompanionBinding
-        : current.snapshot.containmentCompanion;
-    if (companionBinding === null) {
-      throw new Error("Reconcile previous standard companion is absent");
-    }
     return {
-      eventType: "rollback-activated",
+      eventType: "operation-aborted",
       targetBinding: observedBinding,
-      payload: {
-        binding: observedBinding,
-        companionBinding,
-        ...resolveAcceptedAuthority({
-          current,
-          namespace,
-          binding: observedBinding,
-        }),
-      },
-      approvalRefs: pending.approvalRefs,
+      payload: {},
+      approvalRefs: [],
     };
   }
   if (observedBinding.releaseRole !== "containment") {

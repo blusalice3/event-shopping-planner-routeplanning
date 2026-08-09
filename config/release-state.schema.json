@@ -972,6 +972,9 @@
         "companionBinding": {
           "$ref": "#/$defs/deploymentBinding"
         },
+        "rollbackInventory": {
+          "$ref": "#/$defs/rollbackInventory"
+        },
         "originAcceptedEvent": {
           "$ref": "#/$defs/immutableObjectRef"
         },
@@ -985,6 +988,7 @@
       "required": [
         "binding",
         "companionBinding",
+        "rollbackInventory",
         "originAcceptedEvent",
         "originAcceptedGate",
         "originAcceptedStandardFloors"

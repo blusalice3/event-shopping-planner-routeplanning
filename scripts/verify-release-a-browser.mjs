@@ -213,7 +213,7 @@ const selectUniqueStandaloneStartupPage = async (
             page,
             url: page.url(),
             standalone: await page.evaluate(
-              () => matchMedia("(display-mode: standalone)").matches,
+              () => globalThis.matchMedia("(display-mode: standalone)").matches,
             ),
           };
         } catch {
@@ -1499,7 +1499,8 @@ const createPromptClosePendingEventThroughUi = async (page, eventName) => {
     await page
       .locator("form:has(#eventName)")
       .evaluate(
-        (form) => form instanceof HTMLFormElement && form.checkValidity(),
+        (form) =>
+          form instanceof globalThis.HTMLFormElement && form.checkValidity(),
       ),
     "Prompt-close fixture form is invalid before submission.",
   );

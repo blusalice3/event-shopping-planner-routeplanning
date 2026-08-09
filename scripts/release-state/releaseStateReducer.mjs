@@ -1052,6 +1052,12 @@ const applyReleaseAccepted = (snapshot, event) => {
     snapshot.activeReleasePolicy,
   );
   invariant(
+    !event.payload.rollbackInventory.some(
+      (entry) => entry.binding.bindingId === standard.bindingId,
+    ),
+    "Accepted standard must not remain in the rollback inventory",
+  );
+  invariant(
     sameValue(snapshot.activeProduction, standard),
     "Accepted standard is not the active production binding",
   );
@@ -1059,9 +1065,30 @@ const applyReleaseAccepted = (snapshot, event) => {
     event.payload.releaseRole === "standard",
     "Containment cannot be release-accepted",
   );
+  const sameGateAcceptance =
+    snapshot.acceptedGate !== null &&
+    snapshot.acceptedStandard !== null &&
+    event.payload.acceptedGate === snapshot.acceptedGate;
   invariant(
-    event.payload.acceptedGate === nextPhaseGate(snapshot.acceptedGate),
-    "Accepted standard does not advance exactly one phase gate",
+    !(sameGateAcceptance && snapshot.acceptedGate === "P8-CLEAN"),
+    "Terminal P8-CLEAN does not permit a same-floor accepted standard replacement",
+  );
+  const replacesCurrentSourceAtSameFloor =
+    sameGateAcceptance &&
+    sameValue(
+      event.payload.acceptedStandardFloors,
+      snapshot.acceptedStandardFloors,
+    ) &&
+    standard.sourceSha !== snapshot.acceptedStandard.sourceSha &&
+    standard.buildId !== snapshot.acceptedStandard.buildId &&
+    standard.bindingId !== snapshot.acceptedStandard.bindingId &&
+    standard.providerDeploymentId !==
+      snapshot.acceptedStandard.providerDeploymentId &&
+    standard.deploymentUrl !== snapshot.acceptedStandard.deploymentUrl;
+  invariant(
+    replacesCurrentSourceAtSameFloor ||
+      event.payload.acceptedGate === nextPhaseGate(snapshot.acceptedGate),
+    "Accepted standard neither advances exactly one phase gate nor replaces the current source at the same floor",
   );
   invariant(
     new Date(event.payload.observedThrough).getTime() >=
@@ -1163,6 +1190,7 @@ const applyRollback = (snapshot, event) => {
       "originAcceptedEvent",
       "originAcceptedGate",
       "originAcceptedStandardFloors",
+      "rollbackInventory",
     ]) &&
       snapshot.pendingOperation.kind === "rollback-standard" &&
       sameValue(binding, snapshot.pendingOperation.targetBinding) &&
@@ -1194,6 +1222,92 @@ const applyRollback = (snapshot, event) => {
   assertDbBindingMatches(snapshot, binding);
   assertRecoveryBindingPolicyMatches(snapshot, binding, "rollback");
   assertCompanionPair(binding, event.payload.companionBinding);
+  assertInventory(
+    snapshot,
+    event.payload.rollbackInventory,
+    snapshot.activeReleasePolicy,
+  );
+  const displacedBinding = snapshot.acceptedStandard;
+  const displacedAcceptedEvent = snapshot.acceptedStandardEvent;
+  invariant(
+    displacedBinding !== null &&
+      displacedAcceptedEvent !== null &&
+      snapshot.acceptedGate !== null &&
+      snapshot.acceptedStandardFloors !== null &&
+      displacedBinding.bindingId !== binding.bindingId,
+    "Rollback has no distinct current accepted standard to preserve",
+  );
+  assertBindingRole(displacedBinding, "standard");
+  assertDbBindingMatches(snapshot, displacedBinding);
+  assertRecoveryBindingPolicyMatches(snapshot, displacedBinding, "rollback");
+  assertImmutableRef(displacedAcceptedEvent, event.namespace);
+  invariant(
+    event.evidenceRefs.some((reference) =>
+      sameValue(reference, displacedAcceptedEvent),
+    ),
+    "Displaced accepted standard event is absent from rollback evidence",
+  );
+  invariant(
+    !event.payload.rollbackInventory.some(
+      (entry) => entry.binding.bindingId === binding.bindingId,
+    ),
+    "Activated rollback target must be removed from the rollback inventory",
+  );
+  const displacedInventoryEntries = event.payload.rollbackInventory.filter(
+    (entry) => entry.binding.bindingId === displacedBinding.bindingId,
+  );
+  invariant(
+    displacedInventoryEntries.length === 1 &&
+      sameValue(displacedInventoryEntries[0].binding, displacedBinding) &&
+      sameValue(
+        displacedInventoryEntries[0].acceptedEvent,
+        displacedAcceptedEvent,
+      ) &&
+      displacedInventoryEntries[0].acceptedGate === snapshot.acceptedGate &&
+      sameValue(
+        displacedInventoryEntries[0].acceptedStandardFloors,
+        snapshot.acceptedStandardFloors,
+      ) &&
+      sameValue(
+        displacedInventoryEntries[0].evaluatedPolicy,
+        snapshot.activeReleasePolicy,
+      ) &&
+      displacedInventoryEntries[0].eligibility === "eligible" &&
+      sameValue(displacedInventoryEntries[0].eligibleActions, [
+        "package-redeploy",
+        "rollback",
+      ]) &&
+      sameValue(displacedInventoryEntries[0].reasonCodes, []),
+    "Displaced current standard lacks exact eligible rollback authority",
+  );
+  const priorByBindingId = new Map(
+    snapshot.rollbackInventory.map((entry) => [entry.binding.bindingId, entry]),
+  );
+  const expectedBindingIds = new Set(
+    snapshot.rollbackInventory
+      .filter(
+        (entry) =>
+          entry.binding.bindingId !== binding.bindingId &&
+          entry.binding.bindingId !== displacedBinding.bindingId,
+      )
+      .map((entry) => entry.binding.bindingId),
+  );
+  expectedBindingIds.add(displacedBinding.bindingId);
+  invariant(
+    event.payload.rollbackInventory.length === expectedBindingIds.size &&
+      event.payload.rollbackInventory.every((entry) =>
+        expectedBindingIds.has(entry.binding.bindingId),
+      ),
+    "Rollback inventory binding IDs are not an exact atomic swap",
+  );
+  for (const entry of event.payload.rollbackInventory) {
+    if (entry.binding.bindingId === displacedBinding.bindingId) continue;
+    const prior = priorByBindingId.get(entry.binding.bindingId);
+    invariant(
+      prior !== undefined && sameValue(prior, entry),
+      "Rollback inventory changed an unrelated accepted authority",
+    );
+  }
   return finalize(snapshot, event, {
     activeProduction: binding,
     acceptedStandard: binding,
@@ -1205,6 +1319,7 @@ const applyRollback = (snapshot, event) => {
     pendingAcceptance: null,
     containmentIncident: null,
     standardRecovery: null,
+    rollbackInventory: event.payload.rollbackInventory,
   });
 };
 
@@ -1262,6 +1377,56 @@ const applyPackageRedeploy = (snapshot, event) => {
       binding: snapshot.pendingOperation.originBinding,
       inventoryEntry: originInventoryEntry ?? currentOriginEntry,
     });
+    invariant(
+      originInventoryEntry === undefined ||
+        (originInventoryEntry.eligibility === "eligible" &&
+          originInventoryEntry.eligibleActions.includes("package-redeploy")),
+      "Standard redeploy origin is not eligible for package redeploy",
+    );
+    let replacedOrigin = false;
+    const expectedInventory = snapshot.rollbackInventory.map((entry) => {
+      if (!sameValue(entry.binding, snapshot.pendingOperation.originBinding)) {
+        return structuredClone(entry);
+      }
+      replacedOrigin = true;
+      return {
+        ...structuredClone(entry),
+        binding: structuredClone(event.payload.standardBinding),
+        acceptedEvent: structuredClone(event.payload.originAcceptedEvent),
+        acceptedGate: event.payload.originAcceptedGate,
+        acceptedStandardFloors: structuredClone(
+          event.payload.originAcceptedStandardFloors,
+        ),
+      };
+    });
+    if (!replacedOrigin) {
+      invariant(
+        currentOriginEntry !== undefined,
+        "Standard redeploy origin has no current accepted authority",
+      );
+      expectedInventory.push({
+        binding: structuredClone(event.payload.standardBinding),
+        acceptedEvent: structuredClone(event.payload.originAcceptedEvent),
+        acceptedGate: event.payload.originAcceptedGate,
+        acceptedStandardFloors: structuredClone(
+          event.payload.originAcceptedStandardFloors,
+        ),
+        evaluatedPolicy: structuredClone(snapshot.activeReleasePolicy),
+        eligibleActions: ["package-redeploy", "rollback"],
+        eligibility: "eligible",
+        reasonCodes: [],
+      });
+    }
+    expectedInventory.sort((left, right) =>
+      Buffer.compare(
+        Buffer.from(left.binding.bindingId, "utf8"),
+        Buffer.from(right.binding.bindingId, "utf8"),
+      ),
+    );
+    invariant(
+      sameValue(event.payload.rollbackInventory, expectedInventory),
+      "Standard redeploy inventory is not the exact authorized transform",
+    );
     const redeployedInventoryEntry = event.payload.rollbackInventory.find(
       (entry) => sameValue(entry.binding, event.payload.standardBinding),
     );

@@ -74,10 +74,10 @@ const phaseExitSeedEvidence = phaseExitAttestationSeed.map(
   ({ attestation }) => attestation,
 );
 
-const binding = (role, suffix) => ({
+const binding = (role, suffix, bindingSourceSha = sourceSha) => ({
   bindingId: `${role}-${suffix}`,
-  sourceSha,
-  buildId: sourceSha,
+  sourceSha: bindingSourceSha,
+  buildId: bindingSourceSha,
   variantId: sha(suffix),
   releaseRole: role,
   publicIdentityKind: "release-identity-v1",
@@ -409,20 +409,7 @@ test("builds a source-hardened standard acceptance through the event chain", () 
       acceptedStandardFloors: {
         pwaLifecycle: "legacy-auto-update-v1",
       },
-      rollbackInventory: [
-        {
-          binding: standard,
-          acceptedEvent: objectRef("4"),
-          acceptedGate: "P0-RELEASE",
-          acceptedStandardFloors: {
-            pwaLifecycle: "legacy-auto-update-v1",
-          },
-          evaluatedPolicy: policyRef,
-          eligibleActions: ["package-redeploy", "rollback"],
-          eligibility: "eligible",
-          reasonCodes: [],
-        },
-      ],
+      rollbackInventory: [],
       clearBootstrapRecovery: false,
     },
     acceptanceApprovals,
@@ -433,6 +420,218 @@ test("builds a source-hardened standard acceptance through the event chain", () 
   assert.equal(snapshot.pendingOperation, null);
   assert.equal(snapshot.pendingAcceptance, null);
   assert.equal(snapshot.legacyObservedProduction, null);
+});
+
+test("allows only a distinct source binding to replace an accepted standard at the exact same floor", () => {
+  const floors = { pwaLifecycle: "legacy-auto-update-v1" };
+  const stageAcceptance = ({
+    snapshot,
+    standard,
+    companion,
+    operationId: stagedOperationId,
+  }) => {
+    let staged = prepareOperation(snapshot, {
+      operationId: stagedOperationId,
+      kind: "promote-standard",
+      targetBinding: standard,
+      companionBinding: companion,
+    });
+    staged = advanceAssignmentLifecycle(staged);
+    return reduceReleaseState(
+      staged,
+      appendEvent(staged, "observation-started", stagedOperationId, {
+        pendingAcceptance: {
+          operationId: stagedOperationId,
+          standardBinding: standard,
+          companionBinding: companion,
+          assignmentValidationEvidence: objectRef("0"),
+          observationStartedEvent: objectRef("f"),
+          observationNotBefore: "2026-08-01T00:00:00.000Z",
+          minimumObservationEndsAt: "2026-08-02T00:00:00.000Z",
+        },
+      }),
+    );
+  };
+  const acceptanceEvent = ({
+    snapshot,
+    operationId: acceptedOperationId,
+    acceptedGate = "P0-RELEASE",
+    acceptedFloors = floors,
+    rollbackInventory = [],
+  }) =>
+    appendEvent(
+      snapshot,
+      "release-accepted",
+      acceptedOperationId,
+      {
+        acceptedGate,
+        releaseRole: "standard",
+        observedThrough: "2026-08-02T00:00:01.000Z",
+        acceptedStandardFloors: acceptedFloors,
+        rollbackInventory,
+        clearBootstrapRecovery: false,
+      },
+      [
+        approval(acceptedOperationId, "releaseOwner", "1"),
+        approval(acceptedOperationId, "dataSafetyReviewer", "2"),
+        approval(acceptedOperationId, "operationsReviewer", "3"),
+      ],
+    );
+
+  const firstStandard = binding("standard", "a");
+  const firstCompanion = binding("containment", "b");
+  const firstOperationId = "accept-source-a";
+  const firstPending = stageAcceptance({
+    snapshot: initializeState(),
+    standard: firstStandard,
+    companion: firstCompanion,
+    operationId: firstOperationId,
+  });
+  const firstAccepted = reduceReleaseState(
+    firstPending,
+    acceptanceEvent({
+      snapshot: firstPending,
+      operationId: firstOperationId,
+    }),
+  );
+
+  const secondSourceSha = "b".repeat(40);
+  const secondStandard = binding("standard", "4", secondSourceSha);
+  const secondCompanion = binding("containment", "5", secondSourceSha);
+  const secondOperationId = "accept-source-b";
+  const secondPending = stageAcceptance({
+    snapshot: firstAccepted,
+    standard: secondStandard,
+    companion: secondCompanion,
+    operationId: secondOperationId,
+  });
+  const priorInventory = [
+    {
+      ...inventoryEntry(firstStandard),
+      acceptedStandardFloors: floors,
+    },
+  ];
+
+  for (const [label, acceptedGate, acceptedFloors] of [
+    ["floor drift", "P0-RELEASE", { pwaLifecycle: "prompt-close-all-v1" }],
+    ["gate skip", "P2A-LOCAL", floors],
+    ["gate regression", "P0-PROMOTE", floors],
+  ]) {
+    assert.throws(
+      () =>
+        reduceReleaseState(
+          secondPending,
+          acceptanceEvent({
+            snapshot: secondPending,
+            operationId: secondOperationId,
+            acceptedGate,
+            acceptedFloors,
+            rollbackInventory: priorInventory,
+          }),
+        ),
+      /neither advances exactly one phase gate nor replaces the current source at the same floor/,
+      label,
+    );
+  }
+
+  const sameSourceOperationId = "reject-same-source-build";
+  const sameSourcePending = stageAcceptance({
+    snapshot: firstAccepted,
+    standard: binding("standard", "6"),
+    companion: binding("containment", "7"),
+    operationId: sameSourceOperationId,
+  });
+  assert.throws(
+    () =>
+      reduceReleaseState(
+        sameSourcePending,
+        acceptanceEvent({
+          snapshot: sameSourcePending,
+          operationId: sameSourceOperationId,
+          rollbackInventory: priorInventory,
+        }),
+      ),
+    /neither advances exactly one phase gate nor replaces the current source at the same floor/,
+  );
+
+  for (const [label, suffix, companionSuffix, reusedIdentity] of [
+    ["binding ID", "8", "9", { bindingId: firstStandard.bindingId }],
+    [
+      "provider deployment ID",
+      "c",
+      "d",
+      { providerDeploymentId: firstStandard.providerDeploymentId },
+    ],
+    [
+      "deployment URL",
+      "e",
+      "f",
+      { deploymentUrl: firstStandard.deploymentUrl },
+    ],
+  ]) {
+    const rejectedOperationId = `reject-reused-${suffix}`;
+    const rejectedPending = stageAcceptance({
+      snapshot: firstAccepted,
+      standard: {
+        ...binding("standard", suffix, secondSourceSha),
+        ...reusedIdentity,
+      },
+      companion: binding("containment", companionSuffix, secondSourceSha),
+      operationId: rejectedOperationId,
+    });
+    assert.throws(
+      () =>
+        reduceReleaseState(
+          rejectedPending,
+          acceptanceEvent({
+            snapshot: rejectedPending,
+            operationId: rejectedOperationId,
+            rollbackInventory: priorInventory,
+          }),
+        ),
+      label === "binding ID"
+        ? /Accepted standard must not remain in the rollback inventory/
+        : /neither advances exactly one phase gate nor replaces the current source at the same floor/,
+      label,
+    );
+  }
+
+  const terminalPending = stageAcceptance({
+    snapshot: { ...firstAccepted, acceptedGate: "P8-CLEAN" },
+    standard: binding("standard", "e", secondSourceSha),
+    companion: binding("containment", "f", secondSourceSha),
+    operationId: "reject-terminal-same-floor",
+  });
+  assert.throws(
+    () =>
+      reduceReleaseState(
+        terminalPending,
+        acceptanceEvent({
+          snapshot: terminalPending,
+          operationId: "reject-terminal-same-floor",
+          acceptedGate: "P8-CLEAN",
+          rollbackInventory: priorInventory,
+        }),
+      ),
+    /Terminal P8-CLEAN does not permit a same-floor accepted standard replacement/u,
+  );
+
+  const secondAccepted = reduceReleaseState(
+    secondPending,
+    acceptanceEvent({
+      snapshot: secondPending,
+      operationId: secondOperationId,
+      rollbackInventory: priorInventory,
+    }),
+  );
+  assert.equal(secondAccepted.acceptedGate, "P0-RELEASE");
+  assert.deepEqual(secondAccepted.acceptedStandardFloors, floors);
+  assert.equal(secondAccepted.acceptedStandard?.bindingId, "standard-4");
+  assert.equal(secondAccepted.rollbackInventory.length, 1);
+  assert.equal(
+    secondAccepted.rollbackInventory[0].binding.bindingId,
+    firstStandard.bindingId,
+  );
 });
 
 test("rejects containment acceptance and duplicate reviewers", () => {
@@ -716,8 +915,12 @@ test("activates bootstrap containment, source-hardened containment, and rollback
   const standard = binding("standard", "e");
   const companion = binding("containment", "f");
   const rollbackAuthority = inventoryEntry(standard).acceptedEvent;
+  const displacedAuthority = objectRef("a");
   snapshot = {
     ...snapshot,
+    acceptedStandardEvent: displacedAuthority,
+    acceptedGate: "P0-RELEASE",
+    acceptedStandardFloors: { pwaLifecycle: "outer-agent-v1" },
     rollbackInventory: [inventoryEntry(standard)],
   };
   snapshot = prepareOperation(snapshot, {
@@ -735,12 +938,22 @@ test("activates bootstrap containment, source-hardened containment, and rollback
       {
         binding: standard,
         companionBinding: companion,
+        rollbackInventory: [
+          {
+            ...inventoryEntry(targetStandard),
+            acceptedEvent: displacedAuthority,
+          },
+        ],
         originAcceptedEvent: rollbackAuthority,
         originAcceptedGate: "P0-RELEASE",
         originAcceptedStandardFloors: { pwaLifecycle: "outer-agent-v1" },
       },
       {
-        evidenceRefs: [currentHeadRef(snapshot), rollbackAuthority],
+        evidenceRefs: [
+          currentHeadRef(snapshot),
+          rollbackAuthority,
+          displacedAuthority,
+        ],
       },
     ),
   );
@@ -751,6 +964,169 @@ test("activates bootstrap containment, source-hardened containment, and rollback
     pwaLifecycle: "outer-agent-v1",
   });
   assert.equal(snapshot.containmentIncident, null);
+});
+
+test("atomically swaps rollback inventory and rejects authority or eligibility tampering", () => {
+  const displaced = binding("standard", "1");
+  const target = binding("standard", "2");
+  const companion = binding("containment", "3");
+  const unrelated = binding("standard", "4");
+  const displacedAuthority = objectRef("a");
+  const targetAuthority = objectRef("b");
+  const unrelatedAuthority = objectRef("c");
+  const floors = { pwaLifecycle: "outer-agent-v1" };
+  const targetEntry = {
+    ...inventoryEntry(target),
+    acceptedEvent: targetAuthority,
+  };
+  const unrelatedEntry = {
+    ...inventoryEntry(unrelated),
+    acceptedEvent: unrelatedAuthority,
+  };
+  let pending = {
+    ...initializeState(),
+    activeProduction: displaced,
+    acceptedStandard: displaced,
+    acceptedStandardEvent: displacedAuthority,
+    acceptedGate: "P0-RELEASE",
+    acceptedStandardFloors: floors,
+    containmentCompanion: binding("containment", "5"),
+    rollbackInventory: [
+      targetEntry,
+      unrelatedEntry,
+      {
+        ...inventoryEntry(displaced),
+        acceptedEvent: objectRef("f"),
+      },
+    ],
+  };
+  pending = prepareOperation(pending, {
+    operationId: "atomic-rollback-swap",
+    kind: "rollback-standard",
+    targetBinding: target,
+    companionBinding: companion,
+  });
+  pending = advanceAssignmentLifecycle(pending);
+  const displacedEntry = {
+    ...inventoryEntry(displaced),
+    acceptedEvent: displacedAuthority,
+  };
+  const validInventory = [displacedEntry, unrelatedEntry];
+  const rollbackEvent = (rollbackInventory, evidenceRefs = []) =>
+    appendRecoveryTerminal(
+      pending,
+      "rollback-activated",
+      {
+        binding: target,
+        companionBinding: companion,
+        rollbackInventory,
+        originAcceptedEvent: targetAuthority,
+        originAcceptedGate: "P0-RELEASE",
+        originAcceptedStandardFloors: floors,
+      },
+      {
+        evidenceRefs: [
+          currentHeadRef(pending),
+          targetAuthority,
+          displacedAuthority,
+          ...evidenceRefs,
+        ],
+      },
+    );
+
+  const swapped = reduceReleaseState(pending, rollbackEvent(validInventory));
+  assert.equal(swapped.acceptedStandard?.bindingId, target.bindingId);
+  assert.deepEqual(
+    swapped.rollbackInventory.map((entry) => entry.binding.bindingId),
+    [displaced.bindingId, unrelated.bindingId],
+  );
+  assert.deepEqual(
+    swapped.rollbackInventory[0].acceptedEvent,
+    displacedAuthority,
+  );
+
+  for (const [label, rollbackInventory, message] of [
+    [
+      "missing displaced current",
+      [unrelatedEntry],
+      /Displaced current standard lacks exact eligible rollback authority/,
+    ],
+    [
+      "target retained",
+      [displacedEntry, unrelatedEntry, targetEntry],
+      /Activated rollback target must be removed/,
+    ],
+    [
+      "stale displaced event",
+      [{ ...displacedEntry, acceptedEvent: objectRef("e") }, unrelatedEntry],
+      /Displaced current standard lacks exact eligible rollback authority/,
+    ],
+    [
+      "displaced action downgrade",
+      [{ ...displacedEntry, eligibleActions: ["rollback"] }, unrelatedEntry],
+      /Displaced current standard lacks exact eligible rollback authority/,
+    ],
+    [
+      "displaced reason tamper",
+      [
+        { ...displacedEntry, reasonCodes: ["tampered-authority"] },
+        unrelatedEntry,
+      ],
+      /Displaced current standard lacks exact eligible rollback authority/,
+    ],
+    [
+      "displaced policy tamper",
+      [{ ...displacedEntry, evaluatedPolicy: objectRef("2") }, unrelatedEntry],
+      /not evaluated against the active policy/,
+    ],
+    [
+      "unrelated eligibility tamper",
+      [
+        displacedEntry,
+        {
+          ...unrelatedEntry,
+          eligibleActions: [],
+          eligibility: "ineligible",
+          reasonCodes: ["artifact-archive-unavailable"],
+        },
+      ],
+      /changed an unrelated accepted authority/,
+    ],
+    [
+      "unrelated accepted event tamper",
+      [displacedEntry, { ...unrelatedEntry, acceptedEvent: objectRef("d") }],
+      /changed an unrelated accepted authority/,
+    ],
+    [
+      "duplicate displaced binding",
+      [displacedEntry, displacedEntry, unrelatedEntry],
+      /binding IDs must be distinct/,
+    ],
+  ]) {
+    assert.throws(
+      () => reduceReleaseState(pending, rollbackEvent(rollbackInventory)),
+      message,
+      label,
+    );
+  }
+
+  assert.throws(
+    () =>
+      reduceReleaseState(
+        { ...pending, rollbackInventory: [unrelatedEntry] },
+        rollbackEvent(validInventory),
+      ),
+    /Rollback target is not currently eligible/,
+  );
+  const missingDisplacedEvidence = rollbackEvent(validInventory);
+  missingDisplacedEvidence.evidenceRefs =
+    missingDisplacedEvidence.evidenceRefs.filter(
+      (reference) => reference.uri !== displacedAuthority.uri,
+    );
+  assert.throws(
+    () => reduceReleaseState(pending, missingDisplacedEvidence),
+    /Displaced accepted standard event is absent from rollback evidence/,
+  );
 });
 
 test("rejects unauthorized or incomplete recovery terminal events", () => {
@@ -879,6 +1255,7 @@ test("applies prepared standard and containment package redeploys", () => {
   const originCompanion = binding("containment", "2");
   const nextStandard = binding("standard", "3");
   const nextCompanion = binding("containment", "4");
+  const unrelatedStandard = binding("standard", "8");
   const newerStandard = binding("standard", "9");
   const newerCompanion = binding("containment", "a");
   const originAuthority = inventoryEntry(originStandard).acceptedEvent;
@@ -891,7 +1268,10 @@ test("applies prepared standard and containment package redeploys", () => {
     acceptedGate: "P1-PWA",
     acceptedStandardFloors: { pwaLifecycle: "outer-agent-v2" },
     containmentCompanion: newerCompanion,
-    rollbackInventory: [inventoryEntry(originStandard)],
+    rollbackInventory: [
+      inventoryEntry(originStandard),
+      inventoryEntry(unrelatedStandard),
+    ],
   };
   snapshot = prepareOperation(snapshot, {
     operationId: "redeploy-standard",
@@ -902,25 +1282,54 @@ test("applies prepared standard and containment package redeploys", () => {
     originCompanionBinding: originCompanion,
   });
   snapshot = advanceAssignmentLifecycle(snapshot);
-  snapshot = reduceReleaseState(
-    snapshot,
+  const redeployInventory = [
+    inventoryEntry(nextStandard),
+    inventoryEntry(unrelatedStandard),
+  ];
+  const redeployPayload = {
+    releaseRole: "standard",
+    standardBinding: nextStandard,
+    companionBinding: nextCompanion,
+    rollbackInventory: redeployInventory,
+    originAcceptedEvent: originAuthority,
+    originAcceptedGate: "P0-RELEASE",
+    originAcceptedStandardFloors: originFloors,
+  };
+  const redeployTerminal = (rollbackInventory) =>
     appendRecoveryTerminal(
       snapshot,
       "package-redeploy-activated",
-      {
-        releaseRole: "standard",
-        standardBinding: nextStandard,
-        companionBinding: nextCompanion,
-        rollbackInventory: [inventoryEntry(nextStandard)],
-        originAcceptedEvent: originAuthority,
-        originAcceptedGate: "P0-RELEASE",
-        originAcceptedStandardFloors: originFloors,
-      },
+      { ...redeployPayload, rollbackInventory },
       {
         evidenceRefs: [currentHeadRef(snapshot), originAuthority],
       },
-    ),
-  );
+    );
+  for (const mutate of [
+    (inventory) => {
+      inventory[1].acceptedGate = "P1-PWA";
+    },
+    (inventory) => {
+      inventory[1].eligibility = "ineligible";
+      inventory[1].eligibleActions = [];
+      inventory[1].reasonCodes = ["tampered"];
+    },
+    (inventory) => {
+      inventory[0].acceptedStandardFloors = {
+        pwaLifecycle: "outer-agent-v2",
+      };
+    },
+    (inventory) => {
+      inventory[0].eligibleActions = ["rollback"];
+    },
+  ]) {
+    const tamperedInventory = structuredClone(redeployInventory);
+    mutate(tamperedInventory);
+    assert.throws(
+      () => reduceReleaseState(snapshot, redeployTerminal(tamperedInventory)),
+      /exact authorized transform/,
+    );
+  }
+  snapshot = reduceReleaseState(snapshot, redeployTerminal(redeployInventory));
   assert.equal(snapshot.acceptedStandard?.bindingId, nextStandard.bindingId);
   assert.deepEqual(snapshot.acceptedStandardEvent, originAuthority);
   assert.equal(snapshot.acceptedGate, "P0-RELEASE");
@@ -994,7 +1403,7 @@ test("reconciles and aborts only the currently prepared operation", () => {
   );
 });
 
-test("reconciles a previous accepted standard and restores its accepted event and floors atomically", () => {
+test("reconciles an already active previous accepted standard by aborting the no-op operation", () => {
   let snapshot = initializeState();
   const previous = binding("standard", "7");
   const companion = binding("containment", "8");
@@ -1086,17 +1495,13 @@ test("reconciles a previous accepted standard and restores its accepted event an
   snapshot = advanceAssignmentLifecycle(snapshot);
   snapshot = reduceReleaseState(
     snapshot,
-    appendRecoveryTerminal(
+    appendEvent(
       snapshot,
-      "rollback-activated",
-      {
-        binding: previous,
-        companionBinding: companion,
-        originAcceptedEvent: acceptedEvent,
-        originAcceptedGate: "P0-RELEASE",
-        originAcceptedStandardFloors: acceptedFloors,
-      },
-      { evidenceRefs: [currentHeadRef(snapshot), acceptedEvent] },
+      "operation-aborted",
+      "reconcile-previous-standard",
+      {},
+      [],
+      [currentHeadRef(snapshot)],
     ),
   );
   assert.equal(snapshot.pendingOperation, null);
@@ -1414,6 +1819,7 @@ const releaseEventSchemaFixtures = () => {
       {
         binding: standard,
         companionBinding: companion,
+        rollbackInventory,
         originAcceptedEvent: rollbackInventory[0].acceptedEvent,
         originAcceptedGate: "P0-RELEASE",
         originAcceptedStandardFloors: { pwaLifecycle: "outer-agent-v1" },

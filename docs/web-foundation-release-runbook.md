@@ -247,7 +247,7 @@ checked-in bindingは未構成で、live observationは `0/14` のため、実�
 | `P0-ARTIFACT`  | `artifact-provider-control-store-drill`                                         | protected release                        |
 | `P0-DATA`      | `remote-db`、`retention`、`backup-restore-rehearsal`、`startup-waf-observation` | protected release / retention workflow   |
 | `P0-RELEASE`   | `physical-performance`                                                          | protected release                        |
-| `P1-PWA`       | `pwa-multiclient-drill`                                                         | managed Windows runner、3 reviewed stage |
+| `P1-PWA`       | `pwa-multiclient-drill`                                                         | strict receipt + 3 reviewed stage        |
 | `P2A-LOCAL`    | `production-request-graph`                                                      | protected production observation job     |
 | `P2B-REPORT`   | `csp-report-observation`                                                        | protected production observation job     |
 | `P4-CSP`       | `deployed-csp-flow`                                                             | protected production observation job     |
@@ -298,12 +298,45 @@ transactionでの実DML/DDLがSQLSTATE `42501`になることを含む。restore
 enrollment hash、distinct absolute profile root/path、installed PWA policy/app ID、Ed25519 public key
 fingerprintを構成する。秘密鍵はmanaged runner secretだけに置く。
 
-`collect-managed-device-live-stage`を3つの別runで A → B → A の順に実行する。各runは
-`request_json={}`で、通常browser tabは通常URL、installed PWAはOSの実shortcut/app IDから起動する。
-すべてのclient processをstage間でclose/reopenし、同じdevice/profile、current Release State history、
-accepted deployment、Service Worker/capability bytes、IndexedDB controller/raw observationをEd25519署名する。
-3 runのID/attemptを`P1-PWA`または`P7-IDB`のbundle producerへ渡す。単一run、standalone風browser window、
-loopback、異なるprofile、caller supplied stage/status/hashは正式証跡にならない。
+`P1-PWA`では、まずprotected `collect-pwa-multiclient-drill`を独立した先行runとして
+`request_json={}`で実行する。通常browser tabと実installed PWAをpolicyで指定したdistinct profile pathから
+起動し、明示的save/flush、close前controller不変、全client解放後のnatural activation、current → rollback →
+currentのcontroller/source遷移をstrict signed receiptへ記録する。
+
+このstrict runを開始する時点で、current accepted standardと唯一のeligible rollback standardはどちらも
+canonical stable/versioned capability・identityを持ち、`pwaLifecycle=prompt-close-all-v1`でなければならない。
+legacy auto-update artifactをformal strict receiptへ流用しない。まずprompt対応rollback predecessorを、fresh
+exact-source evidence、24時間以上のcontinuous observation、三役のdistinct approvalで`P1-PWA` standardとして
+acceptする。次にsource、build、binding、provider deployment ID/URLがすべて異なるprompt対応current candidateを、
+`candidate_gate=P1-PWA`を維持した独立のbuild/acceptance run群で同じfloorへacceptする。same-floor時のformal
+predecessorは`P1-PWA`自身ではなく`P0-RELEASE`であり、終端`P8-CLEAN`ではsame-floor replacementを禁止する。
+
+二つ目のacceptance後、current candidateだけがactiveで、最初のprompt standardだけがsole eligible rollback
+standardであることをRelease Stateから確認してstrict runへ進む。caller flag、合成identity、以前のevidence、
+approval receiptを再利用してこのbootstrap順序を迂回しない。
+
+次に`collect-managed-device-live-stage`を3つの別runで current → rollback → current の順に実行する。stage 1の
+採取後にreviewed archive recoveryでcurrentからsole eligible rollbackへ切り替え、stage 2の採取後にもう一度
+reviewed archive recoveryを実行して元のcurrentへ戻してからstage 3を採取する。二つのterminal eventはどちらも
+`rollback-activated`でなければならず、rollback inventoryは各terminalで原子的に入れ替わる。各collectorは
+`request_json={}`で、通常browser tabは通常URL、installed PWAはOSの実shortcut/app IDから起動する。すべての
+client processをstage間でclose/reopenし、同じdevice/profile、current Release State history、accepted deployment、
+Service Worker/capability bytes、IndexedDB controller/raw observationをEd25519署名する。
+
+`P1-PWA`のbundle producerにはstrict runのID/attemptを
+`phase_authority_pwa_receipt_run_id` / `phase_authority_pwa_receipt_run_attempt`で渡し、続けて3 stageの
+各run ID/attempt selectorを渡す。producer/readbackはstrict runが3 stageより前で、4 collector runとproducer
+runがすべてdistinctであることを検証する。さらにcomposite authorityがexact source/device、current/rollback
+deployment、各stageのcontroller、strict receiptとstageの時刻・current → rollback → current順序を再検証する。
+
+compositeを作っただけではExitにならない。`produce-phase-exit-authority-bundle`を
+`target_gate=P1-PWA`で実行し、exact package bytes/hashを別runでreviewしてから
+`publish-phase-exit-authority-bundle`を実行する。最後に`attest-phase-exit`を`target_gate=P1-PWA`で実行し、
+immutable Release Stateへ`P1-PWA` attestationがappendされたことをreadbackする。
+
+`P7-IDB`はstrict PWA receiptを要求せず、従来どおり3 stageのrun ID/attemptだけをbundle producerへ渡す。
+単一run、standalone風browser window、loopback、異なるprofile、caller supplied stage/status/hashは正式証跡に
+ならない。
 
 ## 16-gate attestation と pre-initialization seed
 
@@ -328,7 +361,7 @@ chainだけを許し、reconcile/recovery assignmentで代替しない。P0-RELE
 P8はP7 attestationをpredecessorとするfloor QA/execution/closureからpolicy floorをactivateした後に
 `P8-CLEAN`をattestする。P8自身のattestationをfloor activationの前提にして循環させない。
 
-dispatchは`source_sha`、`operation`、canonical `request_json`の3入力だけである。現行registryの49
+dispatchは`source_sha`、`operation`、canonical `request_json`の3入力だけである。現行registryの50
 operationはclosed schemaで検証され、unknown/unused/missing fieldを拒否する。operation数とworkflow
 coverageはtestがregistryから導出するため、文書の手作業一覧をdispatch正本にしない。
 
@@ -336,14 +369,17 @@ coverageはtestがregistryから導出するため、文書の手作業一覧を
 
 build は二つの protected run に分ける。
 
-1. `produce-artifact-build-requirements` が current Release State を全 replay し、active policy、次の
-   target gate、source、provider/DB/toolchain/CSP authority と expected standard/containment dimensions を
-   canonical `artifact-build-requirements.json` にする。これを
+1. `produce-artifact-build-requirements` はrequestの必須`candidate_gate`をcurrent Release Stateから再導出する。
+   通常はexact next gate、非終端のsource-only replacementだけはcurrent gateとexactly equalなfloorを許し、
+   source再利用、gate skip/regression、floor drift、`P8-CLEAN` replacementを拒否する。active policy、source、
+   provider/DB/toolchain/CSP authority と expected standard/containment dimensionsをcanonical
+   `artifact-build-requirements.json` にする。これを
    `foundation-artifact-build-requirements-<sourceSha>` として upload する。
 2. 人が requirements bytes の SHA-256 を review する。
 3. `build-and-verify` は distinct prior run ID と reviewed SHA-256 で exact artifact を downloadし、
-   current Release State から同じ requirements を再導出する。head/policy/source/hash が変化した場合、
-   同一 run、caller supplied dimension、proposed policy からの production build を拒否する。
+   current Release State から同じ requirementsを再導出する。このoperationへ`candidate_gate`を再入力せず、
+   reviewed requirements内の`targetGate`をauthorityとする。head/policy/source/hashが変化した場合、同一run、
+   caller supplied dimension、proposed policyからのproduction buildを拒否する。
 
 package 出力先は checkout 外の新規 directory にする。既存 directory への上書きを禁止する。protected
 workflow と同じ authority で read-only reproduction を行う場合も、reviewed requirements file と hash を
@@ -582,18 +618,18 @@ evidence store に保存し、保存後の再読取まで一致した場合だ�
     fresh exact-source v1とrollback inventoryを持つcanonical evidence/sourceをcreate-onlyで閉じる。
     bytesのSHA-256とrun authorityをreviewし、`publish-acceptance-evidence`がexact prior artifactだけを
     `foundation-acceptance-evidence-<sourceSha>`として再公開する。
-12. `produce-acceptance-requirements` が current Release State、pending standard、active release
-    policy の `phaseSequence` を replay し、次の `acceptedGate` と performance evidence の要否・kind を
-    canonical `acceptance-requirements.json` にする。人が bytes の SHA-256 を review し、後続 run は
-    exact prior run ID と hash で artifact を download する。後続 run は current state から同じ要件を
-    再導出し、bytes/hash が一致しない場合、同一 run の artifact、caller supplied gate を拒否する。
+12. `produce-acceptance-requirements` は必須`candidate_gate`、current Release State、pending standard、active
+    release policyの`phaseSequence`をreplayし、通常のexact next gateまたは許可された非終端same-floor gateと
+    performance evidenceの要否・kindをcanonical `acceptance-requirements.json`にする。人がbytesのSHA-256を
+    reviewし、後続runはexact prior run IDとhashでartifactをdownloadする。後続runはcurrent stateから同じ要件を
+    再導出し、bytes/hash/candidate gateが一致しない場合、同一runのartifact、unknown/surplus gateを拒否する。
 13. performance evidence は accepted gate ごとに固定する。`P0-RELEASE` は
     `P0-TOOLCHAIN` own-gate envelope、`P3-XLSX`、`P5-DUAL`、`P5-LIST` は各 own-gate
     envelope、`P8-CLEAN` は四つの historical accepted event と live archive readback を束縛した
     `performance-inherited-closure/v1` だけを許可する。P8 closure は
     `produce-performance-inherited-closure` の別 run で作り、同じ artifact name/file/hash 契約で review
     する。その他の accepted gate は performance bytes/hash とも `null` とし、dummy evidence を拒否する。
-14. `produce-acceptance-inputs` が reviewed requirements、evidence/source、必要時だけ reviewed
+14. `produce-acceptance-inputs` は同じ必須`candidate_gate`を維持し、reviewed requirements、evidence/source、必要時だけ reviewed
     performance bytes から canonical `continuous-production-probe.json` を生成する。P1 以降で legacy
     bootstrap を解除する場合は、companion 固有の recovery drill を実施し、reviewed
     `companion-recovery-drill-source.json` から `companion-recovery-drill.json` も生成する。同じ保護 run で
@@ -601,11 +637,15 @@ evidence store に保存し、保存後の再読取まで一致した場合だ�
     performance ref の全 object closure を持つ `acceptance-final` bundle を生成し、bundle/object-set の
     SHA-256 を別途 review する。source v2とfinal v1はそれぞれclosed JSON schemaで検証し、unknown field、
     source workflow authority、sample/chain commit、HTTP/provider receiptの欠落またはkeyword制約違反を拒否する。
-15. `accept-standard` が reviewed requirements、evidence、continuous probe、必要時の performance と
+15. `accept-standard` は同じ必須`candidate_gate`を維持し、reviewed requirements、evidence、continuous probe、必要時の performance と
     companion drill、terminal bundle/object-set、current head/provider identities、三役の distinct approval
     chain を再検証する。performance の full gate verifier は immutable evidence 保存前と CAS commit 直前の
     二回実行し、完全一致した candidate event だけを CAS appendして standard だけを
     `release-accepted` にする。
+
+三つのcandidate-aware acceptance operationは`candidate_gate`をexact一致で伝播し、requirementsの
+`acceptedGate`とterminal `release-accepted.payload.acceptedGate`も同値でなければならない。same-floor
+replacementでも24時間観測、全sample、三役approval、assignment validationを省略しない。
 
 collectorの下位CLIは`npm run release:acceptance-collector -- -- initialize|append|finalize`、final inputの
 下位CLIは`npm run release:acceptance-input -- -- continuous-probe|companion-recovery`である。productionでは

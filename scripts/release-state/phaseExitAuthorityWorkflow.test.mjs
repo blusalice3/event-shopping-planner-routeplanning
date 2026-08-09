@@ -49,6 +49,7 @@ test("release accepts only a closed three-input protected dispatch", () => {
     "collect-foundation-external-bindings",
     "collect-foundation-bootstrap-recovery",
     "collect-managed-device-live-stage",
+    "collect-pwa-multiclient-drill",
     "attest-phase-exit",
   ]) {
     assert.ok(Object.hasOwn(RELEASE_DISPATCH_OPERATION_SCHEMAS, operation));
@@ -250,11 +251,19 @@ test("browser authorities pin toolchain and upload exact attempt-qualified files
   }
 });
 
-test("managed device stages run only on the exact protected Windows runner and upload one exact receipt", () => {
+test("managed device live and strict PWA collectors are the exact two protected job operations", () => {
   const managed = releaseWorkflow.jobs["managed-device-authority"];
   assert.match(
     managed.if,
     /inputs\.operation == 'collect-managed-device-live-stage'/u,
+  );
+  assert.match(
+    managed.if,
+    /inputs\.operation == 'collect-pwa-multiclient-drill'/u,
+  );
+  assert.equal(
+    [...managed.if.matchAll(/inputs\.operation == '[^']+'/gu)].length,
+    2,
   );
   assert.deepEqual(managed["runs-on"], {
     group: "foundation-managed-devices",
@@ -265,39 +274,130 @@ test("managed device stages run only on the exact protected Windows runner and u
     contents: "read",
     "id-token": "write",
   });
-  const collection = managed.steps.find(
+  assert.deepEqual(Object.keys(managed.env), [
+    "REQUESTED_SOURCE_SHA",
+    "REQUESTED_OPERATION",
+    "RELEASE_STATE_NAMESPACE",
+  ]);
+  const guard = managed.steps.find(
+    ({ name }) => name === "Guard managed device authority protected source",
+  );
+  assert.match(
+    guard.run,
+    /@\('collect-managed-device-live-stage', 'collect-pwa-multiclient-drill'\) -notcontains/u,
+  );
+  const liveCollection = managed.steps.find(
     ({ name }) => name === "Collect exact managed device live stage",
   );
-  assert.match(collection.run, /browser:managed-device-stage:collect/u);
+  assert.equal(
+    liveCollection.if,
+    "inputs.operation == 'collect-managed-device-live-stage'",
+  );
+  assert.match(liveCollection.run, /browser:managed-device-stage:collect/u);
+  const strictCollection = managed.steps.find(
+    ({ name }) => name === "Collect exact PWA multiclient drill",
+  );
+  assert.equal(
+    strictCollection.if,
+    "inputs.operation == 'collect-pwa-multiclient-drill'",
+  );
+  assert.match(strictCollection.run, /browser:pwa-multiclient:collect/u);
+  assert.match(strictCollection.run, /pwa-multiclient-drill\.json/u);
   for (const secretName of [
     "RELEASE_STATE_DATABASE_URL",
     "RELEASE_STATE_DATABASE_CA_PEM",
     "FOUNDATION_DEVICE_ATTESTATION_PRIVATE_KEY_PEM",
     "FOUNDATION_DEVICE_ATTESTATION_PUBLIC_KEY_PEM",
   ]) {
-    assert.ok(Object.hasOwn(collection.env, secretName));
+    assert.ok(Object.hasOwn(liveCollection.env, secretName));
+    assert.ok(Object.hasOwn(strictCollection.env, secretName));
     assert.equal(Object.hasOwn(managed.env ?? {}, secretName), false);
   }
-  const upload = managed.steps.find(
+  const liveUpload = managed.steps.find(
     ({ name }) => name === "Upload exact managed device live stage",
   );
-  assert.equal(upload.uses, "actions/upload-artifact@v4");
   assert.equal(
-    upload.with.name,
+    liveUpload.if,
+    "inputs.operation == 'collect-managed-device-live-stage'",
+  );
+  assert.equal(liveUpload.uses, "actions/upload-artifact@v4");
+  assert.equal(
+    liveUpload.with.name,
     "foundation-managed-device-live-stage-${{ inputs.source_sha }}-${{ github.run_attempt }}",
   );
   assert.equal(
-    upload.with.path,
+    liveUpload.with.path,
     "${{ runner.temp }}/managed-device-live-stage.json",
   );
+  const strictUpload = managed.steps.find(
+    ({ name }) => name === "Upload exact PWA multiclient drill",
+  );
+  assert.equal(
+    strictUpload.if,
+    "inputs.operation == 'collect-pwa-multiclient-drill'",
+  );
+  assert.equal(strictUpload.uses, "actions/upload-artifact@v4");
+  assert.equal(
+    strictUpload.with.name,
+    "foundation-pwa-multiclient-drill-${{ inputs.source_sha }}-${{ github.run_attempt }}",
+  );
+  assert.equal(
+    strictUpload.with.path,
+    "${{ runner.temp }}/pwa-multiclient-drill.json",
+  );
+  for (const jobName of ["release", "browser-authority"]) {
+    for (const operation of [
+      "collect-managed-device-live-stage",
+      "collect-pwa-multiclient-drill",
+    ]) {
+      assert.match(
+        releaseWorkflow.jobs[jobName].if,
+        new RegExp(`inputs\\.operation != '${operation}'`, "u"),
+      );
+    }
+  }
+  const nonManagedJobs = Object.fromEntries(
+    Object.entries(releaseWorkflow.jobs).filter(
+      ([name]) => name !== "managed-device-authority",
+    ),
+  );
+  assert.doesNotMatch(
+    JSON.stringify(nonManagedJobs),
+    /browser:pwa-multiclient:collect|foundation-pwa-multiclient-drill-|pwa-multiclient-drill\.json/u,
+  );
+});
+
+test("P1 strict receipt environment is phase-scoped and producer-only", () => {
+  const validation = releaseWorkflow.jobs.release.steps.find(
+    ({ name }) => name === "Validate reviewed dispatch inputs",
+  ).run;
+  for (const name of [
+    "REQUESTED_PHASE_AUTHORITY_PWA_RECEIPT_RUN_ID",
+    "REQUESTED_PHASE_AUTHORITY_PWA_RECEIPT_RUN_ATTEMPT",
+  ]) {
+    assert.equal(
+      [...validation.matchAll(new RegExp(`\\$env:${name}`, "gu"))].length,
+      2,
+    );
+  }
   assert.match(
-    releaseWorkflow.jobs.release.if,
-    /inputs\.operation != 'collect-managed-device-live-stage'/u,
+    validation,
+    /phase authority inputs are forbidden for this operation/u,
   );
   assert.match(
-    releaseWorkflow.jobs["browser-authority"].if,
-    /inputs\.operation != 'collect-managed-device-live-stage'/u,
+    validation,
+    /phase authority publication requires an exact reviewed package/u,
   );
+  const production = releaseWorkflow.jobs.release.steps.find(
+    ({ name }) =>
+      name ===
+      "Produce reviewed phase authority package from fixed collector artifacts",
+  ).run;
+  assert.match(
+    production,
+    /'P1-PWA'[\s\S]*--pwa-receipt-run-id[\s\S]*--pwa-receipt-run-attempt[\s\S]*--managed-device-run-1-id/u,
+  );
+  assert.doesNotMatch(production, /'P7-IDB'[\s\S]{0,450}--pwa-receipt-run/u);
 });
 
 test("publisher binds every implemented collector through immutable reviewed authority", () => {
@@ -356,6 +456,10 @@ test("publisher binds every implemented collector through immutable reviewed aut
   }
   assert.match(publisher, /putManagedDeviceReviewedStageSetAuthority/u);
   assert.match(publisher, /readManagedDeviceReviewedStageSetAuthority/u);
+  assert.match(publisher, /PWA_STRICT_RECEIPT_ARTIFACT_NAME_TEMPLATE/u);
+  assert.match(publisher, /PWA_STRICT_RECEIPT_FILE_NAME/u);
+  assert.match(publisher, /putPwaReviewedFormalClosureAuthority/u);
+  assert.match(publisher, /readPwaReviewedFormalClosureAuthority/u);
   assert.match(publisher, /buildManagedDevicePhaseExitEvidence/u);
 });
 
@@ -451,42 +555,75 @@ test("package CLI requires the exact target-gate collector set", () => {
     artifactDrillRunId: "108",
     artifactDrillRunAttempt: "4",
   });
-  for (const targetGate of ["P1-PWA", "P7-IDB"]) {
-    const managedProduce = [
-      "produce",
-      ...common.map((value) => (value === "P0-DATA" ? targetGate : value)),
-      "--managed-device-run-1-id",
-      "110",
-      "--managed-device-run-1-attempt",
-      "1",
-      "--managed-device-run-2-id",
-      "111",
-      "--managed-device-run-2-attempt",
-      "2",
-      "--managed-device-run-3-id",
-      "112",
-      "--managed-device-run-3-attempt",
-      "3",
-    ];
-    assert.deepEqual(parsePhaseExitAuthorityArguments(managedProduce).values, {
-      namespace: "phase-authority-live",
-      sourceSha: "a".repeat(40),
-      targetGate,
-      outputPath: "output.json",
-      managedDeviceRun1Id: "110",
-      managedDeviceRun1Attempt: "1",
-      managedDeviceRun2Id: "111",
-      managedDeviceRun2Attempt: "2",
-      managedDeviceRun3Id: "112",
-      managedDeviceRun3Attempt: "3",
-    });
+  const managedSelectors = [
+    "--managed-device-run-1-id",
+    "110",
+    "--managed-device-run-1-attempt",
+    "1",
+    "--managed-device-run-2-id",
+    "111",
+    "--managed-device-run-2-attempt",
+    "2",
+    "--managed-device-run-3-id",
+    "112",
+    "--managed-device-run-3-attempt",
+    "3",
+  ];
+  const pwaProduce = [
+    "produce",
+    ...common.map((value) => (value === "P0-DATA" ? "P1-PWA" : value)),
+    "--pwa-receipt-run-id",
+    "109",
+    "--pwa-receipt-run-attempt",
+    "4",
+    ...managedSelectors,
+  ];
+  assert.deepEqual(parsePhaseExitAuthorityArguments(pwaProduce).values, {
+    namespace: "phase-authority-live",
+    sourceSha: "a".repeat(40),
+    targetGate: "P1-PWA",
+    outputPath: "output.json",
+    pwaReceiptRunId: "109",
+    pwaReceiptRunAttempt: "4",
+    managedDeviceRun1Id: "110",
+    managedDeviceRun1Attempt: "1",
+    managedDeviceRun2Id: "111",
+    managedDeviceRun2Attempt: "2",
+    managedDeviceRun3Id: "112",
+    managedDeviceRun3Attempt: "3",
+  });
+  const pwaWithoutStrictReceipt = [
+    "produce",
+    ...common.map((value) => (value === "P0-DATA" ? "P1-PWA" : value)),
+    ...managedSelectors,
+  ];
+  assert.throws(
+    () => parsePhaseExitAuthorityArguments(pwaWithoutStrictReceipt),
+    /argument|requires/u,
+  );
+  const idbProduce = [
+    "produce",
+    ...common.map((value) => (value === "P0-DATA" ? "P7-IDB" : value)),
+    ...managedSelectors,
+  ];
+  assert.deepEqual(parsePhaseExitAuthorityArguments(idbProduce).values, {
+    namespace: "phase-authority-live",
+    sourceSha: "a".repeat(40),
+    targetGate: "P7-IDB",
+    outputPath: "output.json",
+    managedDeviceRun1Id: "110",
+    managedDeviceRun1Attempt: "1",
+    managedDeviceRun2Id: "111",
+    managedDeviceRun2Attempt: "2",
+    managedDeviceRun3Id: "112",
+    managedDeviceRun3Attempt: "3",
+  });
+  for (const invalid of [
+    [...idbProduce, "--pwa-receipt-run-id", "109"],
+    [...pwaProduce, "--client-kind", "installed-pwa"],
+  ]) {
     assert.throws(
-      () =>
-        parsePhaseExitAuthorityArguments([
-          ...managedProduce,
-          "--client-kind",
-          "installed-pwa",
-        ]),
+      () => parsePhaseExitAuthorityArguments(invalid),
       /argument|requires/u,
     );
   }
@@ -524,6 +661,7 @@ test("workflow verifies every non-exempt predecessor before operation steps", ()
       firstOperationIndex > predecessorIndex,
   );
   assert.match(predecessor.run, /release:verify-operation-predecessor/u);
+  assert.match(predecessor.run, /--candidate-gate/u);
   for (const [operation, required] of Object.entries(
     RELEASE_OPERATION_REQUIRED_PREDECESSOR,
   )) {

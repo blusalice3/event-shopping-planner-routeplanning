@@ -416,12 +416,22 @@ export const runManagedDeviceCollectorCli = async (
               dbContract,
               cspPolicy,
             });
+      const publicArtifacts = {
+        current: Object.freeze({
+          ...currentArtifact,
+          distRoot: path.join(currentArtifact.distRoot, "static"),
+        }),
+        rollback:
+          rollbackArtifact === null
+            ? null
+            : Object.freeze({
+                ...rollbackArtifact,
+                distRoot: path.join(rollbackArtifact.distRoot, "static"),
+              }),
+      };
       receipt = await execute({
         request,
-        artifacts: {
-          current: currentArtifact,
-          rollback: rollbackArtifact,
-        },
+        artifacts: publicArtifacts,
         externalPolicy: external.policy,
         environment,
         repositoryRoot: root,

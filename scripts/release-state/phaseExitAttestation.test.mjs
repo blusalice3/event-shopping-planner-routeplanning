@@ -745,18 +745,21 @@ test("CAS-appends the complete 16-gate chain through semantic release history an
       approval(promotion.operationId, "operationsReviewer"),
     ];
     const floors = { pwaLifecycle: "legacy-auto-update-v1" };
-    const inventory = [
-      {
-        binding: promotion.standard,
-        acceptedEvent: immutableReference(`${gate}:accepted-inventory`),
-        acceptedGate: gate,
-        acceptedStandardFloors: floors,
-        evaluatedPolicy: policyReference,
-        eligibleActions: ["package-redeploy", "rollback"],
-        eligibility: "eligible",
-        reasonCodes: [],
-      },
-    ];
+    const inventory =
+      current.snapshot.acceptedStandard === null
+        ? []
+        : [
+            {
+              binding: current.snapshot.acceptedStandard,
+              acceptedEvent: current.snapshot.acceptedStandardEvent,
+              acceptedGate: current.snapshot.acceptedGate,
+              acceptedStandardFloors: current.snapshot.acceptedStandardFloors,
+              evaluatedPolicy: policyReference,
+              eligibleActions: ["package-redeploy", "rollback"],
+              eligibility: "eligible",
+              reasonCodes: [],
+            },
+          ];
     createAndAppend({
       eventType: "release-accepted",
       operationId: promotion.operationId,

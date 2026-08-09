@@ -267,7 +267,7 @@ const expectedReaderBranchByAuthority = Object.freeze({
   retention: "generic-reviewed-artifact",
   "backup-restore-rehearsal": "derived-reviewed-artifact",
   "startup-waf-observation": "derived-reviewed-artifact",
-  "pwa-multiclient-drill": "managed-device-reviewed-stage-set",
+  "pwa-multiclient-drill": "pwa-reviewed-formal-closure",
   "production-request-graph": "derived-reviewed-artifact",
   "csp-report-observation": "derived-reviewed-artifact",
   "deployed-csp-flow": "derived-reviewed-artifact",
@@ -356,7 +356,7 @@ const positiveReaderCoverage = Object.freeze([
     authority: "pwa-multiclient-drill",
     file: "scripts/release-state/managedDeviceReviewedStageSetAuthority.test.mjs",
     testName:
-      "stores a canonical closed set and derives order only from reviewed runs",
+      "stores and reads a canonical PWA reviewed formal closure from immutable predecessors",
   },
   {
     authority: "production-request-graph",
@@ -2692,7 +2692,7 @@ test("projects a closed target-gate subject without leaking live production stat
   );
 });
 
-test("managed-device authorities derive evidence only from the reviewed stage set", () => {
+test("managed-device authorities derive evidence only from their reviewed formal authority", () => {
   const policies = configuredPolicies();
   const collectorAuthority = {
     uri: `release-state://${namespace}/evidence/${hash("8")}`,
@@ -2758,6 +2758,23 @@ test("managed-device authorities derive evidence only from the reviewed stage se
       },
       setReceipt: { reference: collectorAuthority },
     };
+    if (authority === "pwa-multiclient-drill") {
+      readback.formalClosure = {
+        kind: "pwa-reviewed-formal-closure-authority/v1",
+        authority,
+        sourceSha,
+        reference: collectorAuthority,
+        stageSetAuthority: {
+          uri: `release-state://${namespace}/evidence/${hash("6")}`,
+          sha256: hash("6"),
+        },
+        strictReceiptArtifactAuthority: {
+          uri: `release-state://${namespace}/evidence/${hash("7")}`,
+          sha256: hash("7"),
+        },
+        strictReceiptSha256: hash("5"),
+      };
+    }
     const built = buildManagedDevicePhaseExitEvidence({
       authority,
       stageSetReadback: readback,
@@ -2771,6 +2788,22 @@ test("managed-device authorities derive evidence only from the reviewed stage se
       built.observedAt,
       readback.aggregated.stages[2].payload.observedAt,
     );
+    if (authority === "pwa-multiclient-drill") {
+      const promptLessReadback = structuredClone(readback);
+      delete promptLessReadback.formalClosure;
+      assert.throws(
+        () =>
+          buildManagedDevicePhaseExitEvidence({
+            authority,
+            stageSetReadback: promptLessReadback,
+            collectorAuthority,
+            subject: { kind: "managed-device-test-subject/v1" },
+            sourceSha,
+            databaseContract: policies.databaseContract,
+          }),
+        /readback differs/u,
+      );
+    }
     assert.throws(
       () =>
         buildManagedDevicePhaseExitEvidence({

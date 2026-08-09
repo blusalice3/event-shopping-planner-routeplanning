@@ -96,6 +96,8 @@ const productionBuildRequirementsArgv = [
   "build-p1-candidate",
   "--source-sha",
   "a".repeat(40),
+  "--target-gate",
+  "P1-PWA",
   "--target-source-sha",
   "a".repeat(40),
   "--output",
@@ -252,6 +254,15 @@ test("parses only the closed command-specific flag sets", () => {
         "caller.json",
       ]),
     /Invalid or duplicate authoritative input flag/,
+  );
+  assert.throws(
+    () =>
+      parseAuthoritativeInputProducerArguments(
+        productionBuildRequirementsArgv.map((value) =>
+          value === "P1-PWA" ? "P0-TOOLCHAIN" : value,
+        ),
+      ),
+    /incomplete or invalid/,
   );
   assert.throws(
     () =>
@@ -494,6 +505,7 @@ test("writes production and Policy QA build requirements from authoritative stat
       productionBuildRequirementsArgv,
       {
         purpose: "production",
+        targetGate: "P1-PWA",
         targetSourceSha: "a".repeat(40),
         hasPolicyReferences: false,
       },
@@ -502,6 +514,7 @@ test("writes production and Policy QA build requirements from authoritative stat
       policyQaBuildRequirementsArgv,
       {
         purpose: "policy-activation-qa",
+        targetGate: undefined,
         targetSourceSha: "b".repeat(40),
         hasPolicyReferences: true,
       },
@@ -530,6 +543,7 @@ test("writes production and Policy QA build requirements from authoritative stat
     assert.equal(received.purpose, expected.purpose);
     assert.equal(received.executorSourceSha, "a".repeat(40));
     assert.equal(received.targetSourceSha, expected.targetSourceSha);
+    assert.equal(received.targetGate, expected.targetGate);
     assert.equal(
       Object.hasOwn(received, "proposedPolicyReference"),
       expected.hasPolicyReferences,
@@ -552,13 +566,11 @@ test("writes production and Policy QA build requirements from authoritative stat
 });
 
 test("rejects production build requirements when executor and target sources differ", () => {
+  const wrongTargetSource = [...productionBuildRequirementsArgv];
+  wrongTargetSource[wrongTargetSource.indexOf("--target-source-sha") + 1] =
+    "b".repeat(40);
   assert.throws(
-    () =>
-      parseAuthoritativeInputProducerArguments([
-        ...productionBuildRequirementsArgv.slice(0, 8),
-        "b".repeat(40),
-        ...productionBuildRequirementsArgv.slice(9),
-      ]),
+    () => parseAuthoritativeInputProducerArguments(wrongTargetSource),
     /incomplete or invalid/,
   );
 });

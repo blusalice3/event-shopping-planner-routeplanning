@@ -13,7 +13,11 @@ import {
 } from "../db/remote-db-observation-authority.mjs";
 import { readBoundReviewedWorkflowRunAuthority } from "../release-state/reviewedWorkflowRunAuthority.mjs";
 import { readBoundReviewedWorkflowArtifactAuthority } from "../release-state/reviewedWorkflowArtifactAuthority.mjs";
-import { readManagedDeviceReviewedStageSetAuthority } from "../release-state/managedDeviceReviewedStageSetAuthority.mjs";
+import {
+  PWA_REVIEWED_FORMAL_CLOSURE_KIND,
+  readManagedDeviceReviewedStageSetAuthority,
+  readPwaReviewedFormalClosureAuthority,
+} from "../release-state/managedDeviceReviewedStageSetAuthority.mjs";
 import {
   readFoundationBaselineClosureForPhaseExit,
   resolveBootstrapFoundationSource,
@@ -220,7 +224,7 @@ const AUTHORITY_DEFINITIONS = Object.freeze(
       kind: "phase-exit-pwa-multiclient-drill/v1",
       collectorWorkflowPath: ".github/workflows/release.yml",
       collectorImplemented: true,
-      collectorAuthorityKind: "managed-device-reviewed-stage-set",
+      collectorAuthorityKind: "pwa-reviewed-formal-closure",
       maximumAgeSeconds: 7 * 24 * 60 * 60,
     },
     {
@@ -293,7 +297,7 @@ const AUTHORITY_READER_KIND_BY_ID = Object.freeze({
   retention: "generic-reviewed-artifact",
   "backup-restore-rehearsal": "derived-reviewed-artifact",
   "startup-waf-observation": "derived-reviewed-artifact",
-  "pwa-multiclient-drill": "managed-device-reviewed-stage-set",
+  "pwa-multiclient-drill": "pwa-reviewed-formal-closure",
   "production-request-graph": "derived-reviewed-artifact",
   "csp-report-observation": "derived-reviewed-artifact",
   "deployed-csp-flow": "derived-reviewed-artifact",
@@ -2256,12 +2260,42 @@ export const buildManagedDevicePhaseExitEvidence = ({
   const definition = AUTHORITY_BY_ID.get(authority);
   const aggregated = readback?.aggregated;
   const finalStage = aggregated?.stages?.at(-1);
+  const requiresPwaFormalClosure = authority === "pwa-multiclient-drill";
+  const expectedCollectorAuthorityKind = requiresPwaFormalClosure
+    ? "pwa-reviewed-formal-closure"
+    : "managed-device-reviewed-stage-set";
+  const formalClosure = readback?.formalClosure;
+  const pwaFormalClosureMatches =
+    !requiresPwaFormalClosure ||
+    (exactKeys(formalClosure, [
+      "authority",
+      "kind",
+      "reference",
+      "sourceSha",
+      "stageSetAuthority",
+      "strictReceiptArtifactAuthority",
+      "strictReceiptSha256",
+    ]) &&
+      formalClosure.kind === PWA_REVIEWED_FORMAL_CLOSURE_KIND &&
+      formalClosure.authority === authority &&
+      formalClosure.sourceSha === sourceSha &&
+      sameCanonicalValue(formalClosure.reference, collectorAuthority) &&
+      exactKeys(formalClosure.stageSetAuthority, ["sha256", "uri"]) &&
+      exactKeys(formalClosure.strictReceiptArtifactAuthority, [
+        "sha256",
+        "uri",
+      ]) &&
+      SHA256_PATTERN.test(formalClosure.stageSetAuthority.sha256 ?? "") &&
+      SHA256_PATTERN.test(
+        formalClosure.strictReceiptArtifactAuthority.sha256 ?? "",
+      ) &&
+      SHA256_PATTERN.test(formalClosure.strictReceiptSha256 ?? ""));
   if (
     !["pwa-multiclient-drill", "idb-device-compatibility"].includes(
       authority,
     ) ||
-    definition?.collectorAuthorityKind !==
-      "managed-device-reviewed-stage-set" ||
+    definition?.collectorAuthorityKind !== expectedCollectorAuthorityKind ||
+    !pwaFormalClosureMatches ||
     aggregated?.document?.authority !== authority ||
     aggregated.document.sourceSha !== sourceSha ||
     aggregated.sha256 !== sha256Json(aggregated.document) ||
@@ -2435,7 +2469,10 @@ const assertEntryEvidence = ({
       context: { ...context, entry },
     });
   } else if (
-    definition.collectorAuthorityKind === "managed-device-reviewed-stage-set"
+    [
+      "managed-device-reviewed-stage-set",
+      "pwa-reviewed-formal-closure",
+    ].includes(definition.collectorAuthorityKind)
   ) {
     const expected = buildManagedDevicePhaseExitEvidence({
       authority: definition.authority,
@@ -2768,15 +2805,14 @@ export const resolveExternalPhaseExitAuthorities = async (options) => {
                 currentWorkflowRunId: options.currentWorkflowRunId,
               })
             : definition.collectorAuthorityKind ===
-                "managed-device-reviewed-stage-set"
+                "pwa-reviewed-formal-closure"
               ? options.currentWorkflowRunId === null
                 ? Promise.reject(
                     new Error(
-                      "Managed device stage set requires the current protected workflow run",
+                      "PWA reviewed formal closure requires the current protected workflow run",
                     ),
                   )
-                : readManagedDeviceReviewedStageSetAuthority({
-                    authority: definition.authority,
+                : readPwaReviewedFormalClosureAuthority({
                     namespace,
                     reference: entry.collectorAuthority,
                     store: options.store,
@@ -2787,34 +2823,54 @@ export const resolveExternalPhaseExitAuthorities = async (options) => {
                     dbContract: options.databaseContract,
                     currentWorkflowRunId: options.currentWorkflowRunId,
                   })
-              : collectorArtifact === undefined
-                ? readBoundReviewedWorkflowRunAuthority({
-                    namespace,
-                    repository: options.approvalPolicy.repository,
-                    expectedSourceSha: options.sourceSha,
-                    expectedWorkflowPath: definition.collectorWorkflowPath,
-                    reference: entry.collectorAuthority,
-                    store: options.store,
-                  })
-                : readBoundReviewedWorkflowArtifactAuthority({
-                    namespace,
-                    repository: options.approvalPolicy.repository,
-                    expectedSourceSha: options.sourceSha,
-                    expectedWorkflowPath: definition.collectorWorkflowPath,
-                    expectedArtifactNameTemplate:
-                      collectorArtifact.nameTemplate.replace(
-                        "{sourceSha}",
-                        options.sourceSha,
+              : definition.collectorAuthorityKind ===
+                  "managed-device-reviewed-stage-set"
+                ? options.currentWorkflowRunId === null
+                  ? Promise.reject(
+                      new Error(
+                        "Managed device stage set requires the current protected workflow run",
                       ),
-                    expectedFileName: collectorArtifact.fileName,
-                    expectedFileMediaType: collectorArtifact.fileMediaType,
-                    reference: entry.collectorAuthority,
-                    store: options.store,
-                  }).then((artifactAuthority) => ({
-                    ...artifactAuthority,
-                    artifactReceipt: artifactAuthority.receipt,
-                    receipt: artifactAuthority.workflowRun.receipt,
-                  }))
+                    )
+                  : readManagedDeviceReviewedStageSetAuthority({
+                      authority: definition.authority,
+                      namespace,
+                      reference: entry.collectorAuthority,
+                      store: options.store,
+                      current: options.current,
+                      expectedCollectorSourceSha: options.sourceSha,
+                      externalPolicy: options.backupRestorePrerequisitePolicy,
+                      approvalPolicy: options.approvalPolicy,
+                      dbContract: options.databaseContract,
+                      currentWorkflowRunId: options.currentWorkflowRunId,
+                    })
+                : collectorArtifact === undefined
+                  ? readBoundReviewedWorkflowRunAuthority({
+                      namespace,
+                      repository: options.approvalPolicy.repository,
+                      expectedSourceSha: options.sourceSha,
+                      expectedWorkflowPath: definition.collectorWorkflowPath,
+                      reference: entry.collectorAuthority,
+                      store: options.store,
+                    })
+                  : readBoundReviewedWorkflowArtifactAuthority({
+                      namespace,
+                      repository: options.approvalPolicy.repository,
+                      expectedSourceSha: options.sourceSha,
+                      expectedWorkflowPath: definition.collectorWorkflowPath,
+                      expectedArtifactNameTemplate:
+                        collectorArtifact.nameTemplate.replace(
+                          "{sourceSha}",
+                          options.sourceSha,
+                        ),
+                      expectedFileName: collectorArtifact.fileName,
+                      expectedFileMediaType: collectorArtifact.fileMediaType,
+                      reference: entry.collectorAuthority,
+                      store: options.store,
+                    }).then((artifactAuthority) => ({
+                      ...artifactAuthority,
+                      artifactReceipt: artifactAuthority.receipt,
+                      receipt: artifactAuthority.workflowRun.receipt,
+                    }))
         ).then((authority) => {
           const producerRunId =
             authority.receipt?.runId ?? authority.closure?.producer?.runId;

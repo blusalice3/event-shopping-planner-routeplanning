@@ -15,7 +15,7 @@ import { buildAuthoritativePolicyActivationClosure } from "./policyActivationClo
 import { buildPolicyActivationQaPackage } from "./policyActivationQaPackage.mjs";
 import { buildAuthoritativePolicyActivationQaExecutionSubject } from "./policyActivationQaExecution.mjs";
 import { buildAuthoritativeArtifactBuildRequirements } from "./artifactBuildAuthority.mjs";
-import { POLICY_ACTIVATION_GATES } from "./phaseGates.mjs";
+import { POLICY_ACTIVATION_GATES, RELEASE_PHASE_GATES } from "./phaseGates.mjs";
 import { createPostgresReleaseStateStore } from "./postgresStore.mjs";
 import {
   NAMESPACE_PATTERN,
@@ -37,6 +37,7 @@ const COMMAND_FLAGS = {
     "--operation-id",
     "--output",
     "--source-sha",
+    "--target-gate",
     "--target-source-sha",
   ],
   "prepromotion-evidence-set": [
@@ -173,7 +174,8 @@ export const parseAuthoritativeInputProducerArguments = (argv) => {
     (command === "artifact-build-requirements" &&
       (!SOURCE_SHA_PATTERN.test(values["--source-sha"]) ||
         !SOURCE_SHA_PATTERN.test(values["--target-source-sha"]) ||
-        values["--source-sha"] !== values["--target-source-sha"])) ||
+        values["--source-sha"] !== values["--target-source-sha"] ||
+        !RELEASE_PHASE_GATES.includes(values["--target-gate"]))) ||
     (command === "policy-activation-qa-build-requirements" &&
       (!SOURCE_SHA_PATTERN.test(values["--source-sha"]) ||
         !SOURCE_SHA_PATTERN.test(values["--target-source-sha"]) ||
@@ -340,7 +342,7 @@ export const runAuthoritativeInputProducerCli = async (
               proposedPolicyReference: reference("--proposed-policy-sha256"),
               activePolicyReference: reference("--active-policy-sha256"),
             }
-          : {}),
+          : { targetGate: values["--target-gate"] }),
       });
       await writeFileImpl(output, result.requirementsBytes, {
         flag: "wx",

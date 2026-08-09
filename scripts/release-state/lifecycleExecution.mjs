@@ -46,6 +46,8 @@ import { assertOwnGatePerformanceProducerReceiptAuthority } from "./ownGatePerfo
 import {
   PROVIDER_ALIAS_OBSERVATION_KIND,
   PROVIDER_ALIAS_OBSERVATION_MEDIA_TYPE,
+  resolvePendingProviderAuthority,
+  validateProviderAliasObservationEvidence,
 } from "./reconcileDecision.mjs";
 import {
   createReleaseEvent,
@@ -369,6 +371,100 @@ const eventReference = (namespace, record) => ({
   sha256: record.eventHash,
 });
 
+const readAcceptedStandardAuthority = ({
+  current,
+  binding,
+  acceptedEvent,
+  label,
+}) => {
+  if (
+    !isRecord(current?.snapshot) ||
+    !Array.isArray(current.records) ||
+    current.records.length === 0 ||
+    !isRecord(binding) ||
+    !isRecord(acceptedEvent)
+  ) {
+    throw new Error("Accepted standard authority input is invalid");
+  }
+  const namespace = current.records[0].event.namespace;
+  assertReference(acceptedEvent, namespace, `${label} accepted event`);
+  let replayed = null;
+  let match = null;
+  const authorizedBindings = [];
+  for (const record of current.records) {
+    const previous = replayed;
+    replayed = reduceReleaseState(replayed, record.event);
+    const reference = eventReference(record.event.namespace, record);
+    if (sameCanonicalValue(reference, acceptedEvent)) {
+      if (
+        match !== null ||
+        record.event.eventType !== "release-accepted" ||
+        !sameCanonicalValue(replayed.acceptedStandardEvent, reference) ||
+        !sameCanonicalValue(
+          replayed.acceptedStandardFloors,
+          record.event.payload.acceptedStandardFloors,
+        ) ||
+        replayed.acceptedGate !== record.event.payload.acceptedGate
+      ) {
+        throw new Error(
+          "Accepted standard event does not authorize the selected binding",
+        );
+      }
+      match = {
+        acceptedEvent: structuredClone(reference),
+        acceptedGate: record.event.payload.acceptedGate,
+        acceptedStandardFloors: structuredClone(
+          record.event.payload.acceptedStandardFloors,
+        ),
+      };
+      authorizedBindings.push(structuredClone(replayed.acceptedStandard));
+      continue;
+    }
+    if (
+      match !== null &&
+      record.event.eventType === "package-redeploy-activated" &&
+      record.event.payload.releaseRole === "standard" &&
+      sameCanonicalValue(
+        record.event.payload.originAcceptedEvent,
+        acceptedEvent,
+      ) &&
+      authorizedBindings.some((candidate) =>
+        sameCanonicalValue(
+          candidate,
+          previous?.pendingOperation?.originBinding,
+        ),
+      ) &&
+      sameCanonicalValue(
+        replayed.acceptedStandard,
+        record.event.payload.standardBinding,
+      ) &&
+      sameCanonicalValue(replayed.acceptedStandardEvent, acceptedEvent) &&
+      replayed.acceptedGate === match.acceptedGate &&
+      sameCanonicalValue(
+        replayed.acceptedStandardFloors,
+        match.acceptedStandardFloors,
+      )
+    ) {
+      authorizedBindings.push(
+        structuredClone(record.event.payload.standardBinding),
+      );
+    }
+  }
+  if (match === null) {
+    throw new Error("Accepted standard event could not be read back");
+  }
+  if (
+    !authorizedBindings.some((candidate) =>
+      sameCanonicalValue(candidate, binding),
+    )
+  ) {
+    throw new Error(
+      "Accepted standard event does not authorize the selected binding",
+    );
+  }
+  return match;
+};
+
 export const resolveAcceptedStandardAuthority = ({ current, binding }) => {
   if (!isRecord(current?.snapshot) || !isRecord(binding)) {
     throw new Error("Accepted standard authority input is invalid");
@@ -393,40 +489,52 @@ export const resolveAcceptedStandardAuthority = ({ current, binding }) => {
   if (distinctReferences.length !== 1) {
     throw new Error("Accepted standard event authority is absent or ambiguous");
   }
-  const acceptedEvent = distinctReferences[0];
+  return readAcceptedStandardAuthority({
+    current,
+    binding,
+    acceptedEvent: distinctReferences[0],
+    label: "Selected standard",
+  });
+};
+
+const resolveCurrentAcceptedStandardAuthority = ({ current }) => {
+  const binding = current?.snapshot?.acceptedStandard;
+  const acceptedEvent = current?.snapshot?.acceptedStandardEvent;
+  if (
+    binding === null ||
+    acceptedEvent === null ||
+    current.snapshot.acceptedGate === null ||
+    current.snapshot.acceptedStandardFloors === null
+  ) {
+    throw new Error("Current accepted standard authority is incomplete");
+  }
+  const authority = readAcceptedStandardAuthority({
+    current,
+    binding,
+    acceptedEvent,
+    label: "Current standard",
+  });
   let replayed = null;
-  let match = null;
   for (const record of current.records) {
     replayed = reduceReleaseState(replayed, record.event);
-    const reference = eventReference(record.event.namespace, record);
-    if (sameCanonicalValue(reference, acceptedEvent)) {
-      if (
-        record.event.eventType !== "release-accepted" ||
-        !sameCanonicalValue(replayed.acceptedStandard, binding) ||
-        !sameCanonicalValue(replayed.acceptedStandardEvent, reference) ||
-        !sameCanonicalValue(
-          replayed.acceptedStandardFloors,
-          record.event.payload.acceptedStandardFloors,
-        ) ||
-        replayed.acceptedGate !== record.event.payload.acceptedGate
-      ) {
-        throw new Error(
-          "Accepted standard event does not authorize the selected binding",
-        );
-      }
-      match = {
-        acceptedEvent: structuredClone(reference),
-        acceptedGate: record.event.payload.acceptedGate,
-        acceptedStandardFloors: structuredClone(
-          record.event.payload.acceptedStandardFloors,
-        ),
-      };
-    }
   }
-  if (match === null) {
-    throw new Error("Accepted standard event could not be read back");
+  if (
+    !sameCanonicalValue(replayed?.acceptedStandard, binding) ||
+    !sameCanonicalValue(replayed?.acceptedStandardEvent, acceptedEvent) ||
+    replayed?.acceptedGate !== current.snapshot.acceptedGate ||
+    !sameCanonicalValue(
+      replayed?.acceptedStandardFloors,
+      current.snapshot.acceptedStandardFloors,
+    ) ||
+    authority.acceptedGate !== current.snapshot.acceptedGate ||
+    !sameCanonicalValue(
+      authority.acceptedStandardFloors,
+      current.snapshot.acceptedStandardFloors,
+    )
+  ) {
+    throw new Error("Current accepted standard authority differs from replay");
   }
-  return match;
+  return { binding: structuredClone(binding), ...authority };
 };
 
 const putImmutableEvidence = async ({
@@ -556,9 +664,52 @@ const appendLifecycleEvent = async ({
   return { current: committed, record, replayed: receipt.replayed };
 };
 
+const expectedReconciliationTerminalEventType = ({
+  reconciliationKind,
+  pending,
+  observedBinding,
+}) => {
+  if (!isRecord(pending) || !isRecord(observedBinding)) {
+    throw new Error("Reconcile terminal authority is incomplete");
+  }
+  if (reconciliationKind === "provider-target-assigned/v1") {
+    const byOperationKind = {
+      "activate-containment": "containment-activated",
+      "promote-standard": null,
+      "redeploy-containment": "package-redeploy-activated",
+      "redeploy-standard": "package-redeploy-activated",
+      "rollback-standard": "rollback-activated",
+    };
+    if (!Object.hasOwn(byOperationKind, pending.kind)) {
+      throw new Error("Reconcile target operation kind is unsupported");
+    }
+    return byOperationKind[pending.kind];
+  }
+  if (reconciliationKind === "provider-previous-assigned/v1") {
+    if (observedBinding.releaseRole === "standard") {
+      return "operation-aborted";
+    }
+    if (observedBinding.releaseRole !== "containment") {
+      throw new Error("Reconcile previous binding role is unsupported");
+    }
+    return observedBinding.publicIdentityKind === "legacy-bootstrap-v1"
+      ? "temporary-containment-activated"
+      : "containment-activated";
+  }
+  if (reconciliationKind === "provider-emergency-assigned/v1") {
+    if (observedBinding.releaseRole !== "containment") {
+      throw new Error("Reconcile emergency binding role is unsupported");
+    }
+    return observedBinding.publicIdentityKind === "legacy-bootstrap-v1"
+      ? "temporary-containment-activated"
+      : "containment-activated";
+  }
+  throw new Error("Reconcile authority kind is unsupported");
+};
+
 export const appendReadyReconciliation = async (
   { store, decision },
-  { readState = readCurrentReleaseState } = {},
+  { readState = readCurrentReleaseState, clock = Date.now } = {},
 ) => {
   assertStore(store);
   if (!isRecord(decision) || !["ready", "blocked"].includes(decision.status)) {
@@ -648,6 +799,81 @@ export const appendReadyReconciliation = async (
     throw new Error("Reconcile provider observation authority is invalid");
   }
   const existing = findAppendRecord(current, appendId);
+  let providerAuthorityCurrent = current;
+  if (existing !== null) {
+    const existingIndex = current.records.findIndex(
+      (record) =>
+        record.sequence === existing.sequence &&
+        record.eventHash === existing.eventHash,
+    );
+    if (existingIndex <= 0) {
+      throw new Error("Reconcile predecessor history is absent");
+    }
+    const records = current.records.slice(0, existingIndex);
+    let snapshot = null;
+    for (const record of records) {
+      snapshot = reduceReleaseState(snapshot, record.event);
+    }
+    if (
+      snapshot === null ||
+      snapshot.sequence !== existing.sequence - 1 ||
+      snapshot.eventHash !== existing.event.previousEventHash
+    ) {
+      throw new Error("Reconcile predecessor history differs from replay");
+    }
+    providerAuthorityCurrent = {
+      records,
+      snapshot,
+      head: {
+        sequence: snapshot.sequence,
+        eventHash: snapshot.eventHash,
+      },
+    };
+  }
+  const pendingProviderAuthority = await resolvePendingProviderAuthority({
+    store,
+    current: providerAuthorityCurrent,
+  });
+  const validatedProviderObservation =
+    await validateProviderAliasObservationEvidence(
+      {
+        store,
+        observationBytes: storedObservation.bytes,
+        providerPolicy: pendingProviderAuthority.providerPolicy,
+        namespace: store.namespace,
+        expectedBinding: plan.payload.observedBinding,
+        freshnessRequired: existing === null,
+      },
+      { now: clock },
+    );
+  const expectedEvidenceRefs = sortAndDedupeReferences(
+    [
+      plan.payload.providerObservation,
+      plan.payload.observedBinding.providerEvidence,
+      ...validatedProviderObservation.providerReceiptChainReferences,
+    ],
+    store.namespace,
+  );
+  if (!sameCanonicalValue(evidenceRefs, expectedEvidenceRefs)) {
+    throw new Error(
+      "Reconcile evidence set differs from verified provider authority",
+    );
+  }
+  const authorizedTerminalEventType = expectedReconciliationTerminalEventType({
+    reconciliationKind: plan.payload.reconciliationKind,
+    pending: providerAuthorityCurrent.snapshot.pendingOperation,
+    observedBinding: plan.payload.observedBinding,
+  });
+  if (
+    (authorizedTerminalEventType === null) !==
+      (decision.terminalPlan === null) ||
+    (decision.terminalPlan !== null &&
+      decision.terminalPlan.eventType !== authorizedTerminalEventType)
+  ) {
+    throw new Error(
+      "Reconcile terminal event type differs from replayed operation authority",
+    );
+  }
   let reconciled;
   if (existing) {
     if (
@@ -702,6 +928,35 @@ export const appendReadyReconciliation = async (
   ) {
     throw new Error("Reconcile authority event could not be replayed");
   }
+  const reconciliationRecordIndex = reconciled.current.records.findIndex(
+    (record) => record.eventHash === reconciled.record.eventHash,
+  );
+  if (reconciliationRecordIndex < 0) {
+    throw new Error("Reconcile authority history prefix is absent");
+  }
+  const reconciliationCurrent = {
+    records: reconciled.current.records.slice(0, reconciliationRecordIndex + 1),
+    snapshot: reconciliationSnapshot,
+    head: {
+      sequence: reconciled.record.sequence,
+      eventHash: reconciled.record.eventHash,
+    },
+  };
+  const expectedTerminalEventType = expectedReconciliationTerminalEventType({
+    reconciliationKind: plan.payload.reconciliationKind,
+    pending: reconciliationSnapshot.pendingOperation,
+    observedBinding: plan.payload.observedBinding,
+  });
+  if (
+    expectedTerminalEventType !== authorizedTerminalEventType ||
+    (expectedTerminalEventType === null) !== (decision.terminalPlan === null) ||
+    (decision.terminalPlan !== null &&
+      decision.terminalPlan.eventType !== expectedTerminalEventType)
+  ) {
+    throw new Error(
+      "Reconcile terminal event type differs from replayed operation authority",
+    );
+  }
   if (decision.terminalPlan === null) {
     return {
       ...decision,
@@ -723,6 +978,7 @@ export const appendReadyReconciliation = async (
   if (
     ![
       "containment-activated",
+      "operation-aborted",
       "package-redeploy-activated",
       "rollback-activated",
       "temporary-containment-activated",
@@ -731,10 +987,12 @@ export const appendReadyReconciliation = async (
       terminalPlan.targetBinding,
       reconciliationSnapshot.pendingOperation?.targetBinding,
     ) ||
-    !sameCanonicalValue(
-      terminalPlan.approvalRefs,
-      reconciliationSnapshot.pendingOperation?.approvalRefs,
-    )
+    (terminalPlan.eventType === "operation-aborted"
+      ? terminalPlan.approvalRefs.length !== 0
+      : !sameCanonicalValue(
+          terminalPlan.approvalRefs,
+          reconciliationSnapshot.pendingOperation?.approvalRefs,
+        ))
   ) {
     throw new Error("Reconcile terminal plan differs from replayed authority");
   }
@@ -746,9 +1004,183 @@ export const appendReadyReconciliation = async (
       label: "Reconcile terminal target",
     });
   }
+  const terminalPending = reconciliationCurrent.snapshot.pendingOperation;
+  let terminalPayload;
+  let acceptedOriginEvidence = [];
+  if (terminalPlan.eventType === "operation-aborted") {
+    assertExactKeys(terminalPlan.payload, [], "Reconcile operation abort");
+    terminalPayload = {};
+  } else if (terminalPlan.eventType === "rollback-activated") {
+    assertExactKeys(
+      terminalPlan.payload,
+      [
+        "binding",
+        "companionBinding",
+        "originAcceptedEvent",
+        "originAcceptedGate",
+        "originAcceptedStandardFloors",
+      ],
+      "Reconcile rollback terminal",
+    );
+    const rollbackAuthority = await derivePostRollbackInventory({
+      store,
+      current: reconciliationCurrent,
+      targetBinding: terminalPlan.targetBinding,
+    });
+    if (
+      !sameCanonicalValue(
+        terminalPlan.payload.binding,
+        terminalPlan.targetBinding,
+      ) ||
+      !sameCanonicalValue(
+        terminalPlan.payload.companionBinding,
+        terminalPending.companionBinding,
+      ) ||
+      !sameCanonicalValue(
+        terminalPlan.payload.originAcceptedEvent,
+        rollbackAuthority.targetAuthority.acceptedEvent,
+      ) ||
+      terminalPlan.payload.originAcceptedGate !==
+        rollbackAuthority.targetAuthority.acceptedGate ||
+      !sameCanonicalValue(
+        terminalPlan.payload.originAcceptedStandardFloors,
+        rollbackAuthority.targetAuthority.acceptedStandardFloors,
+      )
+    ) {
+      throw new Error(
+        "Reconcile rollback target differs from accepted authority",
+      );
+    }
+    terminalPayload = {
+      binding: structuredClone(terminalPlan.targetBinding),
+      companionBinding: structuredClone(terminalPending.companionBinding),
+      rollbackInventory: rollbackAuthority.rollbackInventory,
+      originAcceptedEvent: rollbackAuthority.targetAuthority.acceptedEvent,
+      originAcceptedGate: rollbackAuthority.targetAuthority.acceptedGate,
+      originAcceptedStandardFloors:
+        rollbackAuthority.targetAuthority.acceptedStandardFloors,
+    };
+    acceptedOriginEvidence = [
+      rollbackAuthority.targetAuthority.acceptedEvent,
+      rollbackAuthority.displacedAuthority.acceptedEvent,
+    ];
+  } else if (
+    terminalPlan.eventType === "package-redeploy-activated" &&
+    terminalPending.kind === "redeploy-standard"
+  ) {
+    assertExactKeys(
+      terminalPlan.payload,
+      [
+        "companionBinding",
+        "originAcceptedEvent",
+        "originAcceptedGate",
+        "originAcceptedStandardFloors",
+        "releaseRole",
+        "standardBinding",
+      ],
+      "Reconcile standard redeploy terminal",
+    );
+    const redeployAuthority = derivePostStandardRedeployInventory({
+      current: reconciliationCurrent,
+      originBinding: terminalPending.originBinding,
+      targetBinding: terminalPlan.targetBinding,
+    });
+    if (
+      terminalPlan.payload.releaseRole !== "standard" ||
+      !sameCanonicalValue(
+        terminalPlan.payload.standardBinding,
+        terminalPlan.targetBinding,
+      ) ||
+      !sameCanonicalValue(
+        terminalPlan.payload.companionBinding,
+        terminalPending.companionBinding,
+      ) ||
+      !sameCanonicalValue(
+        terminalPlan.payload.originAcceptedEvent,
+        redeployAuthority.originAuthority.acceptedEvent,
+      ) ||
+      terminalPlan.payload.originAcceptedGate !==
+        redeployAuthority.originAuthority.acceptedGate ||
+      !sameCanonicalValue(
+        terminalPlan.payload.originAcceptedStandardFloors,
+        redeployAuthority.originAuthority.acceptedStandardFloors,
+      )
+    ) {
+      throw new Error(
+        "Reconcile standard redeploy differs from accepted authority",
+      );
+    }
+    terminalPayload = {
+      releaseRole: "standard",
+      standardBinding: structuredClone(terminalPlan.targetBinding),
+      companionBinding: structuredClone(terminalPending.companionBinding),
+      rollbackInventory: redeployAuthority.rollbackInventory,
+      originAcceptedEvent: redeployAuthority.originAuthority.acceptedEvent,
+      originAcceptedGate: redeployAuthority.originAuthority.acceptedGate,
+      originAcceptedStandardFloors:
+        redeployAuthority.originAuthority.acceptedStandardFloors,
+    };
+    acceptedOriginEvidence = [redeployAuthority.originAuthority.acceptedEvent];
+  } else {
+    const packageRedeploy =
+      terminalPlan.eventType === "package-redeploy-activated";
+    assertExactKeys(
+      terminalPlan.payload,
+      [
+        "activatedAt",
+        "binding",
+        "recoveryDeadline",
+        ...(packageRedeploy ? ["releaseRole"] : []),
+        "targetStandard",
+      ],
+      "Reconcile containment terminal",
+    );
+    if (
+      (packageRedeploy && terminalPlan.payload.releaseRole !== "containment") ||
+      !sameCanonicalValue(
+        terminalPlan.payload.binding,
+        terminalPlan.targetBinding,
+      ) ||
+      !sameCanonicalValue(
+        terminalPlan.payload.targetStandard,
+        reconciliationSnapshot.acceptedStandard,
+      )
+    ) {
+      throw new Error(
+        "Reconcile containment differs from replayed operation authority",
+      );
+    }
+    assertTimestamp(
+      terminalPlan.payload.activatedAt,
+      "Reconcile proposed containment activatedAt",
+    );
+    assertTimestamp(
+      terminalPlan.payload.recoveryDeadline,
+      "Reconcile proposed containment recoveryDeadline",
+    );
+    const activatedAt = new Date(
+      assertTimestamp(
+        reconciled.record.committedAt,
+        "Reconcile authority commit time",
+      ),
+    ).toISOString();
+    const recoveryHours =
+      terminalPlan.eventType === "temporary-containment-activated" ? 6 : 24;
+    terminalPayload = {
+      ...(packageRedeploy ? { releaseRole: "containment" } : {}),
+      binding: structuredClone(terminalPlan.targetBinding),
+      activatedAt,
+      recoveryDeadline: new Date(
+        Date.parse(activatedAt) + recoveryHours * 60 * 60 * 1000,
+      ).toISOString(),
+      targetStandard: structuredClone(reconciliationSnapshot.acceptedStandard),
+    };
+  }
   const companionBinding =
-    terminalPlan.payload.companionBinding ??
-    reconciliationSnapshot.pendingOperation.companionBinding;
+    terminalPlan.eventType === "operation-aborted"
+      ? null
+      : (terminalPayload.companionBinding ??
+        reconciliationSnapshot.pendingOperation.companionBinding);
   if (companionBinding !== null) {
     await assertArtifactArchiveAvailable({
       store,
@@ -781,12 +1213,6 @@ export const appendReadyReconciliation = async (
     ),
     readState,
   });
-  const acceptedOriginEvidence = Object.hasOwn(
-    terminalPlan.payload,
-    "originAcceptedEvent",
-  )
-    ? [terminalPlan.payload.originAcceptedEvent]
-    : [];
   const terminal = await appendLifecycleEvent({
     store,
     current: validated.current,
@@ -798,7 +1224,7 @@ export const appendReadyReconciliation = async (
       operationId: plan.operationId,
       evidenceSha256: decision.observationSha256,
     }),
-    payload: terminalPlan.payload,
+    payload: terminalPayload,
     evidenceRefs: sortAndDedupeReferences(
       [
         ...evidenceRefs,
@@ -1520,20 +1946,14 @@ const validateAssignmentEvidence = ({
   return { validation, probe };
 };
 
-const assertPreparedResultInState = ({
+const assertPreparedResultRecord = ({
   current,
   validatedPrepared,
   namespace,
 }) => {
-  const { result, event, operation } = validatedPrepared;
-  if (
-    event.namespace !== namespace ||
-    current.snapshot.pendingOperation === null ||
-    !sameCanonicalValue(current.snapshot.pendingOperation, operation)
-  ) {
-    throw new Error(
-      "Prepared promotion result differs from the pending Release State operation",
-    );
+  const { result, event } = validatedPrepared;
+  if (event.namespace !== namespace) {
+    throw new Error("Prepared promotion result namespace differs");
   }
   const records = current.records.filter(
     (record) =>
@@ -1551,6 +1971,50 @@ const assertPreparedResultInState = ({
     );
   }
   return records[0];
+};
+
+const assertPreparedResultInState = (options) => {
+  const record = assertPreparedResultRecord(options);
+  if (
+    options.current.snapshot.pendingOperation === null ||
+    !sameCanonicalValue(
+      options.current.snapshot.pendingOperation,
+      options.validatedPrepared.operation,
+    )
+  ) {
+    throw new Error(
+      "Prepared promotion result differs from the pending Release State operation",
+    );
+  }
+  return record;
+};
+
+const historicalCurrentThroughRecord = ({ current, record, label }) => {
+  const recordIndex = current.records.findIndex(
+    (candidate) =>
+      candidate.sequence === record.sequence &&
+      candidate.eventHash === record.eventHash,
+  );
+  if (recordIndex < 0) {
+    throw new Error(`${label} history prefix is absent`);
+  }
+  const records = current.records.slice(0, recordIndex + 1);
+  let snapshot = null;
+  for (const historical of records) {
+    snapshot = reduceReleaseState(snapshot, historical.event);
+  }
+  if (
+    snapshot === null ||
+    snapshot.sequence !== record.sequence ||
+    snapshot.eventHash !== record.eventHash
+  ) {
+    throw new Error(`${label} history prefix differs from replay`);
+  }
+  return {
+    records,
+    snapshot,
+    head: { sequence: record.sequence, eventHash: record.eventHash },
+  };
 };
 
 const putEvidenceEntries = async ({ store, namespace, entries }) => {
@@ -1672,11 +2136,6 @@ export const recordPreparedPromotionAssignment = async (
     nowMilliseconds,
   });
   let current = await readState({ store });
-  const preparedRecord = assertPreparedResultInState({
-    current,
-    validatedPrepared,
-    namespace: store.namespace,
-  });
   const operation = validatedPrepared.operation;
   const promotionReceiptSha256 = sha256Bytes(promotionReceiptBytes);
   const appendId = deriveLifecycleAppendId({
@@ -1686,6 +2145,18 @@ export const recordPreparedPromotionAssignment = async (
     evidenceSha256: promotionReceiptSha256,
   });
   const existing = findAppendRecord(current, appendId);
+  let preparedRecord =
+    existing === null
+      ? assertPreparedResultInState({
+          current,
+          validatedPrepared,
+          namespace: store.namespace,
+        })
+      : assertPreparedResultRecord({
+          current,
+          validatedPrepared,
+          namespace: store.namespace,
+        });
   const parsedReceipt = parseCanonicalJsonBytes(
     promotionReceiptBytes,
     "Prepared promotion receipt",
@@ -1781,11 +2252,18 @@ export const recordPreparedPromotionAssignment = async (
     });
   }
   current = await readState({ store });
-  assertPreparedResultInState({
-    current,
-    validatedPrepared,
-    namespace: store.namespace,
-  });
+  preparedRecord =
+    existing === null
+      ? assertPreparedResultInState({
+          current,
+          validatedPrepared,
+          namespace: store.namespace,
+        })
+      : assertPreparedResultRecord({
+          current,
+          validatedPrepared,
+          namespace: store.namespace,
+        });
   const assignedPayload = {
     assignmentReceipt: references.assignmentReceipt,
     promotionReceipt: references.promotionReceipt,
@@ -1850,22 +2328,23 @@ export const recordPreparedPromotionLifecycle = async (
     nowMilliseconds,
   });
   const initial = await readState({ store });
-  assertPreparedResultInState({
-    current: initial,
-    validatedPrepared,
-    namespace: store.namespace,
-  });
   const assignedAppendId = deriveLifecycleAppendId({
     kind: "deployment-assigned",
     namespace: store.namespace,
     operationId: validatedPrepared.operation.operationId,
     evidenceSha256: sha256Bytes(promotionReceiptBytes),
   });
-  if (findAppendRecord(initial, assignedAppendId) === null) {
+  const initialAssignedRecord = findAppendRecord(initial, assignedAppendId);
+  if (initialAssignedRecord === null) {
     throw new Error(
       "Deployment assignment must be recorded before production validation",
     );
   }
+  assertPreparedResultRecord({
+    current: initial,
+    validatedPrepared,
+    namespace: store.namespace,
+  });
   parseCanonicalJsonBytes(
     assignmentValidationBytes,
     "Assignment validation evidence",
@@ -2019,7 +2498,7 @@ export const recordPreparedPromotionLifecycle = async (
   }
 
   let current = await readState({ store });
-  const preparedRecord = assertPreparedResultInState({
+  const preparedRecord = assertPreparedResultRecord({
     current,
     validatedPrepared,
     namespace: store.namespace,
@@ -2084,6 +2563,11 @@ export const recordPreparedPromotionLifecycle = async (
     readState,
   });
   current = assignmentValidated.current;
+  const terminalAuthorityCurrent = historicalCurrentThroughRecord({
+    current,
+    record: assignmentValidated.record,
+    label: "Recovery assignment validation",
+  });
 
   if (operation.kind !== "promote-standard") {
     const terminalKinds = {
@@ -2110,22 +2594,45 @@ export const recordPreparedPromotionLifecycle = async (
         label: "Recovery terminal companion",
       });
     }
-    const activatedAt = new Date(
-      readClock(clock, "Recovery terminal commit"),
-    ).toISOString();
-    const recoveryDeadline = new Date(
-      Date.parse(activatedAt) + SOURCE_HARDENED_RECOVERY_MILLISECONDS,
-    ).toISOString();
+    const terminalAppendId = deriveLifecycleAppendId({
+      kind: terminalEventType,
+      namespace: store.namespace,
+      operationId,
+      evidenceSha256: references.assignmentValidation.sha256,
+    });
+    const existingTerminal = findAppendRecord(current, terminalAppendId);
+    const timestampedRecovery = [
+      "activate-containment",
+      "redeploy-containment",
+    ].includes(operation.kind);
+    const activatedAt = timestampedRecovery
+      ? existingTerminal === null
+        ? new Date(readClock(clock, "Recovery terminal commit")).toISOString()
+        : existingTerminal.event.payload.activatedAt
+      : null;
+    const recoveryDeadline = timestampedRecovery
+      ? new Date(
+          Date.parse(activatedAt) + SOURCE_HARDENED_RECOVERY_MILLISECONDS,
+        ).toISOString()
+      : null;
     let terminalPayload;
     let terminalAcceptedAuthority = null;
+    let terminalAcceptedEvidence = [];
     if (operation.kind === "rollback-standard") {
-      terminalAcceptedAuthority = resolveAcceptedStandardAuthority({
-        current,
-        binding: operation.targetBinding,
+      const rollbackAuthority = await derivePostRollbackInventory({
+        store,
+        current: terminalAuthorityCurrent,
+        targetBinding: operation.targetBinding,
       });
+      terminalAcceptedAuthority = rollbackAuthority.targetAuthority;
+      terminalAcceptedEvidence = [
+        rollbackAuthority.targetAuthority.acceptedEvent,
+        rollbackAuthority.displacedAuthority.acceptedEvent,
+      ];
       terminalPayload = {
         binding: operation.targetBinding,
         companionBinding: operation.companionBinding,
+        rollbackInventory: rollbackAuthority.rollbackInventory,
         originAcceptedEvent: terminalAcceptedAuthority.acceptedEvent,
         originAcceptedGate: terminalAcceptedAuthority.acceptedGate,
         originAcceptedStandardFloors:
@@ -2136,7 +2643,7 @@ export const recordPreparedPromotionLifecycle = async (
         binding: operation.targetBinding,
         activatedAt,
         recoveryDeadline,
-        targetStandard: current.snapshot.acceptedStandard,
+        targetStandard: terminalAuthorityCurrent.snapshot.acceptedStandard,
       };
     } else if (operation.kind === "redeploy-containment") {
       terminalPayload = {
@@ -2144,60 +2651,21 @@ export const recordPreparedPromotionLifecycle = async (
         binding: operation.targetBinding,
         activatedAt,
         recoveryDeadline,
-        targetStandard: current.snapshot.acceptedStandard,
+        targetStandard: terminalAuthorityCurrent.snapshot.acceptedStandard,
       };
     } else {
-      terminalAcceptedAuthority = resolveAcceptedStandardAuthority({
-        current,
-        binding: operation.originBinding,
+      const redeployAuthority = derivePostStandardRedeployInventory({
+        current: terminalAuthorityCurrent,
+        originBinding: operation.originBinding,
+        targetBinding: operation.targetBinding,
       });
-      const inventory = current.snapshot.rollbackInventory.map((entry) =>
-        sameCanonicalValue(entry.binding, operation.originBinding)
-          ? {
-              ...structuredClone(entry),
-              binding: operation.targetBinding,
-              acceptedEvent: terminalAcceptedAuthority.acceptedEvent,
-              acceptedGate: terminalAcceptedAuthority.acceptedGate,
-              acceptedStandardFloors:
-                terminalAcceptedAuthority.acceptedStandardFloors,
-            }
-          : structuredClone(entry),
-      );
-      if (
-        !inventory.some(
-          (entry) =>
-            entry.binding.bindingId === operation.targetBinding.bindingId,
-        )
-      ) {
-        if (
-          current.snapshot.acceptedStandard?.bindingId !==
-            operation.originBinding.bindingId ||
-          current.snapshot.acceptedStandardEvent === null
-        ) {
-          throw new Error(
-            "Standard redeploy origin has no accepted inventory authority",
-          );
-        }
-        inventory.push({
-          binding: operation.targetBinding,
-          acceptedEvent: terminalAcceptedAuthority.acceptedEvent,
-          acceptedGate: terminalAcceptedAuthority.acceptedGate,
-          acceptedStandardFloors:
-            terminalAcceptedAuthority.acceptedStandardFloors,
-          evaluatedPolicy: current.snapshot.activeReleasePolicy,
-          eligibleActions: ["package-redeploy", "rollback"],
-          eligibility: "eligible",
-          reasonCodes: [],
-        });
-      }
-      inventory.sort((left, right) =>
-        compareUtf8(left.binding.bindingId, right.binding.bindingId),
-      );
+      terminalAcceptedAuthority = redeployAuthority.originAuthority;
+      terminalAcceptedEvidence = [terminalAcceptedAuthority.acceptedEvent];
       terminalPayload = {
         releaseRole: "standard",
         standardBinding: operation.targetBinding,
         companionBinding: operation.companionBinding,
-        rollbackInventory: inventory,
+        rollbackInventory: redeployAuthority.rollbackInventory,
         originAcceptedEvent: terminalAcceptedAuthority.acceptedEvent,
         originAcceptedGate: terminalAcceptedAuthority.acceptedGate,
         originAcceptedStandardFloors:
@@ -2209,20 +2677,13 @@ export const recordPreparedPromotionLifecycle = async (
       current,
       eventType: terminalEventType,
       operationId,
-      appendId: deriveLifecycleAppendId({
-        kind: terminalEventType,
-        namespace: store.namespace,
-        operationId,
-        evidenceSha256: references.assignmentValidation.sha256,
-      }),
+      appendId: terminalAppendId,
       payload: terminalPayload,
       evidenceRefs: sortAndDedupeReferences(
         [
           ...sharedEvidence,
           eventReference(store.namespace, assignmentValidated.record),
-          ...(terminalAcceptedAuthority === null
-            ? []
-            : [terminalAcceptedAuthority.acceptedEvent]),
+          ...terminalAcceptedEvidence,
         ],
         store.namespace,
       ),
@@ -2564,6 +3025,27 @@ const hasIndependentCompanion = (standard, companion) =>
   standard.artifactManifest.sha256 !== companion.artifactManifest.sha256 &&
   standard.providerEvidence.sha256 !== companion.providerEvidence.sha256;
 
+const assertIndependentSameFloorStandard = ({
+  snapshot,
+  standard,
+  candidateGate,
+}) => {
+  if (candidateGate !== snapshot.acceptedGate) return;
+  const currentStandard = snapshot.acceptedStandard;
+  if (
+    currentStandard === null ||
+    standard.sourceSha === currentStandard.sourceSha ||
+    standard.buildId === currentStandard.buildId ||
+    standard.bindingId === currentStandard.bindingId ||
+    standard.providerDeploymentId === currentStandard.providerDeploymentId ||
+    standard.deploymentUrl === currentStandard.deploymentUrl
+  ) {
+    throw new Error(
+      "Same-floor standard replacement is not an independent source deployment",
+    );
+  }
+};
+
 const standardFloorsFromDimensions = (dimensions) =>
   Object.fromEntries(
     ACCEPTED_STANDARD_FLOOR_KEYS.map((key) => [key, dimensions[key]]),
@@ -2593,6 +3075,7 @@ const releasePolicyPhaseStates = (releasePolicy) => {
 export const deriveAcceptedGateForCandidate = ({
   snapshot,
   releasePolicy,
+  candidateGate,
   candidateFloors,
 }) => {
   const phaseStates = releasePolicyPhaseStates(releasePolicy);
@@ -2629,10 +3112,27 @@ export const deriveAcceptedGateForCandidate = ({
       "Current accepted gate and floors differ from policy phases",
     );
   }
+  if (
+    snapshot.acceptedGate !== null &&
+    candidateGate === snapshot.acceptedGate
+  ) {
+    if (candidateGate === "P8-CLEAN") {
+      throw new Error(
+        "Terminal P8-CLEAN does not permit a same-floor standard replacement",
+      );
+    }
+    if (!sameCanonicalValue(candidateFloors, currentFloors)) {
+      throw new Error(
+        "Same-floor standard replacement differs from current accepted floors",
+      );
+    }
+    return candidateGate;
+  }
   const candidate = phaseStates[currentIndex + 1];
   if (
     currentIndex < -1 ||
     candidate === undefined ||
+    candidate.gate !== candidateGate ||
     !sameCanonicalValue(candidate.floors, candidateFloors)
   ) {
     throw new Error(
@@ -2811,7 +3311,13 @@ const deriveAcceptanceReleaseState = async ({
   const acceptedGate = deriveAcceptedGateForCandidate({
     snapshot: current.snapshot,
     releasePolicy,
+    candidateGate: standardEvidence.manifest.targetGate,
     candidateFloors: acceptedStandardFloors,
+  });
+  assertIndependentSameFloorStandard({
+    snapshot: current.snapshot,
+    standard,
+    candidateGate: acceptedGate,
   });
   const promptCloseAll =
     standardEvidence.identity.pwaLifecycle === "prompt-close-all-v1";
@@ -2887,7 +3393,13 @@ export const resolvePendingAcceptanceRequirements = async (
   const acceptedGate = deriveAcceptedGateForCandidate({
     snapshot: current.snapshot,
     releasePolicy,
+    candidateGate: standardEvidence.manifest.targetGate,
     candidateFloors: acceptedStandardFloors,
+  });
+  assertIndependentSameFloorStandard({
+    snapshot: current.snapshot,
+    standard: pending.standardBinding,
+    candidateGate: acceptedGate,
   });
   return buildPendingAcceptanceRequirements({
     namespace: store.namespace,
@@ -2927,6 +3439,7 @@ export const deriveRollbackInventory = async ({
       replayed.acceptedStandard !== null
     ) {
       acceptedEvents.set(replayed.acceptedStandard.bindingId, {
+        binding: structuredClone(replayed.acceptedStandard),
         reference: eventReference(record.event.namespace, record),
         gate: record.event.payload.acceptedGate,
         floors: structuredClone(record.event.payload.acceptedStandardFloors),
@@ -2949,20 +3462,18 @@ export const deriveRollbackInventory = async ({
     ]),
   );
   const previous = current.snapshot.acceptedStandard;
-  if (previous !== null && !candidates.has(previous.bindingId)) {
-    const accepted = acceptedEvents.get(previous.bindingId);
-    if (accepted) {
-      candidates.set(previous.bindingId, {
-        binding: structuredClone(previous),
-        acceptedEvent: accepted.reference,
-        acceptedGate: accepted.gate,
-        acceptedStandardFloors: structuredClone(accepted.floors),
-        evaluatedPolicy: structuredClone(current.snapshot.activeReleasePolicy),
-        eligibleActions: [],
-        eligibility: "ineligible",
-        reasonCodes: [],
-      });
-    }
+  if (previous !== null) {
+    const accepted = resolveCurrentAcceptedStandardAuthority({ current });
+    candidates.set(previous.bindingId, {
+      binding: structuredClone(previous),
+      acceptedEvent: accepted.acceptedEvent,
+      acceptedGate: accepted.acceptedGate,
+      acceptedStandardFloors: structuredClone(accepted.acceptedStandardFloors),
+      evaluatedPolicy: structuredClone(current.snapshot.activeReleasePolicy),
+      eligibleActions: [],
+      eligibility: "ineligible",
+      reasonCodes: [],
+    });
   }
   const inventory = [];
   for (const entry of candidates.values()) {
@@ -2983,26 +3494,30 @@ export const deriveRollbackInventory = async ({
     } catch {
       reasons.push("artifact-archive-unavailable");
     }
-    const accepted =
-      acceptedEvents.get(entry.binding.bindingId) ??
-      (() => {
-        const record = current.records.find(
-          (candidate) =>
-            candidate.eventHash === entry.acceptedEvent?.sha256 &&
-            candidate.event.eventType === "release-accepted",
-        );
-        return record
-          ? {
-              reference: structuredClone(entry.acceptedEvent),
-              gate: record.event.payload.acceptedGate,
-              floors: structuredClone(
-                record.event.payload.acceptedStandardFloors,
-              ),
-            }
-          : null;
-      })();
-    if (!accepted) {
-      throw new Error("Rollback inventory accepted event is unresolved");
+    const latestAccepted = acceptedEvents.get(entry.binding.bindingId);
+    const selectedAcceptedEvent =
+      latestAccepted?.reference ?? entry.acceptedEvent;
+    const resolvedAccepted = readAcceptedStandardAuthority({
+      current,
+      binding: entry.binding,
+      acceptedEvent: selectedAcceptedEvent,
+      label: `Rollback inventory binding ${entry.binding.bindingId}`,
+    });
+    const accepted = {
+      ...(latestAccepted === undefined
+        ? {}
+        : { binding: latestAccepted.binding }),
+      reference: resolvedAccepted.acceptedEvent,
+      gate: resolvedAccepted.acceptedGate,
+      floors: resolvedAccepted.acceptedStandardFloors,
+    };
+    if (
+      Object.hasOwn(accepted, "binding") &&
+      !sameCanonicalValue(accepted.binding, entry.binding)
+    ) {
+      throw new Error(
+        "Rollback inventory binding differs from its latest accepted authority",
+      );
     }
     assertExactKeys(
       accepted.floors,
@@ -3037,6 +3552,154 @@ export const deriveRollbackInventory = async ({
   return inventory.sort((left, right) =>
     compareUtf8(left.binding.bindingId, right.binding.bindingId),
   );
+};
+
+const derivePostRollbackInventory = async ({
+  store,
+  current,
+  targetBinding,
+}) => {
+  const targetAuthority = resolveAcceptedStandardAuthority({
+    current,
+    binding: targetBinding,
+  });
+  const displacedAuthority = resolveCurrentAcceptedStandardAuthority({
+    current,
+  });
+  if (displacedAuthority.binding.bindingId === targetBinding.bindingId) {
+    throw new Error("Rollback target must differ from the current standard");
+  }
+  const releasePolicy = await readCanonicalEvidenceObject({
+    store,
+    namespace: store.namespace,
+    reference: current.snapshot.activeReleasePolicy,
+    label: "Active release policy",
+  });
+  const derived = await deriveRollbackInventory({
+    store,
+    current,
+    releasePolicy,
+    minimumAcceptedGate: targetAuthority.acceptedGate,
+    minimumAcceptedFloors: targetAuthority.acceptedStandardFloors,
+  });
+  const displacedEntries = derived.filter(
+    (entry) => entry.binding.bindingId === displacedAuthority.binding.bindingId,
+  );
+  if (
+    displacedEntries.length !== 1 ||
+    !sameCanonicalValue(
+      displacedEntries[0].binding,
+      displacedAuthority.binding,
+    ) ||
+    !sameCanonicalValue(
+      displacedEntries[0].acceptedEvent,
+      displacedAuthority.acceptedEvent,
+    ) ||
+    displacedEntries[0].acceptedGate !== displacedAuthority.acceptedGate ||
+    !sameCanonicalValue(
+      displacedEntries[0].acceptedStandardFloors,
+      displacedAuthority.acceptedStandardFloors,
+    ) ||
+    displacedEntries[0].eligibility !== "eligible" ||
+    !displacedEntries[0].eligibleActions.includes("rollback")
+  ) {
+    throw new Error(
+      "Displaced current standard is not an exact eligible rollback authority",
+    );
+  }
+  const priorUnrelated = current.snapshot.rollbackInventory.filter(
+    (entry) =>
+      entry.binding.bindingId !== targetBinding.bindingId &&
+      entry.binding.bindingId !== displacedAuthority.binding.bindingId,
+  );
+  for (const priorEntry of priorUnrelated) {
+    const rederivedEntry = derived.find(
+      (entry) => entry.binding.bindingId === priorEntry.binding.bindingId,
+    );
+    if (!sameCanonicalValue(rederivedEntry, priorEntry)) {
+      throw new Error(
+        "Unrelated rollback inventory changed during terminal verification",
+      );
+    }
+  }
+  const rollbackInventory = [
+    ...priorUnrelated.map((entry) => structuredClone(entry)),
+    structuredClone(displacedEntries[0]),
+  ].sort((left, right) =>
+    compareUtf8(left.binding.bindingId, right.binding.bindingId),
+  );
+  return {
+    targetAuthority,
+    displacedAuthority,
+    rollbackInventory,
+  };
+};
+
+const derivePostStandardRedeployInventory = ({
+  current,
+  originBinding,
+  targetBinding,
+}) => {
+  const originAuthority = resolveAcceptedStandardAuthority({
+    current,
+    binding: originBinding,
+  });
+  if (
+    current.snapshot.rollbackInventory.some(
+      (entry) =>
+        entry.binding.bindingId === targetBinding.bindingId &&
+        !sameCanonicalValue(entry.binding, originBinding),
+    )
+  ) {
+    throw new Error(
+      "Standard redeploy target collides with rollback inventory",
+    );
+  }
+  let replacedOrigin = false;
+  const rollbackInventory = current.snapshot.rollbackInventory.map((entry) => {
+    if (!sameCanonicalValue(entry.binding, originBinding)) {
+      return structuredClone(entry);
+    }
+    if (replacedOrigin) {
+      throw new Error("Standard redeploy origin inventory is ambiguous");
+    }
+    replacedOrigin = true;
+    return {
+      ...structuredClone(entry),
+      binding: structuredClone(targetBinding),
+      acceptedEvent: originAuthority.acceptedEvent,
+      acceptedGate: originAuthority.acceptedGate,
+      acceptedStandardFloors: structuredClone(
+        originAuthority.acceptedStandardFloors,
+      ),
+    };
+  });
+  if (!replacedOrigin) {
+    if (
+      !sameCanonicalValue(current.snapshot.acceptedStandard, originBinding) ||
+      current.snapshot.acceptedStandardEvent === null
+    ) {
+      throw new Error(
+        "Standard redeploy origin has no accepted inventory authority",
+      );
+    }
+    rollbackInventory.push({
+      binding: structuredClone(targetBinding),
+      acceptedEvent: originAuthority.acceptedEvent,
+      acceptedGate: originAuthority.acceptedGate,
+      acceptedStandardFloors: structuredClone(
+        originAuthority.acceptedStandardFloors,
+      ),
+      evaluatedPolicy: structuredClone(current.snapshot.activeReleasePolicy),
+      eligibleActions: ["package-redeploy", "rollback"],
+      eligibility: "eligible",
+      reasonCodes: [],
+    });
+  }
+  rollbackInventory.sort((left, right) =>
+    compareUtf8(left.binding.bindingId, right.binding.bindingId),
+  );
+  return { originAuthority, rollbackInventory };
 };
 
 const validateAcceptanceEvidence = ({
@@ -3721,13 +4384,17 @@ const executePendingStandardAcceptance = async (
     );
   }
   const acceptedStandardFloors = derivedReleaseState.acceptedStandardFloors;
-  const rollbackInventory = await deriveRollbackInventory({
-    store,
-    current,
-    releasePolicy: derivedReleaseState.releasePolicy,
-    minimumAcceptedGate: derivedReleaseState.acceptedGate,
-    minimumAcceptedFloors: acceptedStandardFloors,
-  });
+  const rollbackInventory = (
+    await deriveRollbackInventory({
+      store,
+      current,
+      releasePolicy: derivedReleaseState.releasePolicy,
+      minimumAcceptedGate: derivedReleaseState.acceptedGate,
+      minimumAcceptedFloors: acceptedStandardFloors,
+    })
+  ).filter(
+    (entry) => entry.binding.bindingId !== pending.standardBinding.bindingId,
+  );
   const subject = {
     schemaVersion: 1,
     subjectKind: "standard-acceptance-subject/v1",

@@ -56,6 +56,7 @@ const COMMON_BUILD_INPUT_KEYS = [
   "targetSourceSha",
   "toolchainPolicyBytes",
 ];
+const PRODUCTION_BUILD_INPUT_KEYS = [...COMMON_BUILD_INPUT_KEYS, "targetGate"];
 const QA_BUILD_INPUT_KEYS = [
   ...COMMON_BUILD_INPUT_KEYS,
   "activePolicyReference",
@@ -342,6 +343,7 @@ const deriveRequirements = async ({
   operationId,
   executorSourceSha,
   targetSourceSha,
+  targetGate: requestedTargetGate,
   purpose,
   proposedPolicyReference,
   activePolicyReference,
@@ -352,11 +354,6 @@ const deriveRequirements = async ({
   assertExpectedState(current.head);
   const { snapshot } = current;
   assertIdleSnapshot(snapshot);
-  if (snapshot.acceptedGate === RELEASE_PHASE_GATES.at(-1)) {
-    throw new Error(
-      "Accepted release gate cannot advance outside the phase sequence",
-    );
-  }
   assertDbCompatibility(snapshot.currentDbCompatibility);
   const providerPolicyReference = providerReferenceFromSnapshot(snapshot);
   const previousPolicyReference = snapshot.activeReleasePolicy;
@@ -410,17 +407,58 @@ const deriveRequirements = async ({
     );
     const states = phaseStates(selectedPolicy);
     assertSnapshotPredecessor({ snapshot, states });
-    targetGate = nextReleasePhaseGate(snapshot.acceptedGate);
+    const sameFloor = requestedTargetGate === snapshot.acceptedGate;
+    if (sameFloor && requestedTargetGate === "P8-CLEAN") {
+      throw new Error(
+        "Terminal P8-CLEAN does not permit a same-floor source replacement",
+      );
+    }
+    let advancesExactlyOneGate = false;
+    if (!sameFloor) {
+      try {
+        advancesExactlyOneGate =
+          requestedTargetGate === nextReleasePhaseGate(snapshot.acceptedGate);
+      } catch {
+        advancesExactlyOneGate = false;
+      }
+    }
+    if (
+      !RELEASE_PHASE_GATES.includes(requestedTargetGate) ||
+      (!sameFloor && !advancesExactlyOneGate)
+    ) {
+      throw new Error(
+        "Production build target gate must preserve the accepted floor or advance exactly one gate",
+      );
+    }
+    if (
+      sameFloor &&
+      (snapshot.acceptedGate === null ||
+        snapshot.acceptedStandard === null ||
+        !SOURCE_SHA_PATTERN.test(snapshot.acceptedStandard.sourceSha ?? "") ||
+        targetSourceSha === snapshot.acceptedStandard.sourceSha)
+    ) {
+      throw new Error(
+        "Same-floor production replacement requires a distinct source and accepted standard",
+      );
+    }
+    targetGate = requestedTargetGate;
     const targetState = states.find((entry) => entry.gate === targetGate);
     if (
       !targetState ||
       !sameCanonicalValue(
         selectedPolicy.acceptedStandardFloors,
         targetState.floors,
-      )
+      ) ||
+      (sameFloor &&
+        !sameCanonicalValue(
+          snapshot.acceptedStandardFloors,
+          targetState.floors,
+        ))
     ) {
       throw new Error(
-        "Active release policy does not authorize the next production gate",
+        sameFloor
+          ? "Active release policy does not authorize the current production floor"
+          : "Active release policy does not authorize the next production gate",
       );
     }
     releasePolicyReference = previousPolicyReference;
@@ -485,9 +523,13 @@ const deriveRequirements = async ({
     };
   }
 
+  const selectedStandardFloors =
+    purpose === PRODUCTION_PURPOSE && targetGate === snapshot.acceptedGate
+      ? snapshot.acceptedStandardFloors
+      : selectedPolicy.acceptedStandardFloors;
   const standardDimensions = {
     releaseRole: "standard",
-    ...selectedPolicy.acceptedStandardFloors,
+    ...selectedStandardFloors,
   };
   assertDimensionObject(selectedPolicy, standardDimensions);
   const containmentDimensions = projectContainmentDimensions(
@@ -577,7 +619,7 @@ export const buildAuthoritativeArtifactBuildRequirements = async (
     options,
     purpose === POLICY_QA_PURPOSE
       ? QA_BUILD_INPUT_KEYS
-      : COMMON_BUILD_INPUT_KEYS,
+      : PRODUCTION_BUILD_INPUT_KEYS,
     "Artifact build authority input",
   );
   assertIdentity(options);
@@ -697,6 +739,7 @@ export const validateAuthoritativeArtifactBuildRequirements = async (
     operationId: requirements.operationId,
     executorSourceSha: requirements.executorSourceSha,
     targetSourceSha: requirements.targetSourceSha,
+    targetGate: requirements.targetGate,
     purpose: requirements.purpose,
     proposedPolicyReference: requirements.proposedReleasePolicy,
     activePolicyReference: requirements.activeReleasePolicy,
