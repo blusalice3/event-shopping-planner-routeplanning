@@ -65,31 +65,40 @@ describe("outer recovery root", () => {
     await waitFor(() => expect(button).not.toBeDisabled());
   });
 
-  it("renders blockers and then reuses the notice for a clear update", () => {
+  it("renders blockers, requires an explicit save, and then shows close-all", () => {
     const root = document.createElement("div");
-    renderWaitingUpdateNotice(root, identity, [
+    const onSaveAndFlush = vi.fn(async () => undefined);
+    renderWaitingUpdateNotice(
+      root,
+      identity,
+      [
+        {
+          clientId: "client-a",
+          capturedAt: "2026-08-06T00:00:00.000Z",
+          responsive: true,
+          blockers: [{ id: "save", label: "保存中" }],
+          flushError: false,
+        },
+        {
+          clientId: "client-b",
+          capturedAt: "2026-08-06T00:00:00.000Z",
+          responsive: false,
+          blockers: [],
+          flushError: false,
+        },
+        {
+          clientId: "client-c",
+          capturedAt: "2026-08-06T00:00:00.000Z",
+          responsive: true,
+          blockers: [],
+          flushError: true,
+        },
+      ],
       {
-        clientId: "client-a",
-        capturedAt: "2026-08-06T00:00:00.000Z",
-        responsive: true,
-        blockers: [{ id: "save", label: "保存中" }],
-        flushError: false,
+        phase: "save-required",
+        onSaveAndFlush,
       },
-      {
-        clientId: "client-b",
-        capturedAt: "2026-08-06T00:00:00.000Z",
-        responsive: false,
-        blockers: [],
-        flushError: false,
-      },
-      {
-        clientId: "client-c",
-        capturedAt: "2026-08-06T00:00:00.000Z",
-        responsive: true,
-        blockers: [],
-        flushError: true,
-      },
-    ]);
+    );
 
     const notice = root.querySelector("[data-pwa-update-notice]");
     expect(notice).not.toBeNull();
@@ -99,20 +108,90 @@ describe("outer recovery root", () => {
     expect(notice).toHaveTextContent("応答なし: 1画面");
     expect(notice).toHaveTextContent("保存失敗: 1画面");
     expect(notice).not.toHaveTextContent("保存が完了しました");
+    expect(notice).toHaveAttribute("data-pwa-update-phase", "save-required");
+    expect(notice).toHaveAttribute("data-pwa-snapshot-count", "3");
+    expect(notice).toHaveAttribute("data-pwa-responsive-count", "2");
+    expect(notice).toHaveAttribute("data-pwa-blocker-count", "1");
+    expect(notice).toHaveAttribute("data-pwa-unresponsive-count", "1");
+    expect(notice).toHaveAttribute("data-pwa-flush-failure-count", "1");
+    expect(notice).toHaveAttribute("data-pwa-close-guidance", "false");
+    expect(notice).toHaveAttribute("data-pwa-save-operation-count", "0");
+    expect(notice?.querySelector("button")).toHaveAttribute(
+      "data-pwa-save-action",
+      "save-and-flush",
+    );
+    expect(notice?.querySelector("button")).toHaveTextContent(
+      "保存して更新準備",
+    );
 
-    renderWaitingUpdateNotice(root, identity, [
-      {
-        clientId: "client-a",
-        capturedAt: "2026-08-06T00:01:00.000Z",
-        responsive: true,
-        blockers: [],
-        flushError: false,
-      },
-    ]);
+    renderWaitingUpdateNotice(
+      root,
+      identity,
+      [
+        {
+          clientId: "client-a",
+          capturedAt: "2026-08-06T00:01:00.000Z",
+          responsive: true,
+          blockers: [],
+          flushError: false,
+        },
+      ],
+      { phase: "ready-to-close" },
+    );
 
     expect(root.querySelector("[data-pwa-update-notice]")).toBe(notice);
     expect(notice?.querySelector("ul")).toBeNull();
     expect(notice).toHaveTextContent("すべてのタブとPWAウィンドウを閉じて");
+    expect(notice?.querySelector("button")).toBeNull();
+    expect(notice).toHaveAttribute("data-pwa-update-phase", "ready-to-close");
+    expect(notice).toHaveAttribute("data-pwa-snapshot-count", "1");
+    expect(notice).toHaveAttribute("data-pwa-responsive-count", "1");
+    expect(notice).toHaveAttribute("data-pwa-blocker-count", "0");
+    expect(notice).toHaveAttribute("data-pwa-close-guidance", "true");
+    expect(notice).toHaveAttribute("data-pwa-save-operation-count", "0");
+  });
+
+  it("disables save while flushing and fails closed when the action rejects", async () => {
+    const root = document.createElement("div");
+    let rejectSave: ((reason?: unknown) => void) | undefined;
+    const onSaveAndFlush = vi.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectSave = reject;
+        }),
+    );
+    renderWaitingUpdateNotice(root, identity, [], {
+      phase: "save-required",
+      onSaveAndFlush,
+    });
+    const button = root.querySelector("button");
+
+    fireEvent.click(button!);
+    fireEvent.click(button!);
+    expect(button).toBeDisabled();
+    expect(root.querySelector("[data-pwa-update-notice]")).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
+    expect(root.querySelector("[data-pwa-update-notice]")).toHaveAttribute(
+      "data-pwa-save-operation-count",
+      "1",
+    );
+    await waitFor(() => expect(onSaveAndFlush).toHaveBeenCalledOnce());
+    rejectSave?.(new Error("snapshot unavailable"));
+
+    await waitFor(() =>
+      expect(root.querySelector("[data-pwa-update-notice]")).toHaveAttribute(
+        "data-pwa-update-phase",
+        "snapshot-error",
+      ),
+    );
+    expect(root).not.toHaveTextContent("すべてのタブとPWAウィンドウを閉じて");
+    expect(root.querySelector("button")).not.toBeDisabled();
+    expect(root.querySelector("[data-pwa-update-notice]")).toHaveAttribute(
+      "aria-busy",
+      "false",
+    );
   });
 
   it("projects only public identity diagnostics", () => {

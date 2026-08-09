@@ -8,8 +8,43 @@ import {
 import {
   installUpdateBlockerResponder,
   requestAllClientBlockerSnapshots,
+  type UpdateBlockerSnapshot,
 } from "./updateBlockerRegistry";
 import { renderRecoveryRoot, renderWaitingUpdateNotice } from "./recoveryRoot";
+
+const OUTER_AGENT_HOST_ID = "pwa-outer-agent-host";
+
+type WaitingWorkerOwnership = Readonly<{
+  generation: number;
+  worker: ServiceWorker;
+}>;
+
+const ensureOuterAgentHost = (applicationRoot: HTMLElement): HTMLElement => {
+  const ownerDocument = applicationRoot.ownerDocument;
+  const existing = ownerDocument.getElementById(OUTER_AGENT_HOST_ID);
+  if (
+    existing instanceof HTMLElement &&
+    existing !== applicationRoot &&
+    !applicationRoot.contains(existing)
+  ) {
+    return existing;
+  }
+  if (existing && existing !== applicationRoot) existing.remove();
+
+  const host = ownerDocument.createElement("div");
+  host.id = OUTER_AGENT_HOST_ID;
+  host.dataset.pwaOuterAgentHost = "true";
+  if (applicationRoot.parentNode) {
+    applicationRoot.parentNode.insertBefore(host, applicationRoot);
+  } else {
+    ownerDocument.body.appendChild(host);
+  }
+  return host;
+};
+
+const cleanupOuterAgentHost = (host: HTMLElement): void => {
+  if (!host.hasChildNodes()) host.remove();
+};
 
 export type RuntimeBuildMeta = {
   sourceSha: string;
@@ -215,16 +250,19 @@ export const startOuterRecoveryAgent = async (
     };
   }
 
-  installUpdateBlockerResponder(
-    serviceWorker as unknown as ServiceWorkerContainer,
-  );
-
   let registration: RegistrationLike | undefined;
   try {
     registration = await serviceWorker.getRegistration("/");
   } catch {
     renderRecoveryRoot(root, "registration-read-failed");
     return { status: "recovery", reasonCode: "registration-read-failed" };
+  }
+
+  if (registration) {
+    installUpdateBlockerResponder(
+      serviceWorker as unknown as ServiceWorkerContainer,
+      { getExpectedWorker: () => registration?.waiting ?? null },
+    );
   }
 
   const origin = dependencies.location.origin;
@@ -314,6 +352,66 @@ export const startOuterRecoveryAgent = async (
     const attemptedWaitingWorkers = new WeakSet<ServiceWorker>();
     const observedInstallingWorkers = new WeakSet<ServiceWorker>();
     let latestInstallingWorker: ServiceWorker | null = null;
+    let waitingGeneration = 0;
+    let activeWaitingOwnership: WaitingWorkerOwnership | null = null;
+    let updateNoticeHost: HTMLElement | null = null;
+    let renderedNotice: {
+      ownership: WaitingWorkerOwnership;
+      element: HTMLElement;
+    } | null = null;
+
+    const removeOwnedNotice = (ownership: WaitingWorkerOwnership): void => {
+      if (renderedNotice?.ownership !== ownership) return;
+      renderedNotice.element.remove();
+      renderedNotice = null;
+      if (updateNoticeHost) {
+        cleanupOuterAgentHost(updateNoticeHost);
+        if (!updateNoticeHost.isConnected) updateNoticeHost = null;
+      }
+    };
+
+    const claimWaitingWorker = (
+      worker: ServiceWorker,
+    ): WaitingWorkerOwnership => {
+      const previousOwnership = activeWaitingOwnership;
+      const ownership = Object.freeze({
+        generation: (waitingGeneration += 1),
+        worker,
+      });
+      activeWaitingOwnership = ownership;
+      if (previousOwnership) removeOwnedNotice(previousOwnership);
+      return ownership;
+    };
+
+    const ownsCurrentWaitingWorker = (
+      ownership: WaitingWorkerOwnership,
+    ): boolean =>
+      activeWaitingOwnership === ownership &&
+      registration.waiting === ownership.worker;
+
+    const releaseStaleOwnership = (
+      ownership: WaitingWorkerOwnership,
+    ): boolean => {
+      if (ownsCurrentWaitingWorker(ownership)) return false;
+      if (activeWaitingOwnership === ownership) activeWaitingOwnership = null;
+      removeOwnedNotice(ownership);
+      return true;
+    };
+
+    const renderOwnedWaitingNotice = (
+      ownership: WaitingWorkerOwnership,
+      identity: PromptCloseAllReleaseIdentity,
+      snapshots: UpdateBlockerSnapshot[],
+      options: Parameters<typeof renderWaitingUpdateNotice>[3],
+    ): void => {
+      if (releaseStaleOwnership(ownership)) return;
+      updateNoticeHost ??= ensureOuterAgentHost(root);
+      renderWaitingUpdateNotice(updateNoticeHost, identity, snapshots, options);
+      const notice = updateNoticeHost.querySelector<HTMLElement>(
+        "[data-pwa-update-notice]",
+      );
+      if (notice) renderedNotice = { ownership, element: notice };
+    };
 
     const discoverWaitingWorker = (worker: ServiceWorker | null): void => {
       if (
@@ -324,6 +422,7 @@ export const startOuterRecoveryAgent = async (
         return;
       }
       attemptedWaitingWorkers.add(worker);
+      const ownership = claimWaitingWorker(worker);
 
       void (async () => {
         try {
@@ -331,20 +430,75 @@ export const startOuterRecoveryAgent = async (
             worker,
             "waiting",
           );
+          const waitingReleaseIdentity = waitingIdentity.identity;
           if (
-            registration.waiting !== worker ||
+            !ownsCurrentWaitingWorker(ownership) ||
             waitingIdentity.workerState !== "waiting" ||
-            waitingIdentity.identity.pwaLifecycle !== "prompt-close-all-v1" ||
+            waitingReleaseIdentity.pwaLifecycle !== "prompt-close-all-v1" ||
             !verifyWorkerEnvelope(waitingIdentity, origin)
           ) {
             return;
           }
-          const snapshots = await dependencies.requestBlockerSnapshots(
-            worker,
-            true,
-          );
-          if (registration.waiting !== worker) return;
-          renderWaitingUpdateNotice(root, waitingIdentity.identity, snapshots);
+          let latestSnapshots: UpdateBlockerSnapshot[] = [];
+          const saveAndFlush = async (): Promise<void> => {
+            if (releaseStaleOwnership(ownership)) return;
+            try {
+              const flushedSnapshots =
+                await dependencies.requestBlockerSnapshots(worker, true);
+              if (releaseStaleOwnership(ownership)) return;
+              latestSnapshots = flushedSnapshots;
+              const readyToClose =
+                flushedSnapshots.length > 0 &&
+                flushedSnapshots.every(
+                  (snapshot) =>
+                    snapshot.responsive &&
+                    !snapshot.flushError &&
+                    snapshot.blockers.length === 0,
+                );
+              renderOwnedWaitingNotice(
+                ownership,
+                waitingReleaseIdentity,
+                flushedSnapshots,
+                readyToClose
+                  ? { phase: "ready-to-close" }
+                  : {
+                      phase: "save-incomplete",
+                      onSaveAndFlush: saveAndFlush,
+                    },
+              );
+            } catch {
+              if (releaseStaleOwnership(ownership)) return;
+              renderOwnedWaitingNotice(
+                ownership,
+                waitingReleaseIdentity,
+                latestSnapshots,
+                {
+                  phase: "snapshot-error",
+                  onSaveAndFlush: saveAndFlush,
+                },
+              );
+            }
+          };
+
+          try {
+            latestSnapshots = await dependencies.requestBlockerSnapshots(
+              worker,
+              false,
+            );
+            if (releaseStaleOwnership(ownership)) return;
+            renderOwnedWaitingNotice(
+              ownership,
+              waitingReleaseIdentity,
+              latestSnapshots,
+              { phase: "save-required", onSaveAndFlush: saveAndFlush },
+            );
+          } catch {
+            if (releaseStaleOwnership(ownership)) return;
+            renderOwnedWaitingNotice(ownership, waitingReleaseIdentity, [], {
+              phase: "snapshot-error",
+              onSaveAndFlush: saveAndFlush,
+            });
+          }
         } catch {
           // Current verified role remains usable. Update discovery fails closed.
         }

@@ -251,6 +251,16 @@ describe("Service Worker blocker snapshot aggregation", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     await nextTask;
 
+    for (const client of [responsive, silent, closed]) {
+      expect(client.postMessage).toHaveBeenLastCalledWith({
+        type: "PWA_BLOCKER_SNAPSHOT_REQUEST",
+        protocolVersion: 1,
+        requestId: nextRequestId,
+        clientId: client.id,
+        flush: false,
+      });
+    }
+
     const nextResponse = nextPostResponse.mock.calls[0]?.[0] as {
       snapshots: UpdateBlockerSnapshot[];
     };

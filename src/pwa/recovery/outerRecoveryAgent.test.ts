@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { createElement } from "react";
+import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   PromptCloseAllReleaseIdentity,
@@ -14,11 +16,25 @@ import {
   type OuterRecoveryAgentDependencies,
   type RuntimeBuildMeta,
 } from "./outerRecoveryAgent";
-import { resetUpdateBlockerRegistryForTests } from "./updateBlockerRegistry";
+import {
+  resetUpdateBlockerRegistryForTests,
+  type UpdateBlockerSnapshot,
+} from "./updateBlockerRegistry";
 
 const SOURCE_SHA = "a".repeat(40);
 const VARIANT_ID = "b".repeat(64);
 const SHA = "c".repeat(64);
+
+const blockerSnapshot = (
+  overrides: Partial<UpdateBlockerSnapshot> = {},
+): UpdateBlockerSnapshot => ({
+  clientId: "client-a",
+  capturedAt: "2026-08-09T00:00:00.000Z",
+  responsive: true,
+  blockers: [],
+  flushError: false,
+  ...overrides,
+});
 
 const identity: PromptCloseAllReleaseIdentity = {
   schemaVersion: 1,
@@ -161,8 +177,25 @@ const dependencies = (
   ...overrides,
 });
 
+const getOuterAgentHost = (
+  bound: Pick<OuterRecoveryAgentDependencies, "root">,
+): HTMLElement | null =>
+  bound.root.ownerDocument.querySelector<HTMLElement>(
+    "[data-pwa-outer-agent-host]",
+  );
+
+const getUpdateNotice = (
+  bound: Pick<OuterRecoveryAgentDependencies, "root">,
+): HTMLElement | null =>
+  getOuterAgentHost(bound)?.querySelector<HTMLElement>(
+    "[data-pwa-update-notice]",
+  ) ?? null;
+
 afterEach(() => {
   resetUpdateBlockerRegistryForTests();
+  document
+    .querySelectorAll("[data-pwa-outer-agent-host]")
+    .forEach((host) => host.remove());
 });
 
 describe("outer recovery runtime identity gate", () => {
@@ -395,17 +428,24 @@ describe("outer recovery runtime identity gate", () => {
       source: "controller",
     });
     await vi.waitFor(() => expect(queryIdentity).toHaveBeenCalledTimes(2));
-    expect(bound.root.querySelector("[data-pwa-update-notice]")).toBeNull();
+    expect(getUpdateNotice(bound)).toBeNull();
   });
 
-  it("renders a save-complete notice after a valid waiting worker reports no blockers", async () => {
+  it("requires an explicit save before rendering the close-all notice", async () => {
     const waiting = {} as ServiceWorker;
     const currentRegistration = registration(waiting);
     const queryIdentity = vi
       .fn()
       .mockResolvedValueOnce(verifiedWorkerIdentity())
       .mockResolvedValueOnce(verifiedWorkerIdentity("waiting"));
-    const requestBlockerSnapshots = vi.fn(async () => []);
+    const requestBlockerSnapshots = vi
+      .fn()
+      .mockResolvedValueOnce([
+        blockerSnapshot({
+          blockers: [{ id: "pending-save", label: "保存待ち" }],
+        }),
+      ])
+      .mockResolvedValueOnce([blockerSnapshot()]);
     const bound = dependencies({
       serviceWorker: serviceWorkerContainer({ currentRegistration }),
       queryIdentity,
@@ -417,13 +457,321 @@ describe("outer recovery runtime identity gate", () => {
       source: "controller",
     });
     await vi.waitFor(() =>
-      expect(requestBlockerSnapshots).toHaveBeenCalledWith(waiting, true),
+      expect(requestBlockerSnapshots).toHaveBeenCalledWith(waiting, false),
+    );
+    const notice = getUpdateNotice(bound);
+    expect(notice).toHaveAttribute("data-pwa-update-phase", "save-required");
+    expect(notice).not.toHaveTextContent("保存が完了しました");
+
+    notice?.querySelector<HTMLButtonElement>("button")?.click();
+    await vi.waitFor(() =>
+      expect(requestBlockerSnapshots).toHaveBeenNthCalledWith(2, waiting, true),
     );
     await vi.waitFor(() =>
-      expect(
-        bound.root.querySelector("[data-pwa-update-notice]"),
-      ).toHaveTextContent("保存が完了しました"),
+      expect(getUpdateNotice(bound)).toHaveAttribute(
+        "data-pwa-update-phase",
+        "ready-to-close",
+      ),
     );
+    expect(getUpdateNotice(bound)).toHaveTextContent("保存が完了しました");
+  });
+
+  it("renders the update notice outside the React-managed root and reuses its host", async () => {
+    const reactContainer = document.createElement("div");
+    reactContainer.id = "root";
+    document.body.appendChild(reactContainer);
+    const reactView = render(
+      createElement("main", { "data-react-owned": "initial" }, "React app"),
+      { container: reactContainer },
+    );
+    const waiting = serviceWorker("installed");
+    const currentRegistration = registration(waiting);
+    const bound = dependencies({
+      root: reactContainer,
+      serviceWorker: serviceWorkerContainer({ currentRegistration }),
+      queryIdentity: vi
+        .fn()
+        .mockResolvedValueOnce(verifiedWorkerIdentity())
+        .mockResolvedValueOnce(verifiedWorkerIdentity("waiting")),
+      requestBlockerSnapshots: vi
+        .fn()
+        .mockResolvedValueOnce([
+          blockerSnapshot({
+            blockers: [{ id: "pending-save", label: "保存待ち" }],
+          }),
+        ])
+        .mockResolvedValueOnce([blockerSnapshot()]),
+    });
+
+    await startOuterRecoveryAgent(bound);
+    await vi.waitFor(() => expect(getUpdateNotice(bound)).not.toBeNull());
+    const host = getOuterAgentHost(bound);
+    expect(host?.parentElement).toBe(document.body);
+    expect(host?.nextSibling).toBe(reactContainer);
+    expect(reactContainer.querySelector("[data-pwa-update-notice]")).toBeNull();
+    expect(reactContainer.querySelector("[data-react-owned]")).toHaveAttribute(
+      "data-react-owned",
+      "initial",
+    );
+
+    reactView.rerender(
+      createElement(
+        "main",
+        { "data-react-owned": "updated" },
+        "React rerender",
+      ),
+    );
+    expect(getOuterAgentHost(bound)).toBe(host);
+    expect(getUpdateNotice(bound)).toHaveAttribute(
+      "data-pwa-update-phase",
+      "save-required",
+    );
+    expect(reactContainer.querySelector("[data-react-owned]")).toHaveAttribute(
+      "data-react-owned",
+      "updated",
+    );
+
+    getUpdateNotice(bound)
+      ?.querySelector<HTMLButtonElement>("[data-pwa-save-and-flush]")
+      ?.click();
+    await vi.waitFor(() =>
+      expect(getUpdateNotice(bound)).toHaveAttribute(
+        "data-pwa-update-phase",
+        "ready-to-close",
+      ),
+    );
+    expect(getOuterAgentHost(bound)).toBe(host);
+    expect(reactContainer.querySelector("[data-pwa-update-notice]")).toBeNull();
+
+    reactView.unmount();
+    reactContainer.remove();
+  });
+
+  it.each([
+    ["an empty response", []],
+    [
+      "a remaining blocker",
+      [
+        blockerSnapshot({
+          blockers: [{ id: "pending-save", label: "保存待ち" }],
+        }),
+      ],
+    ],
+    ["an unresponsive client", [blockerSnapshot({ responsive: false })]],
+    ["a flush failure", [blockerSnapshot({ flushError: true })]],
+  ])("fails closed after explicit save returns %s", async (_label, result) => {
+    const waiting = {} as ServiceWorker;
+    const currentRegistration = registration(waiting);
+    const queryIdentity = vi
+      .fn()
+      .mockResolvedValueOnce(verifiedWorkerIdentity())
+      .mockResolvedValueOnce(verifiedWorkerIdentity("waiting"));
+    const requestBlockerSnapshots = vi
+      .fn()
+      .mockResolvedValueOnce([blockerSnapshot()])
+      .mockResolvedValueOnce(result);
+    const bound = dependencies({
+      serviceWorker: serviceWorkerContainer({ currentRegistration }),
+      queryIdentity,
+      requestBlockerSnapshots,
+    });
+
+    await startOuterRecoveryAgent(bound);
+    await vi.waitFor(() =>
+      expect(getUpdateNotice(bound)).toHaveAttribute(
+        "data-pwa-update-phase",
+        "save-required",
+      ),
+    );
+    getUpdateNotice(bound)
+      ?.querySelector<HTMLButtonElement>("[data-pwa-save-and-flush]")
+      ?.click();
+
+    await vi.waitFor(() =>
+      expect(getUpdateNotice(bound)).toHaveAttribute(
+        "data-pwa-update-phase",
+        "save-incomplete",
+      ),
+    );
+    expect(getUpdateNotice(bound)).not.toHaveTextContent(
+      "すべてのタブとPWAウィンドウを閉じて",
+    );
+    expect(getUpdateNotice(bound)?.querySelector("button")).toHaveTextContent(
+      "保存を再試行",
+    );
+  });
+
+  it("fails closed when the explicit flush request rejects", async () => {
+    const waiting = {} as ServiceWorker;
+    const currentRegistration = registration(waiting);
+    const requestBlockerSnapshots = vi
+      .fn()
+      .mockResolvedValueOnce([blockerSnapshot()])
+      .mockRejectedValueOnce(new Error("flush channel unavailable"));
+    const bound = dependencies({
+      serviceWorker: serviceWorkerContainer({ currentRegistration }),
+      queryIdentity: vi
+        .fn()
+        .mockResolvedValueOnce(verifiedWorkerIdentity())
+        .mockResolvedValueOnce(verifiedWorkerIdentity("waiting")),
+      requestBlockerSnapshots,
+    });
+
+    await startOuterRecoveryAgent(bound);
+    await vi.waitFor(() => expect(getUpdateNotice(bound)).not.toBeNull());
+    getUpdateNotice(bound)?.querySelector<HTMLButtonElement>("button")?.click();
+
+    await vi.waitFor(() =>
+      expect(getUpdateNotice(bound)).toHaveAttribute(
+        "data-pwa-update-phase",
+        "snapshot-error",
+      ),
+    );
+    expect(getUpdateNotice(bound)).not.toHaveTextContent("保存が完了しました");
+  });
+
+  it("does not flush a worker that stopped waiting before the user action", async () => {
+    const waiting = {} as ServiceWorker;
+    const currentRegistration = registration(waiting);
+    const requestBlockerSnapshots = vi.fn(async () => [blockerSnapshot()]);
+    const bound = dependencies({
+      serviceWorker: serviceWorkerContainer({ currentRegistration }),
+      queryIdentity: vi
+        .fn()
+        .mockResolvedValueOnce(verifiedWorkerIdentity())
+        .mockResolvedValueOnce(verifiedWorkerIdentity("waiting")),
+      requestBlockerSnapshots,
+    });
+
+    await startOuterRecoveryAgent(bound);
+    await vi.waitFor(() => expect(getUpdateNotice(bound)).not.toBeNull());
+    currentRegistration.waiting = {} as ServiceWorker;
+    getUpdateNotice(bound)?.querySelector<HTMLButtonElement>("button")?.click();
+
+    await vi.waitFor(() => expect(getUpdateNotice(bound)).toBeNull());
+    expect(getOuterAgentHost(bound)).toBeNull();
+    expect(requestBlockerSnapshots).toHaveBeenCalledOnce();
+  });
+
+  it("does not report save completion when the worker changes during flush", async () => {
+    const waiting = {} as ServiceWorker;
+    const currentRegistration = registration(waiting);
+    let resolveFlush: ((value: UpdateBlockerSnapshot[]) => void) | undefined;
+    const requestBlockerSnapshots = vi
+      .fn()
+      .mockResolvedValueOnce([blockerSnapshot()])
+      .mockImplementationOnce(
+        () =>
+          new Promise<UpdateBlockerSnapshot[]>((resolve) => {
+            resolveFlush = resolve;
+          }),
+      );
+    const bound = dependencies({
+      serviceWorker: serviceWorkerContainer({ currentRegistration }),
+      queryIdentity: vi
+        .fn()
+        .mockResolvedValueOnce(verifiedWorkerIdentity())
+        .mockResolvedValueOnce(verifiedWorkerIdentity("waiting")),
+      requestBlockerSnapshots,
+    });
+
+    await startOuterRecoveryAgent(bound);
+    await vi.waitFor(() => expect(getUpdateNotice(bound)).not.toBeNull());
+    getUpdateNotice(bound)?.querySelector<HTMLButtonElement>("button")?.click();
+    await vi.waitFor(() =>
+      expect(requestBlockerSnapshots).toHaveBeenCalledTimes(2),
+    );
+    currentRegistration.waiting = {} as ServiceWorker;
+    resolveFlush?.([blockerSnapshot()]);
+
+    await vi.waitFor(() => expect(getUpdateNotice(bound)).toBeNull());
+    expect(getOuterAgentHost(bound)).toBeNull();
+  });
+
+  it("keeps worker B notice when worker A flush resolves after ownership changes", async () => {
+    const waitingA = serviceWorker("installed");
+    const waitingB = serviceWorker("installed");
+    const currentRegistration = registration(waitingA);
+    const identityB: PromptCloseAllReleaseIdentity = {
+      ...identity,
+      variantId: "d".repeat(64),
+    };
+    let resolveAFlush:
+      | ((snapshots: UpdateBlockerSnapshot[]) => void)
+      | undefined;
+    const requestBlockerSnapshots = vi.fn(
+      (
+        worker: Parameters<
+          OuterRecoveryAgentDependencies["requestBlockerSnapshots"]
+        >[0],
+        flush: boolean,
+      ) => {
+        if (worker === waitingA && !flush) {
+          return Promise.resolve([
+            blockerSnapshot({
+              clientId: "client-a",
+              blockers: [{ id: "save-a", label: "Aを保存中" }],
+            }),
+          ]);
+        }
+        if (worker === waitingA && flush) {
+          return new Promise<UpdateBlockerSnapshot[]>((resolve) => {
+            resolveAFlush = resolve;
+          });
+        }
+        if (worker === waitingB && !flush) {
+          return Promise.resolve([
+            blockerSnapshot({
+              clientId: "client-b",
+              blockers: [{ id: "save-b", label: "Bを保存中" }],
+            }),
+          ]);
+        }
+        return Promise.reject(new Error("Unexpected blocker request"));
+      },
+    );
+    const bound = dependencies({
+      serviceWorker: serviceWorkerContainer({ currentRegistration }),
+      queryIdentity: vi
+        .fn()
+        .mockResolvedValueOnce(verifiedWorkerIdentity())
+        .mockResolvedValueOnce(verifiedWorkerIdentity("waiting"))
+        .mockResolvedValueOnce(verifiedWorkerIdentity("waiting", identityB)),
+      requestBlockerSnapshots,
+    });
+
+    await startOuterRecoveryAgent(bound);
+    await vi.waitFor(() =>
+      expect(getUpdateNotice(bound)).toHaveTextContent("Aを保存中"),
+    );
+    getUpdateNotice(bound)
+      ?.querySelector<HTMLButtonElement>("[data-pwa-save-and-flush]")
+      ?.click();
+    await vi.waitFor(() =>
+      expect(requestBlockerSnapshots).toHaveBeenCalledWith(waitingA, true),
+    );
+
+    currentRegistration.installing = waitingB;
+    currentRegistration.waiting = waitingB;
+    currentRegistration.dispatchEvent(new Event("updatefound"));
+    await vi.waitFor(() =>
+      expect(getUpdateNotice(bound)).toHaveAttribute(
+        "data-variant-id",
+        identityB.variantId,
+      ),
+    );
+    const workerBNotice = getUpdateNotice(bound);
+    expect(workerBNotice).toHaveTextContent("Bを保存中");
+
+    resolveAFlush?.([blockerSnapshot({ clientId: "client-a" })]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(getUpdateNotice(bound)).toBe(workerBNotice);
+    expect(getUpdateNotice(bound)).toHaveAttribute(
+      "data-pwa-update-phase",
+      "save-required",
+    );
+    expect(getUpdateNotice(bound)).toHaveTextContent("Bを保存中");
   });
 
   it("discovers an updatefound worker after its installed statechange", async () => {
@@ -451,9 +799,9 @@ describe("outer recovery runtime identity gate", () => {
     transitionWorker(installing, "installed");
 
     await vi.waitFor(() =>
-      expect(requestBlockerSnapshots).toHaveBeenCalledWith(installing, true),
+      expect(requestBlockerSnapshots).toHaveBeenCalledWith(installing, false),
     );
-    expect(bound.root.querySelector("[data-pwa-update-notice]")).not.toBeNull();
+    expect(getUpdateNotice(bound)).not.toBeNull();
   });
 
   it("discovers a worker that is already installed when updatefound fires", async () => {
@@ -476,7 +824,7 @@ describe("outer recovery runtime identity gate", () => {
     currentRegistration.dispatchEvent(new Event("updatefound"));
 
     await vi.waitFor(() =>
-      expect(requestBlockerSnapshots).toHaveBeenCalledWith(installed, true),
+      expect(requestBlockerSnapshots).toHaveBeenCalledWith(installed, false),
     );
   });
 
@@ -539,7 +887,7 @@ describe("outer recovery runtime identity gate", () => {
     await vi.waitFor(() => expect(queryIdentity).toHaveBeenCalledTimes(2));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(requestBlockerSnapshots).not.toHaveBeenCalled();
-    expect(bound.root.querySelector("[data-pwa-update-notice]")).toBeNull();
+    expect(getUpdateNotice(bound)).toBeNull();
     expect(bound.root).not.toHaveAttribute("data-pwa-recovery");
   });
 
@@ -565,11 +913,11 @@ describe("outer recovery runtime identity gate", () => {
     await vi.waitFor(() => expect(queryIdentity).toHaveBeenCalledTimes(2));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(requestBlockerSnapshots).not.toHaveBeenCalled();
-    expect(bound.root.querySelector("[data-pwa-update-notice]")).toBeNull();
+    expect(getUpdateNotice(bound)).toBeNull();
     expect(bound.root).not.toHaveAttribute("data-pwa-recovery");
   });
 
-  it("does not render a false save-complete notice when blocker aggregation fails", async () => {
+  it("renders a fail-closed retry action when blocker aggregation fails", async () => {
     const waiting = {} as ServiceWorker;
     const currentRegistration = registration(waiting);
     const queryIdentity = vi
@@ -590,11 +938,17 @@ describe("outer recovery runtime identity gate", () => {
       source: "controller",
     });
     await vi.waitFor(() =>
-      expect(requestBlockerSnapshots).toHaveBeenCalledWith(waiting, true),
+      expect(requestBlockerSnapshots).toHaveBeenCalledWith(waiting, false),
     );
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(bound.root.querySelector("[data-pwa-update-notice]")).toBeNull();
-    expect(bound.root).not.toHaveTextContent("保存が完了しました");
+    expect(getUpdateNotice(bound)).toHaveAttribute(
+      "data-pwa-update-phase",
+      "snapshot-error",
+    );
+    expect(getUpdateNotice(bound)?.querySelector("button")).toHaveTextContent(
+      "保存を再試行",
+    );
+    expect(getUpdateNotice(bound)).not.toHaveTextContent("保存が完了しました");
   });
 });

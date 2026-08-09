@@ -3,6 +3,9 @@ import {
   type ReleaseIdentity,
 } from "../releaseIdentityProtocol";
 import { describeIdentityForDiagnostics } from "../recovery/recoveryRoot";
+import { installRoleUpdateBlockerBridge } from "../updateBlockerRegistry";
+
+installRoleUpdateBlockerBridge();
 
 const appendText = (
   parent: HTMLElement,

@@ -5,8 +5,10 @@ import { SpaceNavigatorProvider } from "./features/space-navigation/SpaceNavigat
 import { SpaceNavigatorHost } from "./features/space-navigation/components/SpaceNavigatorHost";
 import { installPersistenceReleaseAMetricsBackend } from "./utils/persistenceReleaseAMetricsBackend";
 import { appRuntime } from "./app/composition/appRuntime";
+import { installRoleUpdateBlockerBridge } from "./pwa/updateBlockerRegistry";
 
 installPersistenceReleaseAMetricsBackend();
+installRoleUpdateBlockerBridge();
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {

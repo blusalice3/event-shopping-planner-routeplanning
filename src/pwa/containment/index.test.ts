@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetUpdateBlockerRegistryForTests } from "../updateBlockerRegistry";
 
 const identity = {
   schemaVersion: 1,
@@ -45,6 +46,7 @@ const setServiceWorker = (value: unknown): void => {
 };
 
 afterEach(() => {
+  resetUpdateBlockerRegistryForTests();
   vi.unstubAllGlobals();
   vi.resetModules();
   document.body.replaceChildren();
