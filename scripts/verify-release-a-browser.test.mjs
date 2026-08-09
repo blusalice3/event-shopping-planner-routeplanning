@@ -161,11 +161,11 @@ test("forward transition waits for one target worker to activate naturally", () 
   );
   for (const fragment of [
     '"save-required"',
-    'state: "frozen"',
+    '"Emulation.setScriptExecutionDisabled"',
     "waitForProductionEventAutosaveBlocker",
     'data-pwa-save-action="save-and-flush"',
     '"save-incomplete"',
-    'state: "active"',
+    "{ value: false }",
     "createPromptClosePendingEventAndArmAutosave",
     "eventAutosaveMutationPersistedAfterInitialAction",
     'data-pwa-save-action="retry"',
@@ -179,24 +179,40 @@ test("forward transition waits for one target worker to activate naturally", () 
   }
   assert.ok(
     promptCloseSource.indexOf("createPromptClosePendingEventAndArmAutosave") <
-      promptCloseSource.indexOf('state: "frozen"'),
+      promptCloseSource.indexOf('"Emulation.setScriptExecutionDisabled"'),
     "The real event-autosave blocker must be created before the initial save action.",
   );
-  const freezeIndex = promptCloseSource.indexOf('state: "frozen"');
+  const scriptDisableIndex = promptCloseSource.indexOf(
+    '"Emulation.setScriptExecutionDisabled"',
+  );
   const finalAutosaveMutationIndex = promptCloseSource.indexOf(
     "applyPromptCloseAutosaveMutationThroughUi",
-    freezeIndex,
+    scriptDisableIndex,
   );
   const initialSaveActionIndex = promptCloseSource.indexOf(
     'data-pwa-save-action="save-and-flush"',
-    freezeIndex,
+    scriptDisableIndex,
   );
   assert.ok(
-    freezeIndex >= 0 &&
-      finalAutosaveMutationIndex > freezeIndex &&
+    scriptDisableIndex >= 0 &&
+      finalAutosaveMutationIndex > scriptDisableIndex &&
       initialSaveActionIndex > finalAutosaveMutationIndex,
-    "The final autosave marker must be applied after freeze and before the trusted save action.",
+    "The final autosave marker must be applied after script disable and before the trusted save action.",
   );
+  const scriptEnableIndex = promptCloseSource.indexOf(
+    "{ value: false }",
+    initialSaveActionIndex,
+  );
+  const retryIndex = promptCloseSource.indexOf(
+    'data-pwa-save-action="retry"',
+    scriptEnableIndex,
+  );
+  assert.ok(
+    scriptEnableIndex > initialSaveActionIndex &&
+      retryIndex > scriptEnableIndex,
+    "The secondary client must resume and prove its production bridge before retry.",
+  );
+  assert.doesNotMatch(verifierSource, /Page\.setWebLifecycleState/);
   assert.match(
     verifierSource,
     /if \(request\.flush\) return;\s*event\.stopImmediatePropagation\(\);/,
@@ -407,7 +423,7 @@ test("preflight and transition JSON contracts remain present", () => {
     "naturalActivation",
     "promptCloseAll",
     'kind: "prompt-close-all-browser-drill/v1"',
-    "frozen-unresponsive-client",
+    "script-execution-disabled-unresponsive-client",
     "eventAutosaveMutationPersistedAfterInitialAction",
     "activeSource",
     "offlineControllerIdentity",

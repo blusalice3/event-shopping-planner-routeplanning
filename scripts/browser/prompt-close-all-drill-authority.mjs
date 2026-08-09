@@ -259,7 +259,7 @@ export const assertPromptCloseAllBrowserDrill = (
   assertPhase(
     value.failedClosed,
     {
-      cause: "frozen-unresponsive-client",
+      cause: "script-execution-disabled-unresponsive-client",
       phase: "save-incomplete",
       snapshotCount: 3,
       responsiveCount: 2,

@@ -30,6 +30,8 @@ checked-in `config/db-compatibility-contract.json` の正しい現在値は
   Workerはfail-closedにし、outer/role双方へ別Mapを生成しない。
 - 更新noticeはReact管理下の`#root`外に専用hostを持ち、waiting Workerの世代・所有権tokenで管理する。
   古い非同期flush結果は新Workerのnoticeを削除できない。
+- controlled navigationはactive Workerが所有するsource-addressed precacheの`/index.html`を優先し、
+  shell欠損時だけnetworkへfallbackする。旧controllerと新HTML meta/outer agentを混在させない。
 - Release A browser transitionは同一origin/profileの3 client、freeze/thawした未応答client、2回の実click、
   production bridge上の実`event-autosave` blocker/flushとIndexedDB保存、close前controller不変、全client
   解放後のnatural activationを検証する。prompt-close証跡はclosed verifierでunknown/missing fieldと

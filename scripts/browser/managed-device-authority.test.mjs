@@ -421,7 +421,7 @@ const promptCloseAllDrill = (profileIndex) => {
       closeGuidanceVisible: false,
     }),
     failedClosed: {
-      cause: "frozen-unresponsive-client",
+      cause: "script-execution-disabled-unresponsive-client",
       ...phase({
         phase: "save-incomplete",
         responsiveCount: 2,

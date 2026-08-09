@@ -586,7 +586,7 @@ const collectPromptCloseAllUiEvidence = async (client) =>
       const controllerChangeCount = Number.parseInt(
         sessionStorage.getItem(
           ${JSON.stringify(CONTROLLER_CHANGE_COUNT_KEY)},
-        ) ?? "-1",
+        ) ?? "0",
         10,
       );
       return {
@@ -2448,10 +2448,8 @@ try {
             );
 
             await promptCloseSecondary.client.send(
-              "Page.setWebLifecycleState",
-              {
-                state: "frozen",
-              },
+              "Emulation.setScriptExecutionDisabled",
+              { value: true },
             );
             let failedClosed;
             try {
@@ -2488,10 +2486,25 @@ try {
                 )}`,
               );
             } finally {
-              await promptCloseSecondary.client
-                .send("Page.setWebLifecycleState", { state: "active" })
-                .catch(() => undefined);
+              await promptCloseSecondary.client.send(
+                "Emulation.setScriptExecutionDisabled",
+                { value: false },
+              );
             }
+
+            const resumedSecondary =
+              await requestProductionEventAutosaveSnapshot(
+                promptCloseSecondary.client,
+                false,
+              );
+            assert(
+              resumedSecondary.responsive === true &&
+                resumedSecondary.flushError === false &&
+                resumedSecondary.blockerCount === 0,
+              `Prompt-close secondary did not recover its production blocker bridge: ${JSON.stringify(
+                resumedSecondary,
+              )}`,
+            );
 
             const eventAfterInitialAction = await waitForAutosaveMutationCommit(
               primary.client,
@@ -2584,7 +2597,7 @@ try {
               },
               preflush: projectPhase(preflush),
               failedClosed: {
-                cause: "frozen-unresponsive-client",
+                cause: "script-execution-disabled-unresponsive-client",
                 ...projectPhase(failedClosed),
               },
               postflush: projectPhase(postflush),
