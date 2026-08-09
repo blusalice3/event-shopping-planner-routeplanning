@@ -151,14 +151,14 @@ test("forward transition waits for one target worker to activate naturally", () 
     /const STAGE_FORWARD_UPDATE_AFTER_BASELINE =\s*TRANSITION_MODE === "forward" && PROMPT_CLOSE_DRILL_MODE === "disabled";/,
   );
   const offlineStageIndex = verifierSource.indexOf(
-    "await setNetworkOffline(primary.client, true)",
+    "await browserContext.setOffline(true)",
   );
   const forwardActivationIndex = verifierSource.indexOf(
     "const naturalActivation = await waitForNaturalServiceWorkerActivation(",
     forwardStart,
   );
   const onlineRestoreIndex = verifierSource.indexOf(
-    "await setNetworkOffline(primary.client, false)",
+    "await browserContext.setOffline(false)",
     forwardActivationIndex,
   );
   const requestedUpdateIndex = verifierSource.indexOf(

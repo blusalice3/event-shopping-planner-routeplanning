@@ -1985,7 +1985,7 @@ try {
     PROMPT_CLOSE_DRILL_MODE === "required" ? "save-blocker" : "none",
   );
   if (STAGE_FORWARD_UPDATE_AFTER_BASELINE) {
-    await setNetworkOffline(primary.client, true);
+    await browserContext.setOffline(true);
   }
   await navigate(primary.client, PREVIEW_URL);
   await ensureControlledApplication(primary.client);
@@ -2431,7 +2431,7 @@ try {
       new URL("/sw.js", PREVIEW_URL).href,
       async () => {
         if (STAGE_FORWARD_UPDATE_AFTER_BASELINE) {
-          await setNetworkOffline(primary.client, false);
+          await browserContext.setOffline(false);
           const restoredOnline = await evaluate(
             primary.client,
             "navigator.onLine === true",
