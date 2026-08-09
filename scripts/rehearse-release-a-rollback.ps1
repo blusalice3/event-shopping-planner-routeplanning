@@ -1,7 +1,8 @@
 param(
   [string]$BaselineCommit = "e5f26b76b1318d70b5d2373c8808cda20c7bb5c3",
   [ValidateRange(0, 65535)]
-  [int]$Port = 0
+  [int]$Port = 0,
+  [switch]$RequirePromptCloseDrill
 )
 
 [Console]::InputEncoding  = [Text.UTF8Encoding]::new($false)
@@ -283,6 +284,7 @@ function Clear-TransitionEnvironment {
   Remove-Item Env:ESP_EXPECTED_INDEX_SHA256 -ErrorAction SilentlyContinue
   Remove-Item Env:ESP_EXPECTED_SW_SHA256 -ErrorAction SilentlyContinue
   Remove-Item Env:ESP_EXPECTED_MAIN_ASSET -ErrorAction SilentlyContinue
+  Remove-Item Env:ESP_PROMPT_CLOSE_DRILL -ErrorAction SilentlyContinue
   Remove-Item Env:ESP_ALLOW_DIRTY_BUILD -ErrorAction SilentlyContinue
 }
 
@@ -308,6 +310,14 @@ function Invoke-BrowserVerifier {
     $env:ESP_EXPECTED_MAIN_ASSET = $Evidence.MainAsset
     if ($TargetBuildId) {
       $env:ESP_EXPECTED_TARGET_BUILD_ID = $TargetBuildId
+    }
+    if ($Mode -eq "forward") {
+      if ($RequirePromptCloseDrill) {
+        $env:ESP_PROMPT_CLOSE_DRILL = "required"
+      } else {
+        # The historical default baseline predates the dormant prompt-close shell.
+        $env:ESP_PROMPT_CLOSE_DRILL = "disabled"
+      }
     }
   }
 

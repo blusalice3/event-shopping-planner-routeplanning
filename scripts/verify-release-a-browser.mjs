@@ -11,6 +11,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { chromium as playwrightChromium } from "playwright";
+import {
+  assertPromptCloseAllBrowserDrill,
+  resolvePromptCloseAllDrillMode,
+} from "./browser/prompt-close-all-drill-authority.mjs";
 import { ServiceWorkerActivationTracker } from "./lib/service-worker-activation-tracker.mjs";
 
 const PREVIEW_URL = process.env.ESP_PREVIEW_URL ?? "http://127.0.0.1:4173/";
@@ -22,6 +26,10 @@ const TRANSITION_MODE = ROLLBACK_MODE
       requestedTransitionMode === "forward"
     ? requestedTransitionMode
     : null;
+const PROMPT_CLOSE_DRILL_MODE = resolvePromptCloseAllDrillMode({
+  transitionMode: TRANSITION_MODE,
+  configuredMode: process.env.ESP_PROMPT_CLOSE_DRILL,
+});
 const ALLOW_DIRTY_BUILD = process.env.ESP_ALLOW_DIRTY_BUILD === "true";
 const REQUESTED_PROFILE_DIRECTORY =
   process.env.ESP_BROWSER_PROFILE_DIR?.trim() || null;
@@ -49,6 +57,10 @@ const LEGACY_DELETE_COUNT_KEY =
   "__esp_internal__:browser-test:legacy-delete-count:v1";
 const CONTROLLER_CHANGE_COUNT_KEY =
   "__esp_internal__:browser-test:controller-change-count:v1";
+const PWA_UPDATE_PROBE_STATE_KEY =
+  "__esp_internal__:browser-test:pwa-update-probe-state:v1";
+const PWA_UPDATE_PROBE_TRACE_KEY =
+  "__esp_internal__:browser-test:pwa-update-probe-trace:v1";
 const ROLLBACK_SAVE_EVENT_NAME = "RELEASE_A_ROLLBACK_SAVE";
 const SYNTHETIC_METADATA =
   '{"A10_FIXTURE":{"title":"synthetic-event","phase":"release-a-browser"}}';
@@ -172,7 +184,14 @@ const closeTarget = async (target) => {
   await target.page.close({ runBeforeUnload: false }).catch(() => undefined);
 };
 
-const installBrowserInstrumentation = async (client) => {
+const installBrowserInstrumentation = async (
+  client,
+  pwaUpdateProbeMode = "none",
+) => {
+  assert(
+    ["none", "save-blocker", "trace-only"].includes(pwaUpdateProbeMode),
+    "PWA update probe mode is invalid.",
+  );
   const source = `(() => {
     const legacyKeys = new Set(${JSON.stringify(
       Object.keys(SYNTHETIC_LEGACY_SOURCES),
@@ -180,6 +199,13 @@ const installBrowserInstrumentation = async (client) => {
     const deleteCountKey = ${JSON.stringify(LEGACY_DELETE_COUNT_KEY)};
     const controllerChangeCountKey = ${JSON.stringify(
       CONTROLLER_CHANGE_COUNT_KEY,
+    )};
+    const pwaUpdateProbeMode = ${JSON.stringify(pwaUpdateProbeMode)};
+    const pwaUpdateProbeStateKey = ${JSON.stringify(
+      PWA_UPDATE_PROBE_STATE_KEY,
+    )};
+    const pwaUpdateProbeTraceKey = ${JSON.stringify(
+      PWA_UPDATE_PROBE_TRACE_KEY,
     )};
     const readCounter = (key) => {
       try {
@@ -208,6 +234,132 @@ const installBrowserInstrumentation = async (client) => {
         controllerChangeCountKey,
         readCounter(controllerChangeCountKey) + 1,
       );
+    });
+    const emptyPwaUpdateTrace = () => ({
+      inspectionCount: 0,
+      flushCount: 0,
+      productionInspectionCount: 0,
+      productionFlushCount: 0,
+      productionFlushResponseCount: 0,
+      productionCleanFlushResponseCount: 0,
+    });
+    const readPwaUpdateTrace = () => {
+      try {
+        const parsed = JSON.parse(
+          sessionStorage.getItem(pwaUpdateProbeTraceKey) ?? "{}",
+        );
+        const trace = emptyPwaUpdateTrace();
+        for (const key of Object.keys(trace)) {
+          if (Number.isSafeInteger(parsed[key]) && parsed[key] >= 0) {
+            trace[key] = parsed[key];
+          }
+        }
+        return trace;
+      } catch {
+        return emptyPwaUpdateTrace();
+      }
+    };
+    const writePwaUpdateTrace = (trace) => {
+      sessionStorage.setItem(pwaUpdateProbeTraceKey, JSON.stringify(trace));
+    };
+    const pendingProductionFlushRequestIds = new Set();
+    globalThis.addEventListener("message", (event) => {
+      if (
+        pwaUpdateProbeMode === "none" ||
+        event.source !== globalThis ||
+        event.origin !== globalThis.location.origin ||
+        sessionStorage.getItem(pwaUpdateProbeStateKey) !== "armed" ||
+        typeof event.data !== "object" ||
+        event.data === null
+      ) {
+        return;
+      }
+      const value = event.data;
+      if (
+        value.type === "ESP_PWA_ROLE_BLOCKER_SNAPSHOT_REQUEST" &&
+        value.protocolVersion === 1 &&
+        typeof value.requestId === "string" &&
+        typeof value.flush === "boolean"
+      ) {
+        const trace = readPwaUpdateTrace();
+        if (value.flush) {
+          trace.productionFlushCount += 1;
+          pendingProductionFlushRequestIds.add(value.requestId);
+        } else {
+          trace.productionInspectionCount += 1;
+        }
+        writePwaUpdateTrace(trace);
+        return;
+      }
+      if (
+        value.type !== "ESP_PWA_ROLE_BLOCKER_SNAPSHOT_RESPONSE" ||
+        value.protocolVersion !== 1 ||
+        typeof value.requestId !== "string" ||
+        !pendingProductionFlushRequestIds.delete(value.requestId)
+      ) {
+        return;
+      }
+      const trace = readPwaUpdateTrace();
+      trace.productionFlushResponseCount += 1;
+      if (
+        typeof value.snapshot === "object" &&
+        value.snapshot !== null &&
+        value.snapshot.responsive === true &&
+        value.snapshot.flushError === false &&
+        Array.isArray(value.snapshot.blockers) &&
+        value.snapshot.blockers.length === 0
+      ) {
+        trace.productionCleanFlushResponseCount += 1;
+      }
+      writePwaUpdateTrace(trace);
+    });
+    navigator.serviceWorker?.addEventListener("message", (event) => {
+      const request = event.data;
+      let probeState = null;
+      try {
+        probeState = sessionStorage.getItem(pwaUpdateProbeStateKey);
+      } catch {
+        return;
+      }
+      if (
+        pwaUpdateProbeMode === "none" ||
+        probeState !== "armed" ||
+        typeof request !== "object" ||
+        request === null ||
+        request.type !== "PWA_BLOCKER_SNAPSHOT_REQUEST" ||
+        request.protocolVersion !== 1 ||
+        typeof request.requestId !== "string" ||
+        typeof request.clientId !== "string" ||
+        typeof request.flush !== "boolean"
+      ) {
+        return;
+      }
+      const trace = readPwaUpdateTrace();
+      if (request.flush) trace.flushCount += 1;
+      else trace.inspectionCount += 1;
+      writePwaUpdateTrace(trace);
+      if (pwaUpdateProbeMode === "trace-only") return;
+      if (request.flush) return;
+      event.stopImmediatePropagation();
+      const response = {
+        type: "PWA_BLOCKER_SNAPSHOT_RESPONSE",
+        protocolVersion: 1,
+        requestId: request.requestId,
+        snapshot: {
+          clientId: request.clientId,
+          capturedAt: new Date().toISOString(),
+          responsive: true,
+          blockers: [
+            {
+              id: "release-a-managed-save",
+              label: "更新前の保存テスト",
+            },
+          ],
+          flushError: false,
+        },
+      };
+      const target = event.source ?? navigator.serviceWorker.controller;
+      target?.postMessage(response);
     });
   })();`;
   await client.send("Page.addScriptToEvaluateOnNewDocument", { source });
@@ -299,6 +451,176 @@ const waitForExpression = async (
     `${label} was not observed.${lastError ? ` ${lastError.message}` : ""}`,
   );
 };
+
+const armPwaUpdateProbe = async (client) =>
+  await evaluate(
+    client,
+    `(() => {
+      sessionStorage.setItem(
+        ${JSON.stringify(PWA_UPDATE_PROBE_STATE_KEY)},
+        "armed",
+      );
+      sessionStorage.setItem(
+        ${JSON.stringify(PWA_UPDATE_PROBE_TRACE_KEY)},
+        JSON.stringify({
+          inspectionCount: 0,
+          flushCount: 0,
+          productionInspectionCount: 0,
+          productionFlushCount: 0,
+          productionFlushResponseCount: 0,
+          productionCleanFlushResponseCount: 0,
+        }),
+      );
+      return true;
+    })()`,
+  );
+
+const collectPromptCloseAllUiEvidence = async (client) =>
+  await evaluate(
+    client,
+    `(() => (async () => {
+      const notice = document.querySelector("[data-pwa-update-notice]");
+      const action = notice?.querySelector("[data-pwa-save-and-flush]");
+      const count = (name) => {
+        const value = Number.parseInt(notice?.dataset[name] ?? "-1", 10);
+        return Number.isSafeInteger(value) && value >= 0 ? value : -1;
+      };
+      const trace = (() => {
+        try {
+          const value = JSON.parse(
+            sessionStorage.getItem(
+              ${JSON.stringify(PWA_UPDATE_PROBE_TRACE_KEY)},
+            ) ?? "{}",
+          );
+          const readCount = (key) =>
+            Number.isSafeInteger(value[key]) && value[key] >= 0
+              ? value[key]
+              : -1;
+          return {
+            inspectionCount: readCount("inspectionCount"),
+            flushCount: readCount("flushCount"),
+            productionInspectionCount: readCount(
+              "productionInspectionCount",
+            ),
+            productionFlushCount: readCount("productionFlushCount"),
+            productionFlushResponseCount: readCount(
+              "productionFlushResponseCount",
+            ),
+            productionCleanFlushResponseCount: readCount(
+              "productionCleanFlushResponseCount",
+            ),
+          };
+        } catch {
+          return {
+            inspectionCount: -1,
+            flushCount: -1,
+            productionInspectionCount: -1,
+            productionFlushCount: -1,
+            productionFlushResponseCount: -1,
+            productionCleanFlushResponseCount: -1,
+          };
+        }
+      })();
+      const registration = await navigator.serviceWorker.getRegistration();
+      const controllerChangeCount = Number.parseInt(
+        sessionStorage.getItem(
+          ${JSON.stringify(CONTROLLER_CHANGE_COUNT_KEY)},
+        ) ?? "-1",
+        10,
+      );
+      return {
+        phase: notice?.dataset.pwaUpdatePhase ?? null,
+        snapshotCount: count("pwaSnapshotCount"),
+        responsiveCount: count("pwaResponsiveCount"),
+        blockerCount: count("pwaBlockerCount"),
+        unresponsiveCount: count("pwaUnresponsiveCount"),
+        flushFailureCount: count("pwaFlushFailureCount"),
+        saveOperationCount: count("pwaSaveOperationCount"),
+        saveOperation: notice?.dataset.saveOperation ?? null,
+        action: action?.dataset.pwaSaveAction ?? null,
+        actionVisible: Boolean(action),
+        closeGuidanceVisible:
+          notice?.dataset.pwaCloseGuidance === "true",
+        activeState: registration?.active?.state ?? null,
+        waitingState: registration?.waiting?.state ?? null,
+        controllerState: navigator.serviceWorker.controller?.state ?? null,
+        controllerScriptUrl:
+          navigator.serviceWorker.controller?.scriptURL ?? null,
+        controllerChangeCount:
+          Number.isSafeInteger(controllerChangeCount) &&
+          controllerChangeCount >= 0
+            ? controllerChangeCount
+            : -1,
+        snapshotRequests: trace,
+      };
+    })())()`,
+  );
+
+const waitForPromptCloseAllPhase = async (client, phase, label) => {
+  await waitForExpression(
+    client,
+    `document.querySelector(
+      "[data-pwa-update-notice]",
+    )?.dataset.pwaUpdatePhase === ${JSON.stringify(phase)}`,
+    label,
+  );
+  return collectPromptCloseAllUiEvidence(client);
+};
+
+const inspectProductionEventAutosaveBlocker = async (client) =>
+  await evaluate(
+    client,
+    `(() => new Promise((resolve, reject) => {
+      const requestId = crypto.randomUUID();
+      const clientId = "release-a-primary-production-bridge";
+      const timeout = setTimeout(() => {
+        globalThis.removeEventListener("message", onMessage);
+        reject(new Error("Production role blocker inspection timed out."));
+      }, 1_500);
+      const onMessage = (event) => {
+        if (
+          event.source !== globalThis ||
+          event.origin !== globalThis.location.origin ||
+          typeof event.data !== "object" ||
+          event.data === null ||
+          event.data.type !== "ESP_PWA_ROLE_BLOCKER_SNAPSHOT_RESPONSE" ||
+          event.data.protocolVersion !== 1 ||
+          event.data.requestId !== requestId
+        ) {
+          return;
+        }
+        clearTimeout(timeout);
+        globalThis.removeEventListener("message", onMessage);
+        const snapshot = event.data.snapshot;
+        const eventAutosave = Array.isArray(snapshot?.blockers)
+          ? snapshot.blockers.find(
+              (blocker) =>
+                blocker?.id === "event-autosave" &&
+                blocker?.label === "イベントを保存中",
+            )
+          : null;
+        resolve({
+          responsive: snapshot?.responsive === true,
+          flushError: snapshot?.flushError === true,
+          blockerCount: Array.isArray(snapshot?.blockers)
+            ? snapshot.blockers.length
+            : -1,
+          eventAutosaveObserved: Boolean(eventAutosave),
+        });
+      };
+      globalThis.addEventListener("message", onMessage);
+      globalThis.postMessage(
+        {
+          type: "ESP_PWA_ROLE_BLOCKER_SNAPSHOT_REQUEST",
+          protocolVersion: 1,
+          requestId,
+          clientId,
+          flush: false,
+        },
+        globalThis.location.origin,
+      );
+    }))()`,
+  );
 
 class AttachedServiceWorkerClient {
   constructor(browserSession, sessionId) {
@@ -458,6 +780,7 @@ const waitForNaturalServiceWorkerActivation = async (
   pageClient,
   serviceWorkerUrl,
   requestUpdate,
+  prepareClientsForRelease,
   releaseClients,
   reopenClients,
   timeoutMs = 20_000,
@@ -492,6 +815,19 @@ const waitForNaturalServiceWorkerActivation = async (
       "installed waiting Service Worker",
       Date.now() + timeoutMs,
     );
+    const promptCloseAllEvidence = prepareClientsForRelease
+      ? await prepareClientsForRelease({
+          waitingVersionId,
+          baselineVersionIds,
+          updateEvidence,
+        })
+      : null;
+    if (promptCloseAllEvidence) {
+      assert(
+        tracker.getNewInstalledVersionId() === waitingVersionId,
+        "Target Service Worker changed before every client was ready to close.",
+      );
+    }
     tracker.markClientsReleaseStarted(waitingVersionId);
     const releaseEvidence = await releaseClients();
     await waitForTrackedState(
@@ -507,13 +843,29 @@ const waitForNaturalServiceWorkerActivation = async (
       "stable Service Worker activation after client reopen",
       Date.now() + timeoutMs,
     );
-    return {
+    const result = {
       versionId: waitingVersionId,
       baselineVersionIds,
       updateEvidence,
       reopenEvidence,
       ...releaseEvidence,
     };
+    if (promptCloseAllEvidence) {
+      result.promptCloseAll = {
+        ...promptCloseAllEvidence,
+        release: {
+          ...releaseEvidence,
+          startedAfterReadyToClose: true,
+        },
+        naturalActivation: {
+          outcome: "natural-after-all-clients-closed",
+          versionId: waitingVersionId,
+          stableAfterReopen: true,
+          reopenedClientCount: Object.keys(reopenEvidence).length,
+        },
+      };
+    }
+    return result;
   } finally {
     unsubscribe();
     await pageClient.send("ServiceWorker.disable").catch(() => undefined);
@@ -916,6 +1268,91 @@ const waitForRollbackSavedEventCommit = async (client, timeoutMs = 20_000) => {
   );
 };
 
+const collectPersistedEventEvidence = async (client, eventName) =>
+  await evaluate(
+    client,
+    `(async () => {
+      const database = await new Promise((resolve, reject) => {
+        const request = indexedDB.open("EventShoppingPlannerDB");
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+      });
+      try {
+        const transaction = database.transaction("eventLists", "readonly");
+        const eventLists = await new Promise((resolve, reject) => {
+          const request = transaction.objectStore("eventLists").get("data");
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve(request.result);
+        });
+        const items = eventLists?.[${JSON.stringify(eventName)}];
+        return {
+          present: Array.isArray(items),
+          itemCount: Array.isArray(items) ? items.length : 0,
+        };
+      } finally {
+        database.close();
+      }
+    })()`,
+  );
+
+const waitForPersistedEvent = async (client, eventName, timeoutMs = 20_000) => {
+  const deadline = Date.now() + timeoutMs;
+  let lastEvidence = null;
+  while (Date.now() < deadline) {
+    lastEvidence = await collectPersistedEventEvidence(client, eventName);
+    if (lastEvidence.present && lastEvidence.itemCount >= 1) {
+      return lastEvidence;
+    }
+    await delay(100);
+  }
+  throw new Error(
+    `Prompt-close save was not committed to IndexedDB. Last evidence: ${JSON.stringify(
+      lastEvidence,
+    )}`,
+  );
+};
+
+const createPromptClosePendingEventThroughUi = async (page, eventName) => {
+  await page
+    .getByRole("button", { name: "新規リスト作成", exact: true })
+    .click();
+  await page.locator("#eventName").waitFor({ state: "visible" });
+  await Promise.all([
+    page.locator("#eventName").fill(eventName),
+    page.locator("#circles").fill("Prompt Close Circle"),
+    page.locator("#event-dates").fill("1日目"),
+    page.locator("#blocks").fill("A"),
+    page.locator("#numbers").fill("01a"),
+    page.locator("#titles").fill("Prompt Close Saved Item"),
+    page.locator("#prices").fill("100"),
+  ]);
+  const alertMessages = [];
+  const acceptDialog = async (dialog) => {
+    alertMessages.push(dialog.message());
+    await dialog.accept();
+  };
+  page.on("dialog", acceptDialog);
+  try {
+    await page.locator("form:has(#eventName) button[type=submit]").click();
+  } finally {
+    page.off("dialog", acceptDialog);
+  }
+  await page.waitForFunction(
+    (expectedEventName) =>
+      globalThis.document.body.textContent?.includes(expectedEventName) ===
+      true,
+    eventName,
+  );
+  assert(
+    alertMessages.some((message) =>
+      message.includes("items imported into a new event"),
+    ),
+    `Prompt-close UI did not reach its successful import path. Alerts: ${JSON.stringify(
+      alertMessages,
+    )}`,
+  );
+};
+
 const createRollbackSavedEventThroughUi = async (client) => {
   const eventName = JSON.stringify(ROLLBACK_SAVE_EVENT_NAME);
   const opened = await evaluate(
@@ -1264,11 +1701,17 @@ try {
   const startupAppPage = browserContext.pages()[0];
   assert(startupAppPage, "Initial standalone app-window page is missing.");
   standaloneTarget = await createTarget(browserContext, startupAppPage);
-  await installBrowserInstrumentation(standaloneTarget.client);
+  await installBrowserInstrumentation(
+    standaloneTarget.client,
+    PROMPT_CLOSE_DRILL_MODE === "required" ? "trace-only" : "none",
+  );
 
   const primary = await createTarget(browserContext);
   targets.push(primary);
-  await installBrowserInstrumentation(primary.client);
+  await installBrowserInstrumentation(
+    primary.client,
+    PROMPT_CLOSE_DRILL_MODE === "required" ? "save-blocker" : "none",
+  );
   await navigate(primary.client, PREVIEW_URL);
   await ensureControlledApplication(primary.client);
   if (TRANSITION_MODE === "rollback") {
@@ -1513,10 +1956,269 @@ try {
         return false;
       }
     };
+
+    let promptCloseSecondary = null;
+    let promptCloseClients = null;
+    let baselineControllerChangeCounts = null;
+    let promptCloseEventName = null;
+    if (PROMPT_CLOSE_DRILL_MODE === "required") {
+      await navigate(standaloneTarget.client, PREVIEW_URL);
+      await ensureControlledApplication(standaloneTarget.client);
+      await waitForReleaseAStartupMetric(standaloneTarget.client);
+
+      promptCloseSecondary = await createTarget(browserContext);
+      targets.push(promptCloseSecondary);
+      await installBrowserInstrumentation(
+        promptCloseSecondary.client,
+        "trace-only",
+      );
+      await navigate(promptCloseSecondary.client, PREVIEW_URL);
+      await ensureControlledApplication(promptCloseSecondary.client);
+      await waitForReleaseAStartupMetric(promptCloseSecondary.client);
+
+      promptCloseClients = [
+        { role: "primary", target: primary },
+        { role: "secondary", target: promptCloseSecondary },
+        { role: "standalone-equivalent", target: standaloneTarget },
+      ];
+      assert(
+        browserContext.pages().filter(hasPreviewOrigin).length ===
+          promptCloseClients.length,
+        "Prompt-close drill requires exactly three same-origin clients.",
+      );
+      baselineControllerChangeCounts = Object.fromEntries(
+        await Promise.all(
+          promptCloseClients.map(async ({ role, target }) => [
+            role,
+            (await collectBrowserInstrumentationEvidence(target.client))
+              .controllerChangeCount,
+          ]),
+        ),
+      );
+      await Promise.all(
+        promptCloseClients.map(({ target }) =>
+          armPwaUpdateProbe(target.client),
+        ),
+      );
+      promptCloseEventName = `RELEASE_A_PROMPT_CLOSE_SAVE_${Date.now()}`;
+      const eventBeforeSave = await collectPersistedEventEvidence(
+        primary.client,
+        promptCloseEventName,
+      );
+      assert(
+        !eventBeforeSave.present,
+        "Prompt-close save fixture already exists before user action.",
+      );
+    }
+
     const naturalActivation = await waitForNaturalServiceWorkerActivation(
       primary.client,
       new URL("/sw.js", PREVIEW_URL).href,
       () => requestTargetServiceWorkerUpdate(primary.client),
+      PROMPT_CLOSE_DRILL_MODE === "required"
+        ? async ({ waitingVersionId }) => {
+            const preflush = await waitForPromptCloseAllPhase(
+              primary.client,
+              "save-required",
+              "prompt-close save-required phase",
+            );
+            assert(
+              preflush.snapshotCount === 3 &&
+                preflush.responsiveCount === 3 &&
+                preflush.blockerCount >= 1 &&
+                preflush.unresponsiveCount === 0 &&
+                preflush.flushFailureCount === 0 &&
+                preflush.saveOperationCount === 0 &&
+                preflush.action === "save-and-flush" &&
+                preflush.actionVisible &&
+                !preflush.closeGuidanceVisible,
+              `Prompt-close preflush evidence differs: ${JSON.stringify(preflush)}`,
+            );
+            assert(
+              preflush.activeState === "activated" &&
+                preflush.waitingState === "installed" &&
+                preflush.controllerState === "activated",
+              "Prompt-close preflush did not preserve the active/waiting roles.",
+            );
+
+            await createPromptClosePendingEventThroughUi(
+              primary.page,
+              promptCloseEventName,
+            );
+            const eventAutosaveInspection =
+              await inspectProductionEventAutosaveBlocker(primary.client);
+            assert(
+              eventAutosaveInspection.responsive === true &&
+                eventAutosaveInspection.flushError === false &&
+                eventAutosaveInspection.blockerCount >= 1 &&
+                eventAutosaveInspection.eventAutosaveObserved === true,
+              `Production event-autosave blocker was not observed before the initial action: ${JSON.stringify(
+                eventAutosaveInspection,
+              )}`,
+            );
+
+            await promptCloseSecondary.client.send(
+              "Page.setWebLifecycleState",
+              {
+                state: "frozen",
+              },
+            );
+            let failedClosed;
+            try {
+              await primary.page
+                .locator(
+                  '[data-pwa-save-and-flush][data-pwa-save-action="save-and-flush"]',
+                )
+                .click();
+              failedClosed = await waitForPromptCloseAllPhase(
+                primary.client,
+                "save-incomplete",
+                "prompt-close fail-closed phase",
+              );
+              assert(
+                failedClosed.snapshotCount === 3 &&
+                  failedClosed.responsiveCount === 2 &&
+                  failedClosed.blockerCount === 0 &&
+                  failedClosed.unresponsiveCount === 1 &&
+                  failedClosed.flushFailureCount === 0 &&
+                  failedClosed.saveOperationCount === 1 &&
+                  failedClosed.action === "retry" &&
+                  failedClosed.actionVisible &&
+                  !failedClosed.closeGuidanceVisible,
+                `Prompt-close fail-closed evidence differs: ${JSON.stringify(
+                  failedClosed,
+                )}`,
+              );
+            } finally {
+              await promptCloseSecondary.client
+                .send("Page.setWebLifecycleState", { state: "active" })
+                .catch(() => undefined);
+            }
+
+            const eventAfterInitialAction = await waitForPersistedEvent(
+              primary.client,
+              promptCloseEventName,
+            );
+            await primary.page
+              .locator(
+                '[data-pwa-save-and-flush][data-pwa-save-action="retry"]',
+              )
+              .click();
+            const postflush = await waitForPromptCloseAllPhase(
+              primary.client,
+              "ready-to-close",
+              "prompt-close ready-to-close phase",
+            );
+            assert(
+              postflush.snapshotCount === 3 &&
+                postflush.responsiveCount === 3 &&
+                postflush.blockerCount === 0 &&
+                postflush.unresponsiveCount === 0 &&
+                postflush.flushFailureCount === 0 &&
+                postflush.saveOperationCount === 2 &&
+                postflush.action === null &&
+                !postflush.actionVisible &&
+                postflush.closeGuidanceVisible,
+              `Prompt-close postflush evidence differs: ${JSON.stringify(
+                postflush,
+              )}`,
+            );
+            assert(
+              postflush.activeState === "activated" &&
+                postflush.waitingState === "installed" &&
+                postflush.controllerState === "activated",
+              "Prompt-close user action activated the waiting worker prematurely.",
+            );
+
+            const clientEvidence = await Promise.all(
+              promptCloseClients.map(async ({ role, target }) => ({
+                role,
+                evidence: await collectPromptCloseAllUiEvidence(target.client),
+              })),
+            );
+            clientEvidence.forEach(({ role, evidence }) => {
+              assert(
+                evidence.snapshotRequests.inspectionCount >= 1 &&
+                  evidence.snapshotRequests.flushCount >= 1 &&
+                  evidence.snapshotRequests.productionFlushCount >= 1 &&
+                  evidence.snapshotRequests.productionFlushResponseCount >= 1 &&
+                  evidence.snapshotRequests.productionCleanFlushResponseCount >=
+                    1,
+                `Prompt-close ${role} did not observe production inspect/flush requests and clean responses.`,
+              );
+              assert(
+                evidence.activeState === "activated" &&
+                  evidence.waitingState === "installed" &&
+                  evidence.controllerState === "activated" &&
+                  evidence.controllerChangeCount ===
+                    baselineControllerChangeCounts[role],
+                `Prompt-close ${role} changed controller before client release.`,
+              );
+            });
+
+            const projectPhase = (evidence) => ({
+              phase: evidence.phase,
+              snapshotCount: evidence.snapshotCount,
+              responsiveCount: evidence.responsiveCount,
+              blockerCount: evidence.blockerCount,
+              unresponsiveCount: evidence.unresponsiveCount,
+              flushFailureCount: evidence.flushFailureCount,
+              saveOperationCount: evidence.saveOperationCount,
+              action: evidence.action,
+              actionVisible: evidence.actionVisible,
+              closeGuidanceVisible: evidence.closeGuidanceVisible,
+            });
+            return {
+              schemaVersion: 1,
+              kind: "prompt-close-all-browser-drill/v1",
+              clientRoles: promptCloseClients.map(({ role }) => role),
+              blockerFixture:
+                "synthetic-protocol-blocker-with-real-event-autosave-persistence",
+              interaction: {
+                initialAction: "playwright-click",
+                retryAction: "playwright-click",
+                operationCount: postflush.saveOperationCount,
+                eventAutosaveBlockerObserved:
+                  eventAutosaveInspection.eventAutosaveObserved,
+                eventPersistedAfterInitialAction:
+                  eventAfterInitialAction.present,
+                persistedItemCount: eventAfterInitialAction.itemCount,
+              },
+              preflush: projectPhase(preflush),
+              failedClosed: {
+                cause: "frozen-unresponsive-client",
+                ...projectPhase(failedClosed),
+              },
+              postflush: projectPhase(postflush),
+              snapshotRequests: clientEvidence.map(({ role, evidence }) => ({
+                role,
+                inspectionCount: evidence.snapshotRequests.inspectionCount,
+                flushCount: evidence.snapshotRequests.flushCount,
+                productionFlushCount:
+                  evidence.snapshotRequests.productionFlushCount,
+                productionFlushResponseCount:
+                  evidence.snapshotRequests.productionFlushResponseCount,
+                productionCleanFlushResponseCount:
+                  evidence.snapshotRequests.productionCleanFlushResponseCount,
+              })),
+              controllerBeforeClose: {
+                fromArtifactId: EXPECTED_FROM_ARTIFACT_ID,
+                targetArtifactId: TARGET_ARTIFACT_ID,
+                waitingVersionId,
+                clients: clientEvidence.map(({ role, evidence }) => ({
+                  role,
+                  activeState: evidence.activeState,
+                  waitingState: evidence.waitingState,
+                  controllerState: evidence.controllerState,
+                  controllerScriptUrl: evidence.controllerScriptUrl,
+                  controllerChangeCountDelta:
+                    evidence.controllerChangeCount -
+                    baselineControllerChangeCounts[role],
+                })),
+              },
+            };
+          }
+        : null,
       async () => {
         const originPages = browserContext.pages().filter(hasPreviewOrigin);
         assert(
@@ -1540,6 +2242,9 @@ try {
         return {
           releasedClientCount: originPages.length,
           releasedTargetCount: releasePages.size,
+          remainingOriginClientCount: browserContext
+            .pages()
+            .filter(hasPreviewOrigin).length,
         };
       },
       async () => {
@@ -1581,6 +2286,18 @@ try {
         return { primaryRegistration, standaloneRegistration };
       },
     );
+    if (PROMPT_CLOSE_DRILL_MODE === "required") {
+      assertPromptCloseAllBrowserDrill(naturalActivation.promptCloseAll, {
+        expectedFromArtifactId: EXPECTED_FROM_ARTIFACT_ID,
+        expectedServiceWorkerUrl: new URL("/sw.js", PREVIEW_URL).href,
+        expectedTargetArtifactId: TARGET_ARTIFACT_ID,
+      });
+    } else {
+      assert(
+        !Object.hasOwn(naturalActivation, "promptCloseAll"),
+        "Disabled prompt-close drill emitted prompt evidence.",
+      );
+    }
     await waitForExpression(
       primary.client,
       `document.querySelector(

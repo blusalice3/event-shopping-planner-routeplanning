@@ -15,6 +15,47 @@ import {
   derivePwaMulticlientEvidence,
   managedDevicePublicKeyFingerprint,
 } from "./managed-device-authority.mjs";
+import { resolvePromptCloseAllDrillMode } from "./prompt-close-all-drill-authority.mjs";
+
+test("resolves prompt-close drill mode as a closed forward-only contract", () => {
+  assert.equal(
+    resolvePromptCloseAllDrillMode({
+      transitionMode: "forward",
+      configuredMode: undefined,
+    }),
+    "required",
+  );
+  assert.equal(
+    resolvePromptCloseAllDrillMode({
+      transitionMode: "forward",
+      configuredMode: "disabled",
+    }),
+    "disabled",
+  );
+  assert.equal(
+    resolvePromptCloseAllDrillMode({
+      transitionMode: "rollback",
+      configuredMode: "disabled",
+    }),
+    "disabled",
+  );
+  assert.throws(
+    () =>
+      resolvePromptCloseAllDrillMode({
+        transitionMode: "forward",
+        configuredMode: "optional",
+      }),
+    /exactly required or disabled/,
+  );
+  assert.throws(
+    () =>
+      resolvePromptCloseAllDrillMode({
+        transitionMode: "rollback",
+        configuredMode: "required",
+      }),
+    /requires a forward transition/,
+  );
+});
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -203,6 +244,115 @@ const rawDatabase = (profileIndex, phaseIndex) => ({
   },
 });
 
+const promptCloseAllDrill = (profileIndex) => {
+  const phase = ({
+    action,
+    actionVisible,
+    blockerCount,
+    closeGuidanceVisible,
+    flushFailureCount = 0,
+    phase: phaseName,
+    responsiveCount,
+    saveOperationCount,
+    snapshotCount = 3,
+    unresponsiveCount,
+  }) => ({
+    phase: phaseName,
+    snapshotCount,
+    responsiveCount,
+    blockerCount,
+    unresponsiveCount,
+    flushFailureCount,
+    saveOperationCount,
+    action,
+    actionVisible,
+    closeGuidanceVisible,
+  });
+  const roles = ["primary", "secondary", "standalone-equivalent"];
+  const waitingVersionId = `waiting-${profileIndex}`;
+  return {
+    schemaVersion: 1,
+    kind: "prompt-close-all-browser-drill/v1",
+    clientRoles: roles,
+    blockerFixture:
+      "synthetic-protocol-blocker-with-real-event-autosave-persistence",
+    interaction: {
+      initialAction: "playwright-click",
+      retryAction: "playwright-click",
+      operationCount: 2,
+      eventAutosaveBlockerObserved: true,
+      eventPersistedAfterInitialAction: true,
+      persistedItemCount: 1,
+    },
+    preflush: phase({
+      phase: "save-required",
+      responsiveCount: 3,
+      blockerCount: 1,
+      unresponsiveCount: 0,
+      saveOperationCount: 0,
+      action: "save-and-flush",
+      actionVisible: true,
+      closeGuidanceVisible: false,
+    }),
+    failedClosed: {
+      cause: "frozen-unresponsive-client",
+      ...phase({
+        phase: "save-incomplete",
+        responsiveCount: 2,
+        blockerCount: 0,
+        unresponsiveCount: 1,
+        saveOperationCount: 1,
+        action: "retry",
+        actionVisible: true,
+        closeGuidanceVisible: false,
+      }),
+    },
+    postflush: phase({
+      phase: "ready-to-close",
+      responsiveCount: 3,
+      blockerCount: 0,
+      unresponsiveCount: 0,
+      saveOperationCount: 2,
+      action: null,
+      actionVisible: false,
+      closeGuidanceVisible: true,
+    }),
+    snapshotRequests: roles.map((role) => ({
+      role,
+      inspectionCount: 1,
+      flushCount: 1,
+      productionFlushCount: 1,
+      productionFlushResponseCount: 1,
+      productionCleanFlushResponseCount: 1,
+    })),
+    controllerBeforeClose: {
+      fromArtifactId: rollbackDeployment.sourceSha,
+      targetArtifactId: sourceSha,
+      waitingVersionId,
+      clients: roles.map((role) => ({
+        role,
+        activeState: "activated",
+        waitingState: "installed",
+        controllerState: "activated",
+        controllerScriptUrl: "http://127.0.0.1:4173/sw.js",
+        controllerChangeCountDelta: 0,
+      })),
+    },
+    release: {
+      releasedClientCount: 3,
+      releasedTargetCount: 3,
+      remainingOriginClientCount: 0,
+      startedAfterReadyToClose: true,
+    },
+    naturalActivation: {
+      outcome: "natural-after-all-clients-closed",
+      versionId: waitingVersionId,
+      stableAfterReopen: true,
+      reopenedClientCount: 2,
+    },
+  };
+};
+
 const rawPwaObservation = (profileIndex, phaseIndex) => {
   const common = {
     browserProcessId: 301 + profileIndex + phaseIndex * 10,
@@ -254,7 +404,9 @@ const rawPwaObservation = (profileIndex, phaseIndex) => {
     activeServiceWorker: { byteLength: 100, sha256: hash("c") },
     offlineControllerIdentity: { buildId: sourceSha },
     controllerChangeCount: 1,
-    naturalActivation: { activated: true },
+    naturalActivation: {
+      promptCloseAll: promptCloseAllDrill(profileIndex),
+    },
   };
 };
 
@@ -466,6 +618,55 @@ test("rejects caller client/status/installed claims and incomplete PWA lifecycle
           validation: validation("pwa-multiclient-drill", policy),
         }),
       /unexpected|transition|cleanup|launch|summaries|raw device receipts/,
+    );
+  }
+});
+
+test("rejects incomplete or tampered prompt-close browser evidence", () => {
+  const policy = configuredExternalPolicy();
+  for (const mutate of [
+    (value) => {
+      delete value.preflush.action;
+    },
+    (value) => {
+      value.postflush.unexpected = true;
+    },
+    (value) => {
+      value.failedClosed.closeGuidanceVisible = true;
+    },
+    (value) => {
+      value.snapshotRequests[1].flushCount = 0;
+    },
+    (value) => {
+      value.snapshotRequests[1].productionFlushResponseCount = 0;
+    },
+    (value) => {
+      value.interaction.eventAutosaveBlockerObserved = false;
+    },
+    (value) => {
+      value.controllerBeforeClose.clients[0].controllerChangeCountDelta = 1;
+    },
+    (value) => {
+      value.release.remainingOriginClientCount = 1;
+    },
+    (value) => {
+      value.naturalActivation.versionId = "substituted";
+    },
+  ]) {
+    const candidate = payload("pwa-multiclient-drill", policy);
+    const promptCloseAll =
+      candidate.evidence.profileTransitions[0].observations.finalForward
+        .naturalActivation.promptCloseAll;
+    mutate(promptCloseAll);
+    assert.throws(
+      () =>
+        createSignedManagedDeviceReceipt({
+          payload: candidate,
+          privateKeyPem,
+          publicKeyPem,
+          validation: validation("pwa-multiclient-drill", policy),
+        }),
+      /Prompt-close/,
     );
   }
 });

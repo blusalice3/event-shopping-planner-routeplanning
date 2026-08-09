@@ -16,6 +16,7 @@ import {
   assertBrowserPhaseExitCollectorIdentity,
   resolveProductionRequestGraphBinding,
 } from "./production-request-graph.mjs";
+import { assertPromptCloseAllBrowserDrill } from "./prompt-close-all-drill-authority.mjs";
 
 export const MANAGED_DEVICE_AUTHORITIES = Object.freeze([
   "idb-device-compatibility",
@@ -636,6 +637,15 @@ const rawTransitionDocuments = ({
     ) {
       throw new Error("Managed PWA raw browser lifecycle differs");
     }
+    assertPromptCloseAllBrowserDrill(
+      finalForward.naturalActivation?.promptCloseAll,
+      {
+        expectedFromArtifactId: rollbackSourceSha,
+        expectedServiceWorkerUrl: new URL("/sw.js", finalForward.previewOrigin)
+          .href,
+        expectedTargetArtifactId: sourceSha,
+      },
+    );
     return document;
   });
 };

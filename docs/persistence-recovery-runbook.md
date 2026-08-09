@@ -468,6 +468,16 @@ cleanなworktreeで、既存previewを停止してから実行します。演習
 npm run test:release-a-rollback
 ```
 
+既定baselineは明示的な保存UIを持たないhistorical packageであるため、この演習では旧natural activation経路を検証し、prompt-close操作は要求しません。`prompt-close-all-v1`を備えたdormant preparation / compatible predecessorとの遷移を検証するときは、そのcommitを明示してprompt-close drillを必須化します。
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/rehearse-release-a-rollback.ps1 `
+  -BaselineCommit <prompt対応predecessorのfull SHA> `
+  -RequirePromptCloseDrill
+```
+
+`-RequirePromptCloseDrill`は`save-required`、実`event-autosave` blocker、user clickによるproduction bridgeのflush、未応答clientでのfail-closed、retry後の`ready-to-close`、全client close後のnatural activationをすべて必須にします。prompt非対応baselineをこのmodeへ渡した場合はtimeoutをPASSへ変換せず失敗します。
+
 このコマンドは次を同一origin・同一Chrome profileで順に実行します。
 
 1. `build:release-a`でcleanなfull SHAとcleanup forced-offを検証する

@@ -1,6 +1,6 @@
 # Web App Foundation 完全性・Exit 証跡
 
-記録日: 2026-08-09 (Asia/Tokyo)
+記録日: 2026-08-10 (Asia/Tokyo)
 
 ## 結論
 
@@ -73,6 +73,32 @@ artifact digest、ZIP bytes、ZIP 内 exact single file、source/run/attempt、a
   distinct absolute profile で実行する。A → B → A の3 reviewed stage、Ed25519 device attestation、
   Service Worker / capability / IndexedDB raw authority を同一 device/profile へ束縛する。
 
+### Phase 1 prompt-close-all
+
+- waiting Workerの初回blocker snapshotは`flush=false`で取得し、画面へ明示的な保存操作を出す。
+- user click後だけ`flush=true`を全clientへ送り、nonempty、全client responsive、blocker 0、flush error 0を
+  同時に満たすまでclose guidanceへ進まない。空応答、未応答、保存失敗、snapshot error、waiting Worker
+  差替えはretryまたはnotice除去へfail-closedにする。Workerへ強制activation messageは送らない。
+- outer agentのSW responderとrole entryのstateful registryは別bundleに分離し、same-window/same-originの
+  exact-key bridgeで接続する。UUID、client ID、source/origin、waiting Worker ownership、timeout、late/duplicate/
+  malformed responseを検証し、bridge failureはunresponsive snapshotへ変換する。`event-autosave`のMapとflushは
+  role bundleだけが所有し、containment roleは空registryで応答する。
+- noticeはReactの`#root`外にある専用outer-agent hostへ描画し、waiting Workerごとの世代・所有権tokenで
+  cleanupする。旧Workerの遅延snapshot/flushは新Workerのnoticeを上書き・削除できない。
+- UIはphase、snapshot/responsive/blocker/unresponsive/flush failure数、操作種別・回数、close guidanceを
+  `data-*`で公開し、authorityが日本語文言を解析しない契約にした。
+- Release A forward browser drillは同一profileのprimary、secondary、standalone-equivalentを制御し、
+  `save-required`観測後にsecondaryをfreezeする。実clickで`save-incomplete`を確認し、thaw後のretryで
+  `ready-to-close`、production bridge上の実`event-autosave` blocker/flush、IndexedDB commit、全clientの
+  clean response、close前controller不変、全client解放後だけのnatural activationを確認する。合成responseは
+  初回`flush=false`表示だけに限定し、`flush=true`はproduction responderへ通す。
+- prompt UI非搭載のhistorical baselineは`disabled`で従来のnatural activationを回帰し、prompt対応
+  predecessorは`-RequirePromptCloseDrill`で上記操作を必須化する。対応能力のないbaselineをrequired modeへ
+  渡した場合はfail-closedにする。
+- drillの`promptCloseAll` objectは共通closed verifierで各階層のunknown/missing field、request欠落、
+  premature controller change、failure中のclose guidance、client残存、activation順序改ざんを拒否する。
+  このloopback drillはrepository regressionであり、実managed Windows/PWAの外部authorityを代替しない。
+
 ### 16-gate attestation と Release State
 
 正式順序は `P0-BASELINE` から `P8-CLEAN` までの16 gateで固定している。
@@ -118,18 +144,21 @@ Node 24.19.0 / npm 11.19.0 の固定 PATH で次を確認した。
 
 | Suite                     |      結果 |
 | ------------------------- | --------: |
-| Foundation                |   761/761 |
+| Foundation                |   764/764 |
 | Release State             |   267/267 |
-| Unit                      | 1107/1107 |
+| Unit                      | 1127/1127 |
 | Integration               |   393/393 |
 | Worker                    |     64/64 |
 | API                       |     17/17 |
-| Coverage                  | 1564/1564 |
+| Coverage                  | 1584/1584 |
 | Formal exit focused       |   132/132 |
 | P8 formal/floor focused   |   143/143 |
 | Quality verifier commands |     24/24 |
 | Clean Release A build     |      PASS |
 | Chromium clean overlay    |     22/22 |
+
+coverageはglobal lines `67.08%` / branches `58.68%`、PWA recovery lines `90.77%` /
+branches `83.58%`、今回変更行 `95.35%` / 変更branch `85.94%`で、6 subsystem floorを満たした。
 
 これらは repository regression の証跡であり、external observation や正式 Exit の代替ではない。
 最終合流時は同じ固定 runtime で再実行し、差異があればこの表ではなく実行 logを優先する。

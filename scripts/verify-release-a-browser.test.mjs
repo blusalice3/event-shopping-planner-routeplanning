@@ -9,6 +9,10 @@ const verifierPath = fileURLToPath(
   new URL("./verify-release-a-browser.mjs", import.meta.url),
 );
 const verifierSource = await readFile(verifierPath, "utf8");
+const rollbackRehearsalSource = await readFile(
+  fileURLToPath(new URL("./rehearse-release-a-rollback.ps1", import.meta.url)),
+  "utf8",
+);
 
 test("Release A browser verifier is syntax-valid and Playwright-owned", () => {
   const syntaxCheck = spawnSync(process.execPath, ["--check", verifierPath], {
@@ -62,6 +66,7 @@ test("forward transition waits for one target worker to activate naturally", () 
     "freezeBaselineVersionIds()",
     "requestUpdate()",
     "getNewInstalledVersionId()",
+    "prepareClientsForRelease({",
     "markClientsReleaseStarted(waitingVersionId)",
     "releaseClients()",
     "isNaturalActivationComplete()",
@@ -128,6 +133,74 @@ test("forward transition waits for one target worker to activate naturally", () 
   assert.doesNotMatch(
     verifierSource,
     /forwardInstrumentation\.controllerChangeCount\s*>=\s*1/,
+  );
+
+  const promptPrepareStart = verifierSource.indexOf(
+    "async ({ waitingVersionId })",
+    forwardStart,
+  );
+  const promptPrepareEnd = verifierSource.indexOf(
+    "async () => {",
+    promptPrepareStart,
+  );
+  const promptCloseSource = verifierSource.slice(
+    promptPrepareStart,
+    promptPrepareEnd,
+  );
+  for (const fragment of [
+    '"save-required"',
+    'state: "frozen"',
+    "inspectProductionEventAutosaveBlocker",
+    'data-pwa-save-action="save-and-flush"',
+    '"save-incomplete"',
+    'state: "active"',
+    "createPromptClosePendingEventThroughUi",
+    'data-pwa-save-action="retry"',
+    '"ready-to-close"',
+    "waitForPersistedEvent",
+  ]) {
+    assert.ok(
+      promptCloseSource.includes(fragment),
+      `Missing prompt-close sequence fragment: ${fragment}`,
+    );
+  }
+  assert.ok(
+    promptCloseSource.indexOf("createPromptClosePendingEventThroughUi") <
+      promptCloseSource.indexOf('state: "frozen"'),
+    "The real event-autosave blocker must be created before the initial save action.",
+  );
+  assert.match(
+    verifierSource,
+    /if \(request\.flush\) return;\s*event\.stopImmediatePropagation\(\);/,
+  );
+  assert.match(
+    helperSource,
+    /prepareClientsForRelease\s*\?\s*await prepareClientsForRelease/,
+  );
+  assert.doesNotMatch(verifierSource, /installedPwa:\s*true/);
+});
+
+test("historical rollback disables prompt UI while capable predecessors can require it", () => {
+  assert.match(rollbackRehearsalSource, /\[switch\]\$RequirePromptCloseDrill/);
+  assert.match(
+    rollbackRehearsalSource,
+    /\$env:ESP_PROMPT_CLOSE_DRILL = "disabled"/,
+  );
+  assert.match(
+    rollbackRehearsalSource,
+    /\$env:ESP_PROMPT_CLOSE_DRILL = "required"/,
+  );
+  assert.match(
+    rollbackRehearsalSource,
+    /Remove-Item Env:ESP_PROMPT_CLOSE_DRILL/,
+  );
+  assert.match(
+    verifierSource,
+    /PROMPT_CLOSE_DRILL_MODE === "required"\s*\? async \(\{ waitingVersionId \}\) =>/,
+  );
+  assert.match(
+    verifierSource,
+    /PROMPT_CLOSE_DRILL_MODE === "required"\) \{\s*assertPromptCloseAllBrowserDrill/,
   );
 });
 
@@ -239,6 +312,10 @@ test("preflight and transition JSON contracts remain present", () => {
     "physicalDeleteCount",
     "controllerChangeCount",
     "naturalActivation",
+    "promptCloseAll",
+    'kind: "prompt-close-all-browser-drill/v1"',
+    "frozen-unresponsive-client",
+    "eventPersisted",
     "activeSource",
     "offlineControllerIdentity",
   ]) {

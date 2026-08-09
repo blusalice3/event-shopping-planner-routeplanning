@@ -1,6 +1,6 @@
 # Web App Foundation 実装状況
 
-更新日: 2026-08-09 (Asia/Tokyo)
+更新日: 2026-08-10 (Asia/Tokyo)
 
 ## 判定の境界
 
@@ -22,6 +22,18 @@ checked-in `config/db-compatibility-contract.json` の正しい現在値は
 - P0A external binding/bootstrap recovery、P0C non-promotable artifact/control-store drill、remote DB、
   retention、backup/restore、startup WAF、physical performanceを protected authority producerへ接続した。
 - production request graph、CSP report-only observation、deployed CSP 7-flowを live bindingから再集計する。
+- Phase 1のwaiting Worker検出は初回`flush=false`で全client snapshotを表示し、明示的な
+  「保存して更新準備」操作後だけ`flush=true`を送る。空応答、blocker残存、保存失敗、未応答client、
+  waiting Worker差替えはfail-closedにし、全clientの保存完了後だけ全tab/PWA windowを閉じる案内を出す。
+- outer agentとrole entryの独立bundle間はsame-window/same-originのstrict bridgeで接続し、role側の
+  `event-autosave`だけが保存状態とflushを所有する。timeout、重複応答、malformed envelope、foreign/stale
+  Workerはfail-closedにし、outer/role双方へ別Mapを生成しない。
+- 更新noticeはReact管理下の`#root`外に専用hostを持ち、waiting Workerの世代・所有権tokenで管理する。
+  古い非同期flush結果は新Workerのnoticeを削除できない。
+- Release A browser transitionは同一origin/profileの3 client、freeze/thawした未応答client、2回の実click、
+  production bridge上の実`event-autosave` blocker/flushとIndexedDB保存、close前controller不変、全client
+  解放後のnatural activationを検証する。prompt-close証跡はclosed verifierでunknown/missing fieldと
+  改ざんを拒否する。prompt UIを持たないhistorical rollbackは旧natural activation経路へ分離する。
 - managed Windows deviceのbrowser tab / installed PWAを distinct profileで A → B → A の3 stageに分け、
   Ed25519 attestation、Service Worker、capability、IndexedDB raw authorityへ束縛する。
 - 14 external authorityごとの closed verifierと reviewed artifact readerを実装し、generic evidence置換を拒否する。
@@ -53,8 +65,8 @@ checked-in `config/db-compatibility-contract.json` の正しい現在値は
 
 ## Local regression
 
-固定 toolchainで記録した統合結果は Foundation 761/761、Release State 267/267、Unit 1107/1107、
-Integration 393/393、Worker 64/64、API 17/17、Coverage 1564/1564、formal exit focused
+固定 toolchainで記録した統合結果は Foundation 764/764、Release State 267/267、Unit 1127/1127、
+Integration 393/393、Worker 64/64、API 17/17、Coverage 1584/1584、formal exit focused
 132/132、P8 formal/floor focused 143/143 である。変更を一時commitしたclean overlayではRelease A
 build/verifierとChromium 22/22も成功した。
 これは external observationやproduction acceptanceの代替ではない。最終合流では再実行 logを優先する。
