@@ -121,7 +121,7 @@ const runSupabase = (arguments_, { allowFailure = false } = {}) => {
 
 const scalar = async (client, text) => {
   const result = await client.query(text);
-  if (result.rowCount !== 1 || Object.keys(result.rows[0]).length !== 1) {
+  if (result.rows.length !== 1 || Object.keys(result.rows[0]).length !== 1) {
     throw new Error(`Disposable DB scalar query is ambiguous: ${text}`);
   }
   return Object.values(result.rows[0])[0];

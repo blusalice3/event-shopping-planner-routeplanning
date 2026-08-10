@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -949,7 +949,9 @@ test("CLI accepts only namespace/source/output and emits reference-only canonica
 });
 
 test("create-only output uses an exact descriptor and refuses overwrite", async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "startup-waf-"));
+  const directory = await mkdtemp(
+    path.join(await realpath(os.tmpdir()), "startup-waf-"),
+  );
   const output = path.join(directory, "authority.json");
   const bytes = canonicalJsonBytes({ safe: true });
   try {

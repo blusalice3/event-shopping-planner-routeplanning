@@ -6,6 +6,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  realpath,
   rm,
   symlink,
   unlink,
@@ -47,8 +48,8 @@ const baseArgv = [
   "production-probe.json",
 ];
 
-const createTemporaryDirectory = () =>
-  mkdtemp(path.join(os.tmpdir(), "assignment-validation-cli-"));
+const createTemporaryDirectory = async () =>
+  mkdtemp(path.join(await realpath(os.tmpdir()), "assignment-validation-cli-"));
 
 const pathValues = ({
   preparedResult,

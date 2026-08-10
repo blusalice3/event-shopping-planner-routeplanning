@@ -6,6 +6,7 @@ import {
   mkdtemp,
   open,
   readFile,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -49,8 +50,8 @@ const baseArgv = [
   "deployment-binding.json",
 ];
 
-const createTemporaryDirectory = () =>
-  mkdtemp(path.join(os.tmpdir(), "deployment-binding-cli-"));
+const createTemporaryDirectory = async () =>
+  mkdtemp(path.join(await realpath(os.tmpdir()), "deployment-binding-cli-"));
 
 test("keeps adjacent unsafe Windows file identities distinct", () => {
   const first = {
