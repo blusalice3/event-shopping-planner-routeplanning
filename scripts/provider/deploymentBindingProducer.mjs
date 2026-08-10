@@ -1322,6 +1322,39 @@ export const produceDeploymentBinding = async (
     label: "Produced DeploymentBinding",
   });
   const bindingBytes = canonicalJsonBytes(binding);
+  const bootstrapObjects = [];
+  if (index.packageKind === "legacy-bootstrap-single") {
+    const [bootstrapInputObject, rawDistManifestObject] = await Promise.all([
+      readPackageObject({
+        packageRoot: resolvedPackageRoot,
+        reference: index.bootstrapInput,
+        expectedKind: "bootstrap-input.json",
+        maximumBytes: MAX_MANIFEST_BYTES,
+        label: "Bootstrap input",
+      }),
+      readPackageObject({
+        packageRoot: resolvedPackageRoot,
+        reference: index.rawDistManifest,
+        expectedKind: "raw-dist-manifest.json",
+        maximumBytes: MAX_MANIFEST_BYTES,
+        label: "Raw dist manifest",
+      }),
+    ]);
+    parseCanonicalJson(bootstrapInputObject.bytes, "Bootstrap input");
+    parseCanonicalJson(rawDistManifestObject.bytes, "Raw dist manifest");
+    bootstrapObjects.push(
+      [
+        bootstrapInputObject.bytes,
+        "application/vnd.event-shopping-planner.bootstrap-input+json;version=1",
+        "Bootstrap input",
+      ],
+      [
+        rawDistManifestObject.bytes,
+        "application/vnd.event-shopping-planner.raw-dist-manifest+json;version=1",
+        "Raw dist manifest",
+      ],
+    );
+  }
   const generatedObjects = [
     [
       deploymentReceiptBytes,
@@ -1383,6 +1416,7 @@ export const produceDeploymentBinding = async (
       "application/vnd.event-shopping-planner.deployment-binding+json;version=1",
       "Deployment binding",
     ],
+    ...bootstrapObjects,
   ];
   for (const [bytes, , label] of generatedObjects) {
     assertNoSecretBytes(bytes, secrets, label);

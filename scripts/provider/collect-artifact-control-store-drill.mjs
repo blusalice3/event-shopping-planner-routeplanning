@@ -34,6 +34,9 @@ import {
   openDisposableArtifactControlStoreDrill,
 } from "./artifact-control-store-drill-postgres.mjs";
 import { executeArtifactControlStoreLiveOperations } from "./artifact-control-store-drill-provider.mjs";
+import { prepareArtifactDrillBootstrapRawDist } from "./artifact-control-store-drill-bootstrap.mjs";
+import { createPostgresReleaseStateStore } from "../release-state/postgresStore.mjs";
+import { resolveBootstrapFoundationSource } from "../lib/foundation-baseline-closure-authority.mjs";
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -44,6 +47,14 @@ const SOURCE_SHA = /^[0-9a-f]{40}$/u;
 const NAMESPACE = /^[a-z0-9][a-z0-9-]{2,62}$/u;
 const MAXIMUM_INPUT_BYTES = 1024 * 1024;
 const MAXIMUM_OUTPUT_BYTES = 32 * 1024 * 1024;
+
+const requireEnvironment = (environment, name) => {
+  const value = environment?.[name];
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`Artifact drill environment is absent: ${name}`);
+  }
+  return value;
+};
 
 const comparablePath = (value) =>
   process.platform === "win32" ? value.toLowerCase() : value;
@@ -235,6 +246,95 @@ const verifyFixedToolchain = (toolchainPolicy) => {
 
 const policyPath = (name) => path.join(root, "config", name);
 
+export const prepareArtifactControlStoreDrillExternalInputs = async ({
+  createProductionStore,
+  collectProviderObservation,
+  prepareBootstrap,
+  environment,
+  storePolicy,
+  productionNamespace,
+  providerPolicy,
+  p0aPolicy,
+  bootstrapSourceResolution,
+  foundationBaseline,
+}) => {
+  let productionStore = null;
+  let bootstrapMaterialization = null;
+  let providerObservation = null;
+  const failures = [];
+  try {
+    productionStore = await createProductionStore({
+      connectionString: requireEnvironment(
+        environment,
+        storePolicy.databaseUrlEnvironmentName,
+      ),
+      namespace: productionNamespace,
+      policy: storePolicy,
+      ca: requireEnvironment(environment, "RELEASE_STATE_DATABASE_CA_PEM"),
+    });
+    const [providerResult, bootstrapResult] = await Promise.allSettled([
+      Promise.resolve().then(() =>
+        collectProviderObservation({
+          policy: providerPolicy,
+          token: environment.VERCEL_TOKEN,
+        }),
+      ),
+      Promise.resolve().then(() =>
+        prepareBootstrap({
+          store: productionStore,
+          namespace: productionNamespace,
+          p0aPolicy,
+          providerPolicy,
+          bootstrapSourceResolution,
+          foundationBaseline,
+          requiredRoutes: p0aPolicy.bootstrapRecovery.requiredRoutes,
+        }),
+      ),
+    ]);
+    if (providerResult.status === "fulfilled") {
+      providerObservation = providerResult.value ?? null;
+    } else {
+      failures.push(providerResult.reason);
+    }
+    if (bootstrapResult.status === "fulfilled") {
+      bootstrapMaterialization = bootstrapResult.value ?? null;
+    } else {
+      failures.push(bootstrapResult.reason);
+    }
+  } catch (error) {
+    failures.push(error);
+  }
+  if (productionStore !== null) {
+    try {
+      await productionStore.close();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (
+    failures.length === 0 &&
+    (providerObservation === null || bootstrapMaterialization === null)
+  ) {
+    failures.push(
+      new Error("Artifact drill external input preparation is incomplete"),
+    );
+  }
+  if (failures.length > 0) {
+    if (bootstrapMaterialization !== null) {
+      try {
+        await bootstrapMaterialization.cleanup();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    throw new AggregateError(
+      failures,
+      "Artifact drill external input preparation or cleanup failed",
+    );
+  }
+  return Object.freeze({ bootstrapMaterialization, providerObservation });
+};
+
 export const runArtifactControlStoreDrillCli = async (
   {
     argv = process.argv.slice(2),
@@ -250,6 +350,9 @@ export const runArtifactControlStoreDrillCli = async (
     openDisposable = openDisposableArtifactControlStoreDrill,
     executeControlStore = executeArtifactControlStorePostgresDrill,
     executeLive = executeArtifactControlStoreLiveOperations,
+    createProductionStore = createPostgresReleaseStateStore,
+    prepareBootstrap = prepareArtifactDrillBootstrapRawDist,
+    resolveBootstrapSource = resolveBootstrapFoundationSource,
     collect = collectAndStoreArtifactControlStoreDrill,
     captureClosure = captureArtifactControlStoreDrillClosureObjects,
     buildClosure = buildArtifactControlStoreDrillClosure,
@@ -269,6 +372,7 @@ export const runArtifactControlStoreDrillCli = async (
     archivePolicy,
     cspPolicy,
     foundationBaseline,
+    p0aPolicy,
   ] = await Promise.all([
     loadPolicy(
       policyPath("approval-policy.json"),
@@ -307,6 +411,10 @@ export const runArtifactControlStoreDrillCli = async (
       policyPath("foundation-baseline.json"),
       "Artifact drill foundation baseline",
     ),
+    loadPolicy(
+      policyPath("foundation-p0a-authorities.json"),
+      "Artifact drill P0A authority policy",
+    ),
   ]);
   verifyFixedToolchain(toolchainPolicy);
   assertConfiguredArtifactControlStoreDrillPolicy(artifactDrillPolicy);
@@ -322,14 +430,32 @@ export const runArtifactControlStoreDrillCli = async (
     runId: workflow.runId,
     runAttempt: workflow.runAttempt,
   });
-  const token = environment.VERCEL_TOKEN;
-  const providerObservation = await collectProviderObservation({
-    policy: providerPolicy,
-    token,
+  const bootstrapSourceResolution = resolveBootstrapSource({
+    bootstrapSourceSha: p0aPolicy.bootstrapRecovery.bootstrapSourceSha,
+    cwd: root,
   });
   let disposable = null;
+  let bootstrapMaterialization = null;
+  let result = null;
+  let primaryError = null;
   let cleanup = null;
   try {
+    const preparedInputs = await prepareArtifactControlStoreDrillExternalInputs(
+      {
+        createProductionStore,
+        collectProviderObservation,
+        prepareBootstrap,
+        environment,
+        storePolicy,
+        productionNamespace: parsed.productionNamespace,
+        providerPolicy,
+        p0aPolicy,
+        bootstrapSourceResolution,
+        foundationBaseline,
+      },
+    );
+    const providerObservation = preparedInputs.providerObservation;
+    bootstrapMaterialization = preparedInputs.bootstrapMaterialization;
     disposable = await openDisposable({
       policy: artifactDrillPolicy,
       storePolicy,
@@ -374,14 +500,16 @@ export const runArtifactControlStoreDrillCli = async (
           controlStoreExecutor: () =>
             executeControlStore({
               drillStore: disposable.drillStore,
-              productionReaderPool: disposable.productionReaderPool,
+              deniedReaderProjectionPool: disposable.deniedReaderProjectionPool,
               namespace: drillNamespace,
               identity: disposable.identity,
             }),
           providerPolicy,
           artifactDrillPolicy,
+          bootstrapMaterialization,
           buildOptions: {
             sourceSha: parsed.sourceSha,
+            p0aPolicy,
             foundationBaseline,
             releasePolicy,
             toolchainPolicy,
@@ -433,20 +561,51 @@ export const runArtifactControlStoreDrillCli = async (
       dbContract,
       cspPolicy,
       foundationBaseline,
+      p0aPolicy,
       expectedSourceSha: parsed.sourceSha,
       expectedRunId: workflow.runId,
       expectedRunAttempt: workflow.runAttempt,
     });
     await writeOutput(path.resolve(cwd, parsed.outputPath), closure);
-    stdout.write(`PASS artifact control-store drill: ${closure.sha256}\n`);
-    return closure;
+    result = closure;
+  } catch (error) {
+    primaryError = error;
   } finally {
+    const cleanupFailures = [];
     if (disposable !== null) {
       const incompleteDisposable = disposable;
       disposable = null;
-      cleanup = await incompleteDisposable.cleanup();
+      try {
+        cleanup = await incompleteDisposable.cleanup();
+      } catch (error) {
+        cleanupFailures.push(error);
+      }
+    }
+    const pendingCleanup = [];
+    if (bootstrapMaterialization !== null) {
+      pendingCleanup.push(bootstrapMaterialization.cleanup());
+    }
+    const settled = await Promise.allSettled(pendingCleanup);
+    cleanupFailures.push(
+      ...settled
+        .filter(({ status }) => status === "rejected")
+        .map(({ reason }) => reason),
+    );
+    if (cleanupFailures.length > 0) {
+      primaryError = new AggregateError(
+        primaryError === null
+          ? cleanupFailures
+          : [primaryError, ...cleanupFailures],
+        "Artifact drill collector execution or cleanup failed",
+      );
     }
   }
+  if (primaryError !== null) throw primaryError;
+  if (result === null) {
+    throw new Error("Artifact drill collector produced no closure");
+  }
+  stdout.write(`PASS artifact control-store drill: ${result.sha256}\n`);
+  return result;
 };
 
 const isMain =

@@ -30,7 +30,7 @@ const configuredBindings = (policy) => ({
   allowedDrillDatabases: ["artifact_drill"],
   allowedDrillAdministratorRoles: ["artifact_drill_admin"],
   allowedDrillExecutorRoles: ["artifact_drill_executor"],
-  allowedProductionReaderRoles: ["production_release_reader"],
+  allowedDeniedReaderProjectionRoles: ["drill_denied_reader"],
   databaseCaSha256:
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   providerPreviewAliasSuffix: "drill.acme.com",
@@ -84,6 +84,19 @@ test("rejects unknown or missing root and implementation fields", async () => {
       /unknown or missing fields/,
     );
   }
+});
+
+test("rejects legacy production-reader policy keys without fallback", async () => {
+  const policy = configuredBindings(await loadPolicy());
+  policy.productionReaderDatabaseUrlEnvironmentName =
+    "ARTIFACT_DRILL_PRODUCTION_READER_DATABASE_URL";
+  policy.allowedProductionReaderRoles = ["production_reader"];
+  delete policy.deniedReaderProjectionDatabaseUrlEnvironmentName;
+  delete policy.allowedDeniedReaderProjectionRoles;
+  assert.throws(
+    () => verifyArtifactControlStoreDrillPolicy(policy),
+    /unknown or missing fields/,
+  );
 });
 
 test("rejects placeholder, duplicate, unsorted, and overlapping role bindings", async () => {

@@ -16,6 +16,7 @@ import { writeExactCreateOnlyFile } from "../lib/exact-file-write.mjs";
 import { resolveBootstrapFoundationSource } from "../lib/foundation-baseline-closure-authority.mjs";
 import { createPostgresReleaseStateStore } from "../release-state/postgresStore.mjs";
 import { collectReviewedWorkflowRunAuthority } from "../release-state/reviewedWorkflowRunAuthority.mjs";
+import { reviewFoundationBootstrapDeploymentSeed } from "./foundation-bootstrap-deployment-seed.mjs";
 import {
   assertFoundationBootstrapRecoveryObservation,
   collectAndStoreFoundationBootstrapRecovery,
@@ -31,7 +32,6 @@ const NAMESPACE = /^[a-z0-9][a-z0-9-]{2,62}$/u;
 const SOURCE_SHA = /^[0-9a-f]{40}$/u;
 const MAXIMUM_POLICY_BYTES = 4 * 1024 * 1024;
 const MAXIMUM_OUTPUT_BYTES = 16 * 1024 * 1024;
-const WORKFLOW_PATH = ".github/workflows/release.yml";
 
 const requireEnvironment = (environment, name) => {
   const value = environment?.[name];
@@ -117,6 +117,7 @@ export const runFoundationBootstrapRecoveryCli = async (
     createStore = createPostgresReleaseStateStore,
     collectOidc = collectAndStoreProductionRequestGraphOidcAuthority,
     collectReviewedRun = collectReviewedWorkflowRunAuthority,
+    reviewSeed = reviewFoundationBootstrapDeploymentSeed,
     resolveBootstrapSource = resolveBootstrapFoundationSource,
     collect = collectAndStoreFoundationBootstrapRecovery,
     writeOutput = writeFoundationBootstrapRecoveryOutput,
@@ -129,7 +130,6 @@ export const runFoundationBootstrapRecoveryCli = async (
     databaseContract,
     storePolicy,
     approvalPolicy,
-    artifactDrillPolicy,
     foundationBaseline,
     toolchainPolicy,
   ] = await Promise.all([
@@ -154,10 +154,6 @@ export const runFoundationBootstrapRecoveryCli = async (
       "Foundation approval policy",
     ),
     loadPolicy(
-      path.join(root, "config", "artifact-control-store-drill.json"),
-      "Foundation artifact drill policy",
-    ),
-    loadPolicy(
       path.join(root, "config", "foundation-baseline.json"),
       "Foundation baseline",
     ),
@@ -173,10 +169,11 @@ export const runFoundationBootstrapRecoveryCli = async (
     databaseContract,
     storePolicy,
     approvalPolicy,
-    artifactDrillPolicy,
     requireBootstrap: true,
   });
-  if (!SOURCE_SHA.test(foundationBaseline?.bootstrapBaselineSourceSha ?? "")) {
+  if (
+    !SOURCE_SHA.test(p0aPolicy?.bootstrapRecovery?.bootstrapSourceSha ?? "")
+  ) {
     throw new Error("Foundation bootstrap baseline source is not configured");
   }
   const sourceSha = requireEnvironment(environment, "GITHUB_SHA");
@@ -184,7 +181,7 @@ export const runFoundationBootstrapRecoveryCli = async (
     throw new Error("Foundation bootstrap protected source is invalid");
   }
   const bootstrapSourceResolution = resolveBootstrapSource({
-    bootstrapSourceSha: foundationBaseline.bootstrapBaselineSourceSha,
+    bootstrapSourceSha: p0aPolicy.bootstrapRecovery.bootstrapSourceSha,
     cwd: root,
   });
   const workflow = await assertProtected({
@@ -203,7 +200,11 @@ export const runFoundationBootstrapRecoveryCli = async (
     ca: requireEnvironment(environment, "RELEASE_STATE_DATABASE_CA_PEM"),
   });
   try {
-    const [oidc, reviewed] = await Promise.all([
+    const githubToken = requireEnvironment(
+      environment,
+      p0aPolicy.githubCredentialEnvironmentName,
+    );
+    const [oidc, seedReview] = await Promise.all([
       collectOidc({
         store,
         namespace: parsed.namespace,
@@ -213,23 +214,24 @@ export const runFoundationBootstrapRecoveryCli = async (
         approvalPolicy,
         environment,
       }),
-      collectReviewedRun({
-        githubToken: requireEnvironment(
-          environment,
-          p0aPolicy.githubCredentialEnvironmentName,
-        ),
-        namespace: parsed.namespace,
-        repository: approvalPolicy.repository,
-        expectedRunId: workflow.runId,
-        expectedRunAttempt: workflow.runAttempt,
-        expectedSourceSha: sourceSha,
-        expectedWorkflowPath: WORKFLOW_PATH,
-        store,
-      }),
+      reviewSeed(
+        {
+          store,
+          githubToken,
+          p0aPolicy,
+          providerPolicy,
+          databaseContract,
+          storePolicy,
+          approvalPolicy,
+          foundationBaseline,
+          namespace: parsed.namespace,
+        },
+        { collectReviewedRun },
+      ),
     ]);
     const observation = await collect({
       approvalPolicy,
-      artifactDrillPolicy,
+      bootstrapSeedAuthority: seedReview.seed.reference,
       bootstrapSourceResolution,
       databaseContract,
       environment,
@@ -243,7 +245,7 @@ export const runFoundationBootstrapRecoveryCli = async (
       oidcReceipt: oidc.reference,
       p0aPolicy,
       providerPolicy,
-      reviewedWorkflowRun: reviewed.receipt,
+      reviewedWorkflowRun: seedReview.reviewed.receipt,
       store,
       storePolicy,
       toolchainPolicy,

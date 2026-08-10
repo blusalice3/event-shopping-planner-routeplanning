@@ -122,6 +122,11 @@ const configuredPolicies = () => {
     credentialOwner: "github-team:release-state",
   };
   p0aPolicy.bootstrapRecovery.deploymentBindingSha256 = "b".repeat(64);
+  p0aPolicy.bootstrapRecovery.deploymentSeedAuthoritySha256 = "c".repeat(64);
+  p0aPolicy.bootstrapRecovery.bootstrapSourceSha = "a".repeat(40);
+  p0aPolicy.bootstrapRecovery.rawDistManifestSha256 = "d".repeat(64);
+  p0aPolicy.bootstrapRecovery.previewAliasSuffix =
+    "preview.blusalice3-foundation.dev";
   p0aPolicy.blockerCodes = [];
 
   const providerPolicy = structuredClone(baseProvider);
@@ -342,6 +347,20 @@ test("closes configured P0A contracts while current repository policy remains fa
   );
   assert.doesNotThrow(() =>
     assertConfiguredFoundationP0aAuthorities(configuredPolicies()),
+  );
+  const overlappingPreview = configuredPolicies();
+  overlappingPreview.providerPolicy.ownedProductionDomains = [
+    "production.blusalice3.dev",
+  ];
+  overlappingPreview.p0aPolicy.bootstrapRecovery.previewAliasSuffix =
+    "sub.production.blusalice3.dev";
+  assert.throws(
+    () =>
+      assertConfiguredFoundationP0aAuthorities({
+        ...overlappingPreview,
+        requireBootstrap: true,
+      }),
+    /preview authority is not configured/,
   );
 });
 

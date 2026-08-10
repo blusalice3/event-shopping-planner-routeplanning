@@ -56,7 +56,9 @@ test("release accepts only a closed three-input protected dispatch", () => {
     "collect-artifact-control-store-drill",
     "collect-backup-restore-rehearsal",
     "collect-foundation-external-bindings",
+    "seed-foundation-bootstrap-deployment-binding",
     "collect-foundation-bootstrap-recovery",
+    "produce-foundation-baseline-closure",
     "collect-managed-device-live-stage",
     "collect-pwa-multiclient-drill",
     "attest-phase-exit",
@@ -270,7 +272,39 @@ test("P0 baseline collectors publish exact attempt-bound artifacts before state 
   }
   assert.match(
     release,
-    /'P0-BASELINE'[\s\S]{0,650}--external-bindings-run-id[\s\S]{0,300}--bootstrap-recovery-run-id/u,
+    /'P0-BASELINE'[\s\S]{0,650}--foundation-baseline-closure-sha256/u,
+  );
+  assert.doesNotMatch(
+    release,
+    /'P0-BASELINE'[\s\S]{0,650}--(?:external-bindings|bootstrap-recovery)-run-id/u,
+  );
+  assert.match(
+    release,
+    /--bootstrap-seed[\s\S]{0,3000}provider:foundation-bootstrap-deployment:seed --/u,
+  );
+  for (const summaryLabel of [
+    "Bootstrap source SHA",
+    "Bootstrap raw-dist manifest SHA-256",
+    "Bootstrap deployment binding SHA-256",
+    "Bootstrap deployment seed authority SHA-256",
+  ]) {
+    assert.match(release, new RegExp(summaryLabel, "u"));
+  }
+  assert.match(
+    release,
+    /release:produce-baseline-closure --[\s\S]{0,300}--namespace[\s\S]{0,300}--output/u,
+  );
+  assert.match(
+    release,
+    /\$result\.schemaVersion -ne 2[\s\S]{0,100}foundation-baseline-closure-stored\/v2/u,
+  );
+  assert.match(
+    release,
+    /Foundation baseline closure SHA-256:[\s\S]{0,120}\$\(\$result\.reference\.sha256\)/u,
+  );
+  assert.doesNotMatch(
+    release,
+    /release:produce-baseline-closure --[\s\S]{0,500}--(?:run-id|source-sha|recovery-sha256|raw-dist-manifest)/u,
   );
 });
 
@@ -511,6 +545,19 @@ test("publisher binds every implemented collector through immutable reviewed aut
       true,
     );
   }
+  for (const authority of ["external-bindings", "bootstrap-recovery-drill"]) {
+    const definition = PHASE_EXIT_EXTERNAL_AUTHORITIES.find(
+      (candidate) => candidate.authority === authority,
+    );
+    assert.equal(
+      definition.collectorAuthorityKind,
+      "foundation-baseline-closure",
+    );
+    assert.equal(
+      definition.collectorOperation,
+      "produce-foundation-baseline-closure",
+    );
+  }
   for (const authority of [
     "pwa-multiclient-drill",
     "idb-device-compatibility",
@@ -588,24 +635,15 @@ test("package CLI requires the exact target-gate collector set", () => {
   const baselineProduce = [
     "produce",
     ...common.map((value) => (value === "P0-DATA" ? "P0-BASELINE" : value)),
-    "--external-bindings-run-id",
-    "106",
-    "--external-bindings-run-attempt",
-    "2",
-    "--bootstrap-recovery-run-id",
-    "107",
-    "--bootstrap-recovery-run-attempt",
-    "3",
+    "--foundation-baseline-closure-sha256",
+    "f".repeat(64),
   ];
   assert.deepEqual(parsePhaseExitAuthorityArguments(baselineProduce).values, {
     namespace: "phase-authority-live",
     sourceSha: "a".repeat(40),
     targetGate: "P0-BASELINE",
     outputPath: "output.json",
-    externalBindingsRunId: "106",
-    externalBindingsRunAttempt: "2",
-    bootstrapRecoveryRunId: "107",
-    bootstrapRecoveryRunAttempt: "3",
+    foundationBaselineClosureSha256: "f".repeat(64),
   });
   const artifactProduce = [
     "produce",
@@ -743,10 +781,19 @@ test("workflow verifies every non-exempt predecessor before operation steps", ()
     ({ name }) =>
       name === "Collect non-promotable artifact/provider/control-store drill",
   );
-  assert.equal(
-    Object.hasOwn(artifactDrill.env, "RELEASE_STATE_DATABASE_URL"),
-    false,
-  );
+  for (const secretName of [
+    "RELEASE_STATE_DATABASE_URL",
+    "RELEASE_STATE_DATABASE_CA_PEM",
+    "ARTIFACT_DRILL_DENIED_READER_DATABASE_URL",
+  ]) {
+    assert.ok(Object.hasOwn(artifactDrill.env, secretName));
+  }
+  for (const legacyName of [
+    "ARTIFACT_DRILL_PRODUCTION_READER_DATABASE_URL",
+    "ARTIFACT_DRILL_BOOTSTRAP_RAW_DIST_ROOT",
+  ]) {
+    assert.equal(Object.hasOwn(artifactDrill.env, legacyName), false);
+  }
 });
 
 test("foundation suite contains every formal collector contract", () => {
@@ -759,6 +806,7 @@ test("foundation suite contains every formal collector contract", () => {
     "scripts/provider/foundation-external-bindings.test.mjs",
     "scripts/provider/foundation-bootstrap-recovery.test.mjs",
     "scripts/provider/artifact-control-store-drill.test.mjs",
+    "scripts/provider/artifact-control-store-drill-bootstrap.test.mjs",
     "scripts/release-state/releaseDispatchRequest.test.mjs",
   ]) {
     assert.match(command, new RegExp(testPath.replaceAll("/", "\\/"), "u"));

@@ -92,6 +92,115 @@
       "public.read_csp_deployment_violation_aggregates",
       "public.retain_csp_violation_reports"
     ],
+    "observerManagedSchemas": [
+      "_realtime",
+      "auth",
+      "cron",
+      "extensions",
+      "graphql",
+      "graphql_public",
+      "net",
+      "pgbouncer",
+      "realtime",
+      "storage",
+      "supabase_functions",
+      "vault"
+    ],
+    "observerManagedSchemaUsage": ["net"],
+    "observerManagedRelationPrivilegeBaseline": [
+      {
+        "objectName": "cron.job",
+        "columnPrivileges": ["SELECT"],
+        "privileges": ["SELECT"]
+      },
+      {
+        "objectName": "cron.job_run_details",
+        "columnPrivileges": ["SELECT"],
+        "privileges": ["DELETE", "SELECT"]
+      },
+      {
+        "objectName": "extensions.pg_stat_statements",
+        "columnPrivileges": ["SELECT"],
+        "privileges": ["SELECT"]
+      },
+      {
+        "objectName": "extensions.pg_stat_statements_info",
+        "columnPrivileges": ["SELECT"],
+        "privileges": ["SELECT"]
+      },
+      {
+        "objectName": "net._http_response",
+        "columnPrivileges": ["INSERT", "REFERENCES", "SELECT", "UPDATE"],
+        "privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "SELECT",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ]
+      },
+      {
+        "objectName": "net.http_request_queue",
+        "columnPrivileges": ["INSERT", "REFERENCES", "SELECT", "UPDATE"],
+        "privileges": [
+          "DELETE",
+          "INSERT",
+          "MAINTAIN",
+          "REFERENCES",
+          "SELECT",
+          "TRIGGER",
+          "TRUNCATE",
+          "UPDATE"
+        ]
+      }
+    ],
+    "observerManagedSequencePrivilegeBaseline": [
+      {
+        "objectName": "net.http_request_queue_id_seq",
+        "privileges": ["SELECT", "UPDATE", "USAGE"]
+      }
+    ],
+    "migrationHistory": [
+      {
+        "version": "20260803000000",
+        "migrationName": "persistence_release_a_metrics",
+        "statementCount": 17,
+        "statementsSha256": "ed810d9c19d47104d9695fe05ea4636dbcd88613eb6f95643a9f5bde9f592fbc"
+      },
+      {
+        "version": "20260805000000",
+        "migrationName": "persistence_release_a_hardening",
+        "statementCount": 35,
+        "statementsSha256": "e6eb73862c5bc3715c664a3725761f4cb1b9f8d4cd4d0bcbcb5baadd9a49ba64"
+      },
+      {
+        "version": "20260808000000",
+        "migrationName": "csp_report_contract",
+        "statementCount": 10,
+        "statementsSha256": "f45d299169dcf51e15f4c064fd581abd4b8e42e51c8bec67d0a02773d462b619"
+      },
+      {
+        "version": "20260809000000",
+        "migrationName": "csp_report_deployment_aggregate",
+        "statementCount": 6,
+        "statementsSha256": "50effb2560f8529c80dccd1f914af701c3690e183da4d61a04c6391dffee2580"
+      },
+      {
+        "version": "20260810000000",
+        "migrationName": "foundation_application_observer",
+        "statementCount": 38,
+        "statementsSha256": "fbf9ca53751e77b42ca7f505ef097b00105cce40396c44648bcb05bab0ce7cb2"
+      },
+      {
+        "version": "20260810010000",
+        "migrationName": "foundation_backup_integrity",
+        "statementCount": 10,
+        "statementsSha256": "e0803d6864264737aaa280b04e0d8c99c403b4a3eafcc33eb869ff62c613566a"
+      }
+    ],
     "requiredPrivilegeFloor": {
       "serviceRoleRawInsert": true,
       "serviceRoleRawSelect": false,
@@ -101,9 +210,12 @@
       "cspApplicationCredentialDormantUntilPhase2B": true
     },
     "migrationChecksums": {
+      "20260803000000_persistence_release_a_metrics.sql": "b6a52ba439542ae1cead5447b994a94848dc5f71bc5427b27e644f5c5cbc7b88",
       "20260805000000_persistence_release_a_hardening.sql": "04a28f077af00d724dcd521c1d94fc85ae777f077cfc639adf1be200d213683b",
       "20260808000000_csp_report_contract.sql": "7d0c2c053aaf6f7e75eea5297bb0a2b0759683e0b9065873408a0114dad82e03",
-      "20260809000000_csp_report_deployment_aggregate.sql": "1213ed7fffd71a85ef3a425159208185c46505bb37350d91db33a8a18480846b"
+      "20260809000000_csp_report_deployment_aggregate.sql": "1213ed7fffd71a85ef3a425159208185c46505bb37350d91db33a8a18480846b",
+      "20260810000000_foundation_application_observer.sql": "035c48aac897ed70ba10e0e8e144ec893ad9e6bdf138cc99676b47cb396699e6",
+      "20260810010000_foundation_backup_integrity.sql": "90b783f6154cc117f2ee6ed18910718936b9a0d106ce804a09e777206e13d4b7"
     }
   },
   "releaseA": {

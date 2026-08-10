@@ -15,8 +15,12 @@
     "credentialOwner": null
   },
   "bootstrapRecovery": {
+    "bootstrapSourceSha": null,
     "deploymentBindingSha256": null,
+    "deploymentSeedAuthoritySha256": null,
+    "rawDistManifestSha256": null,
     "maximumRecoverySeconds": 900,
+    "previewAliasSuffix": null,
     "requiredRoutes": [
       "/",
       "/index.html",

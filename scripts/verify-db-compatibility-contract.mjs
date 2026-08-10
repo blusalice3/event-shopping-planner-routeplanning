@@ -26,31 +26,161 @@ const contractPath = path.join(
   "db-compatibility-contract.json",
 );
 const migrationDirectory = path.join(root, "supabase", "migrations");
+const baselineMigrationName =
+  "20260803000000_persistence_release_a_metrics.sql";
 const hardeningMigrationName =
   "20260805000000_persistence_release_a_hardening.sql";
 const cspContractMigrationName = "20260808000000_csp_report_contract.sql";
 const cspDeploymentAggregateMigrationName =
   "20260809000000_csp_report_deployment_aggregate.sql";
+const applicationObserverMigrationName =
+  "20260810000000_foundation_application_observer.sql";
+const backupIntegrityMigrationName =
+  "20260810010000_foundation_backup_integrity.sql";
 const [
   contract,
+  baselineMigrationBytes,
   hardeningMigrationBytes,
   cspContractMigrationBytes,
   cspDeploymentAggregateMigrationBytes,
+  applicationObserverMigrationBytes,
+  backupIntegrityMigrationBytes,
 ] = await Promise.all([
   readJsonStrict(contractPath),
+  readFile(path.join(migrationDirectory, baselineMigrationName)),
   readFile(path.join(migrationDirectory, hardeningMigrationName)),
   readFile(path.join(migrationDirectory, cspContractMigrationName)),
   readFile(path.join(migrationDirectory, cspDeploymentAggregateMigrationName)),
+  readFile(path.join(migrationDirectory, applicationObserverMigrationName)),
+  readFile(path.join(migrationDirectory, backupIntegrityMigrationName)),
 ]);
 const migrationChecksums = Object.freeze({
+  [baselineMigrationName]: sha256Bytes(baselineMigrationBytes),
   [hardeningMigrationName]: sha256Bytes(hardeningMigrationBytes),
   [cspContractMigrationName]: sha256Bytes(cspContractMigrationBytes),
   [cspDeploymentAggregateMigrationName]: sha256Bytes(
     cspDeploymentAggregateMigrationBytes,
   ),
+  [applicationObserverMigrationName]: sha256Bytes(
+    applicationObserverMigrationBytes,
+  ),
+  [backupIntegrityMigrationName]: sha256Bytes(backupIntegrityMigrationBytes),
 });
 const fingerprint = sha256Json(contract);
 assertRemoteDbObservationAuthority(contract.remote?.observationAuthority);
+const expectedObserverManagedSchemas = [
+  "_realtime",
+  "auth",
+  "cron",
+  "extensions",
+  "graphql",
+  "graphql_public",
+  "net",
+  "pgbouncer",
+  "realtime",
+  "storage",
+  "supabase_functions",
+  "vault",
+];
+if (
+  !Array.isArray(contract.remote?.observerManagedSchemas) ||
+  contract.remote.observerManagedSchemas.length !==
+    expectedObserverManagedSchemas.length ||
+  contract.remote.observerManagedSchemas.some(
+    (schema, index) => schema !== expectedObserverManagedSchemas[index],
+  )
+) {
+  throw new Error("DB observer managed schema boundary differs");
+}
+if (
+  !Array.isArray(contract.remote?.observerManagedSchemaUsage) ||
+  contract.remote.observerManagedSchemaUsage.length !== 1 ||
+  contract.remote.observerManagedSchemaUsage[0] !== "net"
+) {
+  throw new Error("DB observer managed schema usage baseline differs");
+}
+if (
+  !Array.isArray(contract.remote?.observerManagedRelationPrivilegeBaseline) ||
+  !Array.isArray(contract.remote?.observerManagedSequencePrivilegeBaseline) ||
+  sha256Json(contract.remote?.observerManagedRelationPrivilegeBaseline) !==
+    "d68230bf81591fed333b62c494f32f35c88e6aaa62b7e0e92c072e02af0ad5d8" ||
+  sha256Json(contract.remote?.observerManagedSequencePrivilegeBaseline) !==
+    "e8058aa0167ff6b03b676ed73b097c7f80eab75fdca83d12cea5cfb1616861c3"
+) {
+  throw new Error("DB observer managed object privilege baseline differs");
+}
+const expectedMigrationVersions = Object.keys(migrationChecksums).map(
+  (name) => /^([0-9]{14})_/u.exec(name)?.[1],
+);
+const expectedMigrationHistoryAuthority = [
+  [
+    "20260803000000",
+    "persistence_release_a_metrics",
+    17,
+    "ed810d9c19d47104d9695fe05ea4636dbcd88613eb6f95643a9f5bde9f592fbc",
+  ],
+  [
+    "20260805000000",
+    "persistence_release_a_hardening",
+    35,
+    "e6eb73862c5bc3715c664a3725761f4cb1b9f8d4cd4d0bcbcb5baadd9a49ba64",
+  ],
+  [
+    "20260808000000",
+    "csp_report_contract",
+    10,
+    "f45d299169dcf51e15f4c064fd581abd4b8e42e51c8bec67d0a02773d462b619",
+  ],
+  [
+    "20260809000000",
+    "csp_report_deployment_aggregate",
+    6,
+    "50effb2560f8529c80dccd1f914af701c3690e183da4d61a04c6391dffee2580",
+  ],
+  [
+    "20260810000000",
+    "foundation_application_observer",
+    38,
+    "fbf9ca53751e77b42ca7f505ef097b00105cce40396c44648bcb05bab0ce7cb2",
+  ],
+  [
+    "20260810010000",
+    "foundation_backup_integrity",
+    10,
+    "e0803d6864264737aaa280b04e0d8c99c403b4a3eafcc33eb869ff62c613566a",
+  ],
+].map(([version, migrationName, statementCount, statementsSha256]) => ({
+  version,
+  migrationName,
+  statementCount,
+  statementsSha256,
+}));
+if (
+  !Array.isArray(contract.remote?.migrationHistory) ||
+  contract.remote.migrationHistory.length !==
+    expectedMigrationVersions.length ||
+  contract.remote.migrationHistory.some(
+    (entry, index) =>
+      entry === null ||
+      typeof entry !== "object" ||
+      Array.isArray(entry) ||
+      Object.keys(entry).sort().join(",") !==
+        "migrationName,statementCount,statementsSha256,version" ||
+      entry.version !== expectedMigrationVersions[index] ||
+      !/^[a-z0-9_]{1,128}$/u.test(entry.migrationName) ||
+      !Number.isSafeInteger(entry.statementCount) ||
+      entry.statementCount < 1 ||
+      !/^[0-9a-f]{64}$/u.test(entry.statementsSha256),
+  )
+) {
+  throw new Error("DB exact migration history authority differs");
+}
+if (
+  sha256Json(contract.remote.migrationHistory) !==
+  sha256Json(expectedMigrationHistoryAuthority)
+) {
+  throw new Error("DB migration history statement authority differs");
+}
 
 const expectedStores = [
   "dayModes",
@@ -133,6 +263,10 @@ const hardeningMigrationText = hardeningMigrationBytes.toString("utf8");
 const cspContractMigrationText = cspContractMigrationBytes.toString("utf8");
 const cspDeploymentAggregateMigrationText =
   cspDeploymentAggregateMigrationBytes.toString("utf8");
+const applicationObserverMigrationText =
+  applicationObserverMigrationBytes.toString("utf8");
+const backupIntegrityMigrationText =
+  backupIntegrityMigrationBytes.toString("utf8");
 const expectedCspEffectiveDirectiveValues = [
   "base-uri",
   "child-src",
@@ -229,6 +363,95 @@ for (const requiredFragment of [
   ) {
     throw new Error(`DB hardening migration lacks: ${requiredFragment}`);
   }
+}
+for (const managedSchema of expectedObserverManagedSchemas) {
+  for (const forbiddenFragment of [
+    `on schema ${managedSchema}`,
+    `in schema ${managedSchema}`,
+  ]) {
+    if (
+      applicationObserverMigrationText
+        .toLowerCase()
+        .includes(forbiddenFragment.toLowerCase())
+    ) {
+      throw new Error(
+        `Application observer migration mutates managed schema ACL: ${managedSchema}`,
+      );
+    }
+  }
+}
+
+for (const requiredFragment of [
+  "create role foundation_db_observer",
+  "login",
+  "noinherit",
+  "nobypassrls",
+  "set default_transaction_read_only = on",
+  "revoke create on schema public from public",
+  "revoke all on all tables in schema public from public",
+  "revoke all on all sequences in schema public from public",
+  "revoke execute on all functions in schema public from public",
+  "alter default privileges\n  revoke execute on functions from public",
+  "alter default privileges in schema public",
+  "revoke all on tables from public",
+  "revoke all on sequences from public",
+  "revoke execute on functions from public",
+  "revoke all on schema supabase_migrations from foundation_db_observer",
+  "on all tables in schema supabase_migrations",
+  "from foundation_db_observer",
+  "on all sequences in schema supabase_migrations",
+  "on all functions in schema supabase_migrations",
+  "revoke all on all tables in schema supabase_migrations from public",
+  "revoke all on all sequences in schema supabase_migrations from public",
+  "revoke execute on all functions in schema supabase_migrations from public",
+  "revoke create on database %I from foundation_db_observer",
+  "grant select on table supabase_migrations.schema_migrations",
+  "grant execute on function public.read_persistence_release_a_metrics",
+  "grant execute on function public.read_csp_violation_aggregates",
+  "grant execute on function public.read_csp_deployment_violation_aggregates",
+]) {
+  if (
+    !applicationObserverMigrationText
+      .toLowerCase()
+      .includes(requiredFragment.toLowerCase())
+  ) {
+    throw new Error(
+      `Application observer migration lacks: ${requiredFragment}`,
+    );
+  }
+}
+
+for (const requiredFragment of [
+  "create or replace function public.read_foundation_backup_restore_integrity()",
+  "security definer",
+  "set search_path = pg_catalog, pg_temp",
+  "pg_catalog.sha256(pg_catalog.convert_to(migration.manifest, 'UTF8'))",
+  "revoke execute on all functions in schema public from public",
+  "alter default privileges in schema public",
+  "revoke execute on functions from public",
+  "from public, anon, authenticated, service_role, foundation_db_observer",
+  "foundation_backup_source_reader",
+  "foundation_backup_restore_reader",
+  "default_transaction_read_only = on",
+  "grant execute on function public.read_foundation_backup_restore_integrity()",
+  "supabase_migrations.schema_migrations",
+  "pg_catalog.convert_to(to_jsonb(metric)::text, 'UTF8')",
+  "pg_catalog.convert_to(to_jsonb(report)::text, 'UTF8')",
+  "pg_catalog.convert_to(to_jsonb(audit)::text, 'UTF8')",
+  "string_agg(row_sha256, '' order by row_sha256)",
+]) {
+  if (
+    !backupIntegrityMigrationText
+      .toLowerCase()
+      .includes(requiredFragment.toLowerCase())
+  ) {
+    throw new Error(`Backup integrity migration lacks: ${requiredFragment}`);
+  }
+}
+if (/hashtextextended|bit_xor/iu.test(backupIntegrityMigrationText)) {
+  throw new Error(
+    "Backup integrity migration uses a non-cryptographic row hash",
+  );
 }
 const requiredCspMigrationFragments = [
   "-- CSP_REPORT_CONTRACT_UPGRADE_BEGIN",

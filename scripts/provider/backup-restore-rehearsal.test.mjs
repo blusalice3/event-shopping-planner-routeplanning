@@ -5,22 +5,15 @@ import test from "node:test";
 import { canonicalJsonBytes, sha256Bytes } from "../lib/canonical-json.mjs";
 import {
   assertBackupDatabaseReceipt,
-  assertBackupRestoreRehearsalRaw,
+  assertSafeRestoreProjectForCleanup,
   collectAndStoreBackupRestoreRehearsal,
   executeBackupProviderOperation,
-  observeBackupRestoreDatabase,
   readStoredBackupRestoreRehearsal,
-  readStoredBackupRestoreRehearsalAuthority,
-  summarizeBackupRestoreRehearsal,
 } from "./backup-restore-rehearsal.mjs";
 import {
   assertBackupRestoreProviderContract,
   assertConfiguredBackupRestorePolicy,
 } from "./backup-restore-rehearsal-policy.mjs";
-import {
-  parseBackupRestoreRehearsalArguments,
-  runBackupRestoreRehearsalCli,
-} from "./collect-backup-restore-rehearsal.mjs";
 
 const basePrerequisitePolicy = JSON.parse(
   await readFile(
@@ -48,11 +41,31 @@ const databaseHead = "3".repeat(64);
 const integritySha256 = "4".repeat(64);
 const sourceProjectRef = "abcdefghijklmnopqrst";
 const restoreProjectRef = "abcdefghijklmnopqrsu";
+const migrationVersion = "20260810010000";
 const sourceCa =
   "-----BEGIN CERTIFICATE-----\nsource-ca-fixture\n-----END CERTIFICATE-----";
 const restoreCa =
   "-----BEGIN CERTIFICATE-----\nrestore-ca-fixture\n-----END CERTIFICATE-----";
 const token = "backup-provider-token-must-never-appear";
+const recoveryPointAt = "2026-08-09T12:03:00.000Z";
+const sourceProject = Object.freeze({
+  ref: sourceProjectRef,
+  organizationSlug: "organization-authority-1",
+  name: "event-shopping-production",
+  region: "ap-northeast-1",
+  createdAt: "2026-08-01T00:00:00.000Z",
+  databaseHost: "source.db.acme.test",
+  status: "ACTIVE_HEALTHY",
+});
+const restoreProject = Object.freeze({
+  ref: restoreProjectRef,
+  organizationSlug: "organization-authority-1",
+  name: "phase-exit-backup-restore-run-1",
+  region: "ap-northeast-1",
+  createdAt: "2026-08-09T12:03:30.000Z",
+  databaseHost: "restore.db.acme.test",
+  status: "ACTIVE_HEALTHY",
+});
 const oidcReceipt = {
   uri: `release-state://${namespace}/evidence/${"a".repeat(64)}`,
   sha256: "a".repeat(64),
@@ -93,29 +106,15 @@ const configuredPrerequisitePolicy = () => {
   return policy;
 };
 
-const responseShape = (recoveryPoint) => ({
-  resourceIdPointer: "/id",
-  statePointer: "/state",
-  recoveryPointAtPointer: recoveryPoint ? "/recovery_point_at" : null,
-});
-
-const operation = (
+const operation = (method, pathTemplate, successStatusCodes) => ({
   method,
   pathTemplate,
-  requestBodyTemplate,
-  recoveryPoint,
-  status,
-) => ({
-  method,
-  pathTemplate,
-  requestBodyTemplate,
-  successStatusCodes: [status],
-  response: responseShape(recoveryPoint),
+  successStatusCodes,
 });
 
 const configuredProviderContract = () => ({
-  schemaVersion: 1,
-  kind: "backup-restore-provider-contract/v1",
+  schemaVersion: 2,
+  kind: "backup-restore-provider-contract/v2",
   bindingStatus: "configured",
   provider: "supabase",
   api: {
@@ -123,62 +122,38 @@ const configuredProviderContract = () => ({
       scheme: "bearer",
       credentialEnvironmentName: "FOUNDATION_BACKUP_API_TOKEN",
     },
-    backupMode: "pitr",
+    restoreMode: "dashboard-new-project",
+    backupReadyState: "COMPLETED",
+    projectReadyState: "ACTIVE_HEALTHY",
     maximumResponseBytes: 64 * 1024,
     requestTimeoutMilliseconds: 5000,
-    polling: { intervalMilliseconds: 100, maximumAttempts: 4 },
+    cleanupPolling: { intervalMilliseconds: 100, maximumAttempts: 4 },
     operations: {
-      cleanupRestore: operation(
+      confirmRestoreDeleted: operation(
+        "GET",
+        "/v1/projects/{restoreProjectRef}",
+        [200, 404],
+      ),
+      deleteRestoreProject: operation(
         "DELETE",
-        "/v1/projects/{restoreProjectRef}/restores/{restoreId}",
-        null,
-        false,
-        202,
+        "/v1/projects/{restoreProjectRef}",
+        [200],
       ),
-      createBackup: operation(
-        "POST",
-        "/v1/projects/{sourceProjectRef}/backups",
-        { type: "pitr" },
-        true,
-        202,
-      ),
-      getBackup: operation(
+      getRestoreProject: operation(
         "GET",
-        "/v1/projects/{sourceProjectRef}/backups/{backupId}",
-        null,
-        true,
-        200,
+        "/v1/projects/{restoreProjectRef}",
+        [200],
       ),
-      getCleanup: operation(
+      getSourceProject: operation(
         "GET",
-        "/v1/projects/{restoreProjectRef}/restores/{restoreId}",
-        null,
-        false,
-        200,
+        "/v1/projects/{sourceProjectRef}",
+        [200],
       ),
-      getRestore: operation(
+      listSourceBackups: operation(
         "GET",
-        "/v1/projects/{restoreProjectRef}/restores/{restoreId}",
-        null,
-        false,
-        200,
+        "/v1/projects/{sourceProjectRef}/database/backups",
+        [200],
       ),
-      restoreBackup: operation(
-        "POST",
-        "/v1/projects/{restoreProjectRef}/restores",
-        { backup_id: "{backupId}" },
-        false,
-        202,
-      ),
-    },
-    states: {
-      backupPending: ["backup-pending"],
-      backupReady: "backup-ready",
-      cleanupPending: ["cleanup-pending"],
-      cleanupReady: "cleanup-ready",
-      failed: ["failed"],
-      restorePending: ["restore-pending"],
-      restoreReady: "restore-ready",
     },
   },
   database: {
@@ -187,21 +162,24 @@ const configuredProviderContract = () => ({
     postgresMajor: 17,
     tlsMode: "verify-full",
     integrityFunction: "read_foundation_backup_restore_integrity",
-    queryName: "foundation-backup-restore-integrity-v1",
+    integrityMigrationVersion: migrationVersion,
+    queryName: "foundation-backup-restore-integrity-v2",
     source: {
       databaseUrlEnvironmentName: "FOUNDATION_BACKUP_SOURCE_DATABASE_URL",
       databaseCaEnvironmentName: "FOUNDATION_BACKUP_SOURCE_DATABASE_CA_PEM",
       allowedHosts: ["source.db.acme.test"],
-      allowedDatabases: ["app_source"],
-      allowedRoles: ["backup_source"],
+      allowedPorts: [5432],
+      allowedDatabases: ["postgres"],
+      allowedRoles: ["foundation_backup_source_reader"],
       caSha256: sha256Bytes(Buffer.from(sourceCa)),
     },
     restore: {
       databaseUrlEnvironmentName: "FOUNDATION_BACKUP_RESTORE_DATABASE_URL",
       databaseCaEnvironmentName: "FOUNDATION_BACKUP_RESTORE_DATABASE_CA_PEM",
       allowedHosts: ["restore.db.acme.test"],
-      allowedDatabases: ["app_restore"],
-      allowedRoles: ["backup_restore"],
+      allowedPorts: [5432],
+      allowedDatabases: ["postgres"],
+      allowedRoles: ["foundation_backup_restore_reader"],
       caSha256: sha256Bytes(Buffer.from(restoreCa)),
     },
   },
@@ -211,79 +189,101 @@ const environment = {
   GITHUB_SHA: sourceSha,
   FOUNDATION_BACKUP_API_TOKEN: token,
   FOUNDATION_BACKUP_SOURCE_DATABASE_URL:
-    "postgresql://backup_source:source-password@source.db.acme.test/app_source?sslmode=verify-full",
+    "postgresql://foundation_backup_source_reader:source-password@source.db.acme.test/postgres?sslmode=verify-full",
   FOUNDATION_BACKUP_SOURCE_DATABASE_CA_PEM: sourceCa,
   FOUNDATION_BACKUP_RESTORE_DATABASE_URL:
-    "postgresql://backup_restore:restore-password@restore.db.acme.test/app_restore?sslmode=verify-full",
+    "postgresql://foundation_backup_restore_reader:restore-password@restore.db.acme.test/postgres?sslmode=verify-full",
   FOUNDATION_BACKUP_RESTORE_DATABASE_CA_PEM: restoreCa,
 };
 
-const operationTimes = {
-  createBackup: ["2026-08-09T12:05:00.000Z", "2026-08-09T12:05:01.000Z"],
-  getBackup: ["2026-08-09T12:05:04.000Z", "2026-08-09T12:05:05.000Z"],
-  restoreBackup: ["2026-08-09T12:05:06.000Z", "2026-08-09T12:05:07.000Z"],
-  getRestore: ["2026-08-09T12:05:49.000Z", "2026-08-09T12:05:50.000Z"],
-  cleanupRestore: ["2026-08-09T12:05:51.000Z", "2026-08-09T12:05:52.000Z"],
-  getCleanup: ["2026-08-09T12:05:54.000Z", "2026-08-09T12:05:55.000Z"],
-};
-const operationState = {
-  createBackup: "backup-pending",
-  getBackup: "backup-ready",
-  restoreBackup: "restore-pending",
-  getRestore: "restore-ready",
-  cleanupRestore: "cleanup-pending",
-  getCleanup: "cleanup-ready",
-};
+const operationTimes = Object.freeze({
+  listSourceBackups: ["2026-08-09T12:04:00.000Z", "2026-08-09T12:04:01.000Z"],
+  getSourceProject: ["2026-08-09T12:04:02.000Z", "2026-08-09T12:04:03.000Z"],
+  getRestoreProject: ["2026-08-09T12:04:04.000Z", "2026-08-09T12:04:05.000Z"],
+  recheckRestoreProject: [
+    "2026-08-09T12:04:05.600Z",
+    "2026-08-09T12:04:05.700Z",
+  ],
+  deleteRestoreProject: [
+    "2026-08-09T12:04:06.000Z",
+    "2026-08-09T12:04:07.000Z",
+  ],
+  confirmRestoreDeleted: [
+    "2026-08-09T12:04:08.000Z",
+    "2026-08-09T12:04:09.000Z",
+  ],
+});
 
 const renderPath = (template, variables) =>
   template.replace(/\{([A-Za-z][A-Za-z0-9]*)\}/gu, (_match, name) =>
     encodeURIComponent(variables[name]),
   );
 
-const renderBody = (value, variables) => {
-  if (typeof value === "string" && /^\{[A-Za-z][A-Za-z0-9]*\}$/u.test(value)) {
-    return variables[value.slice(1, -1)];
-  }
-  if (Array.isArray(value))
-    return value.map((entry) => renderBody(entry, variables));
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [
-        key,
-        renderBody(entry, variables),
-      ]),
-    );
-  }
-  return value;
-};
-
 const providerResult = (
   contract,
   operationName,
   variables,
-  { state = operationState[operationName], resourceId } = {},
+  {
+    project,
+    pendingCleanup = false,
+    pendingCleanupProject = restoreProject,
+    pendingCleanupState = "ACTIVE_HEALTHY",
+    occurrence = 1,
+  } = {},
 ) => {
   const descriptor = contract.api.operations[operationName];
-  const id =
-    resourceId ??
-    (["createBackup", "getBackup"].includes(operationName)
-      ? "backup-id-immutable"
-      : "restore-id-immutable");
-  const requestBytes =
-    descriptor.requestBodyTemplate === null
-      ? Buffer.alloc(0)
-      : canonicalJsonBytes(
-          renderBody(descriptor.requestBodyTemplate, variables),
-        );
-  const recoveryPointAt =
-    descriptor.response.recoveryPointAtPointer === null
-      ? null
-      : "2026-08-09T12:03:00.000Z";
-  const responseBytes = canonicalJsonBytes({
-    id,
-    state,
-    ...(recoveryPointAt === null ? {} : { recovery_point_at: recoveryPointAt }),
-  });
+  let normalized;
+  let status = descriptor.successStatusCodes[0];
+  if (operationName === "listSourceBackups") {
+    normalized = {
+      resourceId: "77",
+      state: "COMPLETED",
+      backup: {
+        id: "77",
+        insertedAt: "2026-08-09T12:00:00.000Z",
+        isPhysicalBackup: true,
+        region: "ap-northeast-1",
+        recoveryPointAt,
+      },
+      project: null,
+    };
+  } else if (operationName === "getSourceProject") {
+    const value = project ?? sourceProject;
+    normalized = {
+      resourceId: value.ref,
+      state: value.status,
+      backup: null,
+      project: { ...value },
+    };
+  } else if (operationName === "getRestoreProject") {
+    const value = project ?? restoreProject;
+    normalized = {
+      resourceId: value.ref,
+      state: value.status,
+      backup: null,
+      project: { ...value },
+    };
+  } else if (operationName === "confirmRestoreDeleted" && pendingCleanup) {
+    normalized = {
+      resourceId: restoreProjectRef,
+      state: pendingCleanupState,
+      backup: null,
+      project: {
+        ...pendingCleanupProject,
+        status: pendingCleanupState,
+      },
+    };
+    status = 200;
+  } else {
+    normalized = {
+      resourceId: restoreProjectRef,
+      state: "deleted",
+      backup: null,
+      project: null,
+    };
+    status = operationName === "confirmRestoreDeleted" ? 404 : 200;
+  }
+  const responseBytes = canonicalJsonBytes({ operationName, status });
   return {
     receipt: {
       operation: operationName,
@@ -292,20 +292,23 @@ const providerResult = (
         renderPath(descriptor.pathTemplate, variables),
         "https://api.supabase.com",
       ).href,
-      startedAt: operationTimes[operationName][0],
-      completedAt: operationTimes[operationName][1],
-      status: descriptor.successStatusCodes[0],
+      startedAt:
+        operationName === "getRestoreProject" && occurrence > 1
+          ? operationTimes.recheckRestoreProject[0]
+          : operationTimes[operationName][0],
+      completedAt:
+        operationName === "getRestoreProject" && occurrence > 1
+          ? operationTimes.recheckRestoreProject[1]
+          : operationTimes[operationName][1],
+      status,
       contentType: "application/json",
       providerRequestId: `request-${operationName}`,
-      requestBodySha256:
-        requestBytes.length === 0
-          ? sha256Bytes(Buffer.alloc(0))
-          : sha256Bytes(requestBytes),
-      requestBodyByteLength: requestBytes.length,
+      requestBodySha256: sha256Bytes(Buffer.alloc(0)),
+      requestBodyByteLength: 0,
       responseBodySha256: sha256Bytes(responseBytes),
       responseBodyByteLength: responseBytes.length,
     },
-    normalized: { resourceId: id, state, recoveryPointAt },
+    normalized,
   };
 };
 
@@ -313,13 +316,17 @@ const databaseReceipt = (target) => ({
   target,
   projectRef: target === "source" ? sourceProjectRef : restoreProjectRef,
   host: `${target}.db.acme.test`,
-  database: target === "source" ? "app_source" : "app_restore",
-  role: target === "source" ? "backup_source" : "backup_restore",
+  port: 5432,
+  database: "postgres",
+  role:
+    target === "source"
+      ? "foundation_backup_source_reader"
+      : "foundation_backup_restore_reader",
   tlsMode: "verify-full",
   transactionReadOnly: true,
   postgresMajor: 17,
-  queryName: "foundation-backup-restore-integrity-v1",
-  observedAt: "2026-08-09T12:05:50.500Z",
+  queryName: "foundation-backup-restore-integrity-v2",
+  observedAt: "2026-08-09T12:04:05.500Z",
   authorization: {
     roleAttributes: {
       superuser: false,
@@ -335,7 +342,7 @@ const databaseReceipt = (target) => ({
       schemaCreate: false,
       databaseCreate: false,
       tableCount: 4,
-      allTablesSelect: true,
+      anyTableSelect: false,
       anyTableInsert: false,
       anyTableUpdate: false,
       anyTableDelete: false,
@@ -344,6 +351,9 @@ const databaseReceipt = (target) => ({
       anyTableTrigger: false,
       integrityFunctionExecute: true,
       integrityFunctionSecurityDefiner: true,
+      executablePublicFunctions: [
+        "public.read_foundation_backup_restore_integrity()",
+      ],
     },
     denialProbes: [
       {
@@ -359,50 +369,9 @@ const databaseReceipt = (target) => ({
     ],
   },
   databaseHead,
+  migrationVersion,
   compatibilityFingerprint: fingerprint,
   integritySha256,
-});
-
-test("rejects overprivileged or self-claimed database authorization receipts", () => {
-  const providerContract = configuredProviderContract();
-  const expected = {
-    target: "source",
-    projectRef: sourceProjectRef,
-    authority: providerContract.database.source,
-    expectedFingerprint: fingerprint,
-  };
-  const mutations = [
-    (receipt) => {
-      receipt.authorization.roleAttributes.superuser = true;
-    },
-    (receipt) => {
-      receipt.authorization.memberships = ["postgres"];
-    },
-    (receipt) => {
-      receipt.authorization.ownedObjectCount = 1;
-    },
-    (receipt) => {
-      receipt.authorization.privileges.anyTableDelete = true;
-    },
-    (receipt) => {
-      receipt.authorization.privileges.schemaCreate = true;
-    },
-    (receipt) => {
-      receipt.authorization.denialProbes[0].sqlState = "25006";
-    },
-    (receipt) => {
-      receipt.authorization.denialProbes[0].operation =
-        "caller-claimed-read-only";
-    },
-  ];
-  for (const mutate of mutations) {
-    const receipt = databaseReceipt("source");
-    mutate(receipt);
-    assert.throws(
-      () => assertBackupDatabaseReceipt(receipt, expected),
-      /authorization|denial|read-only/u,
-    );
-  }
 });
 
 const memoryStore = () => {
@@ -412,7 +381,7 @@ const memoryStore = () => {
     objects,
     async putEvidence({ bytes, mediaType }) {
       const sha256 = sha256Bytes(bytes);
-      const committedAt = "2026-08-09T12:06:00.000Z";
+      const committedAt = "2026-08-09T12:04:10.000Z";
       objects.set(sha256, {
         bytes: Buffer.from(bytes),
         mediaType,
@@ -439,42 +408,51 @@ const memoryStore = () => {
 const collectFixture = async ({
   providerOverride,
   databaseOverride,
-  extraOptions = {},
+  environmentOverride,
+  providerContractOverride,
 } = {}) => {
   const prerequisitePolicy = configuredPrerequisitePolicy();
   const providerContract = configuredProviderContract();
+  if (providerContractOverride) providerContractOverride(providerContract);
+  const runtimeEnvironment = { ...environment, ...environmentOverride };
   const store = memoryStore();
   const calls = [];
+  const operationCounts = new Map();
   const observation = await collectAndStoreBackupRestoreRehearsal(
     {
       current,
-      environment,
+      environment: runtimeEnvironment,
       namespace,
       oidcAuthority,
       oidcReceipt,
       prerequisitePolicy,
       providerContract,
       store,
-      ...extraOptions,
     },
     {
       readOidcAuthority: async () => ({ receipt: { trusted: true } }),
       executeProviderOperation: async ({ operation: name, variables }) => {
         calls.push(name);
+        const count = (operationCounts.get(name) ?? 0) + 1;
+        operationCounts.set(name, count);
         if (providerOverride) {
           const replacement = providerOverride({
             name,
             variables,
             contract: providerContract,
             calls,
+            count,
           });
           if (replacement !== undefined) return replacement;
         }
-        return providerResult(providerContract, name, variables);
+        return providerResult(providerContract, name, variables, {
+          occurrence: count,
+        });
       },
-      observeDatabase: async ({ target }) => {
+      observeDatabase: async (options) => {
+        const { target } = options;
         if (databaseOverride) {
-          const replacement = databaseOverride(target);
+          const replacement = databaseOverride(target, options);
           if (replacement !== undefined) return replacement;
         }
         return databaseReceipt(target);
@@ -492,85 +470,309 @@ const collectFixture = async ({
   };
 };
 
-test("closes configured Supabase API and disjoint TLS DB authority shapes", () => {
+test("accepts only the official read/inspect/delete Supabase API contract", () => {
   assert.equal(
     assertBackupRestoreProviderContract(unconfiguredProviderContract)
       .bindingStatus,
     "unconfigured",
   );
-  assert.throws(
-    () =>
-      assertBackupRestoreProviderContract(unconfiguredProviderContract, {
-        requireConfigured: true,
-      }),
-    /not configured/,
-  );
-  const prerequisitePolicy = configuredPrerequisitePolicy();
   const providerContract = configuredProviderContract();
   const configured = assertConfiguredBackupRestorePolicy({
-    prerequisitePolicy,
+    prerequisitePolicy: configuredPrerequisitePolicy(),
     providerContract,
   });
-  assert.equal(configured.backup.provider, "supabase");
-  assert.match(configured.providerContractSha256, /^[0-9a-f]{64}$/u);
+  assert.equal(
+    configured.providerContract.api.restoreMode,
+    "dashboard-new-project",
+  );
+  assert.equal(
+    Object.values(providerContract.api.operations).some(
+      ({ method, pathTemplate }) =>
+        method === "POST" || pathTemplate.includes("restore-pitr"),
+    ),
+    false,
+  );
 
   for (const mutate of [
     (contract) => {
-      contract.api.operations.createBackup.method = "GET";
+      contract.api.operations.listSourceBackups.pathTemplate =
+        "/v1/projects/{sourceProjectRef}/database/backups/restore-pitr";
     },
     (contract) => {
-      contract.api.operations.restoreBackup.pathTemplate =
-        "/v1/projects/{restoreProjectRef}/restores";
-      contract.api.operations.restoreBackup.requestBodyTemplate = {};
+      contract.api.operations.getRestoreProject.method = "POST";
     },
     (contract) => {
-      contract.api.states.restoreReady = contract.api.states.restorePending[0];
+      contract.api.restoreMode = "in-place";
     },
     (contract) => {
-      contract.database.restore.allowedRoles =
-        contract.database.source.allowedRoles;
+      contract.database.source.allowedPorts = [6543];
     },
     (contract) => {
-      contract.callerSucceeded = true;
+      contract.database.source.allowedDatabases = ["application"];
+    },
+    (contract) => {
+      contract.database.source.allowedHosts.push("zz-secondary.db.acme.test");
+    },
+    (contract) => {
+      contract.database.source.allowedRoles = ["additional_backup_reader"];
     },
   ]) {
     const drifted = configuredProviderContract();
     mutate(drifted);
-    assert.throws(() =>
-      assertBackupRestoreProviderContract(drifted, {
-        requireConfigured: true,
-      }),
+    assert.throws(
+      () =>
+        assertBackupRestoreProviderContract(drifted, {
+          requireConfigured: true,
+        }),
+      /official endpoint|authority|in-place|ports|database name/u,
     );
   }
 });
 
-test("runs backup, immutable-ID poll, nonproduction restore, DB comparison, and cleanup", async () => {
-  const { observation, store, calls, prerequisitePolicy, providerContract } =
-    await collectFixture();
-  assert.deepEqual(calls, [
-    "createBackup",
-    "getBackup",
-    "restoreBackup",
-    "getRestore",
-    "cleanupRestore",
-    "getCleanup",
-  ]);
-  assert.equal(observation.result.observedRecoveryPointSeconds, 120);
-  assert.equal(observation.result.observedRecoveryTimeSeconds, 45);
-  assert.equal(observation.result.dataLossObserved, false);
-  assert.equal(observation.result.outcome, "succeeded");
-  const stored = await readStoredBackupRestoreRehearsal({
-    store,
-    namespace,
-    reference: observation.rawRehearsal,
+test("rejects non-integer backup IDs and invalid RFC 3339 timestamps", async () => {
+  const prerequisitePolicy = configuredPrerequisitePolicy();
+  const providerContract = configuredProviderContract();
+  const latestRecoveryUnix = Date.parse(recoveryPointAt) / 1000;
+  for (const [id, insertedAt, expected] of [
+    ["77", "2026-08-09T12:00:00Z", /no completed physical backup/u],
+    [77, "2026-08-09T12:00:00.1234567890Z", /RFC 3339 timestamp/u],
+    [77, "2026-02-30T12:00:00Z", /RFC 3339 timestamp/u],
+  ]) {
+    await assert.rejects(
+      executeBackupProviderOperation({
+        prerequisitePolicy,
+        providerContract,
+        operation: "listSourceBackups",
+        variables: { sourceProjectRef },
+        token,
+        clock: () => Date.parse(operationTimes.listSourceBackups[0]),
+        fetchImpl: async () =>
+          new Response(
+            canonicalJsonBytes({
+              region: "ap-northeast-1",
+              walg_enabled: true,
+              pitr_enabled: true,
+              backups: [
+                {
+                  id,
+                  is_physical_backup: true,
+                  status: "COMPLETED",
+                  inserted_at: insertedAt,
+                },
+              ],
+              physical_backup_data: {
+                earliest_physical_backup_date_unix: latestRecoveryUnix - 3600,
+                latest_physical_backup_date_unix: latestRecoveryUnix,
+              },
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            },
+          ),
+      }),
+      expected,
+    );
+  }
+});
+
+test("normalizes the official backup list and project response shapes", async () => {
+  const prerequisitePolicy = configuredPrerequisitePolicy();
+  const providerContract = configuredProviderContract();
+  const requests = [];
+  let backupResponseBytes;
+  const latestRecoveryUnix = Date.parse(recoveryPointAt) / 1000;
+  const result = await executeBackupProviderOperation({
     prerequisitePolicy,
     providerContract,
+    operation: "listSourceBackups",
+    variables: { sourceProjectRef },
+    token,
+    clock: (() => {
+      const values = [
+        Date.parse(operationTimes.listSourceBackups[0]),
+        Date.parse(operationTimes.listSourceBackups[1]),
+      ];
+      return () => values.shift();
+    })(),
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      backupResponseBytes = canonicalJsonBytes({
+        region: "ap-northeast-1",
+        walg_enabled: true,
+        pitr_enabled: true,
+        backups: [
+          {
+            id: 77,
+            is_physical_backup: true,
+            status: "COMPLETED",
+            inserted_at: "2026-08-09T12:00:00Z",
+          },
+        ],
+        physical_backup_data: {
+          earliest_physical_backup_date_unix: latestRecoveryUnix - 3600,
+          latest_physical_backup_date_unix: latestRecoveryUnix,
+        },
+      });
+      return new Response(backupResponseBytes, {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-request-id": "provider-request-1",
+        },
+      });
+    },
   });
-  assert.equal(stored.result.backupId, "backup-id-immutable");
+  assert.equal(result.normalized.resourceId, "77");
   assert.equal(
-    stored.raw.database.source.databaseHead,
-    stored.raw.database.restore.databaseHead,
+    result.receipt.responseBodySha256,
+    sha256Bytes(backupResponseBytes),
   );
+  assert.equal(result.normalized.backup.insertedAt, "2026-08-09T12:00:00.000Z");
+  assert.equal(result.normalized.backup.region, "ap-northeast-1");
+  assert.equal(result.normalized.backup.recoveryPointAt, recoveryPointAt);
+  assert.equal(
+    requests[0].url,
+    `https://api.supabase.com/v1/projects/${sourceProjectRef}/database/backups`,
+  );
+  assert.equal(requests[0].options.method, "GET");
+  assert.equal(Object.hasOwn(requests[0].options, "body"), false);
+
+  const cleanupClockValues = [
+    Date.parse(operationTimes.confirmRestoreDeleted[0]),
+    Date.parse(operationTimes.confirmRestoreDeleted[1]),
+  ];
+  const cleanupResponseBytes = canonicalJsonBytes({
+    ref: restoreProject.ref,
+    organization_slug: restoreProject.organizationSlug,
+    name: restoreProject.name,
+    region: restoreProject.region,
+    created_at: "2026-08-09T12:03:30.123456Z",
+    status: "GOING_DOWN",
+    database: { host: restoreProject.databaseHost },
+  });
+  const cleanupPending = await executeBackupProviderOperation({
+    prerequisitePolicy,
+    providerContract,
+    operation: "confirmRestoreDeleted",
+    variables: { restoreProjectRef },
+    token,
+    clock: () => cleanupClockValues.shift(),
+    fetchImpl: async () =>
+      new Response(cleanupResponseBytes, {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+  });
+  assert.equal(cleanupPending.normalized.state, "GOING_DOWN");
+  assert.equal(cleanupPending.normalized.project.ref, restoreProjectRef);
+  assert.equal(
+    cleanupPending.receipt.responseBodySha256,
+    sha256Bytes(cleanupResponseBytes),
+  );
+  assert.equal(
+    cleanupPending.normalized.project.createdAt,
+    "2026-08-09T12:03:30.123Z",
+  );
+});
+
+test("fails closed before DELETE for every unsafe restore-project identity", async () => {
+  const providerContract = configuredProviderContract();
+  const prerequisitePolicy = configuredPrerequisitePolicy();
+  const backupReceipt = providerResult(providerContract, "listSourceBackups", {
+    sourceProjectRef,
+  });
+  const sourceReceipt = providerResult(providerContract, "getSourceProject", {
+    sourceProjectRef,
+  });
+  const mutations = [
+    { organizationSlug: "other-organization" },
+    { region: "us-east-1" },
+    { databaseHost: sourceProject.databaseHost },
+    { name: "unrelated-staging-project" },
+    { ref: sourceProjectRef },
+    { createdAt: "2026-08-08T00:00:00.000Z" },
+    { createdAt: "2026-08-07T00:00:00.000Z" },
+  ];
+  for (const mutation of mutations) {
+    const changed = { ...restoreProject, ...mutation };
+    const restoreReceipt = providerResult(
+      providerContract,
+      "getRestoreProject",
+      { restoreProjectRef },
+      { project: changed },
+    );
+    assert.throws(
+      () =>
+        assertSafeRestoreProjectForCleanup({
+          backup: prerequisitePolicy.backupRestore,
+          backupReceipt,
+          sourceProjectReceipt: sourceReceipt,
+          restoreProjectReceipt: restoreReceipt,
+        }),
+      /cleanup target/u,
+    );
+  }
+
+  const calls = [];
+  await assert.rejects(
+    collectAndStoreBackupRestoreRehearsal(
+      {
+        current,
+        environment,
+        namespace,
+        oidcAuthority,
+        oidcReceipt,
+        prerequisitePolicy,
+        providerContract,
+        store: memoryStore(),
+      },
+      {
+        readOidcAuthority: async () => ({}),
+        executeProviderOperation: async ({ operation: name, variables }) => {
+          calls.push(name);
+          return providerResult(providerContract, name, variables, {
+            project:
+              name === "getRestoreProject"
+                ? { ...restoreProject, organizationSlug: "wrong-org" }
+                : undefined,
+          });
+        },
+        observeDatabase: async ({ target }) => databaseReceipt(target),
+      },
+    ),
+    /cleanup target identity/u,
+  );
+  assert.deepEqual(calls, [
+    "listSourceBackups",
+    "getSourceProject",
+    "getRestoreProject",
+  ]);
+});
+
+test("collects a new-project restore, compares DB authority, and confirms deletion", async () => {
+  const fixture = await collectFixture();
+  assert.deepEqual(fixture.calls, [
+    "listSourceBackups",
+    "getSourceProject",
+    "getRestoreProject",
+    "getRestoreProject",
+    "deleteRestoreProject",
+    "confirmRestoreDeleted",
+  ]);
+  assert.equal(fixture.observation.result.observedRecoveryPointSeconds, 30);
+  assert.equal(fixture.observation.result.observedRecoveryTimeSeconds, 36);
+  assert.equal(fixture.observation.result.dataLossObserved, false);
+  assert.equal(fixture.observation.result.outcome, "succeeded");
+  const stored = await readStoredBackupRestoreRehearsal({
+    store: fixture.store,
+    namespace,
+    reference: fixture.observation.rawRehearsal,
+    prerequisitePolicy: fixture.prerequisitePolicy,
+    providerContract: fixture.providerContract,
+  });
+  assert.equal(stored.raw.schemaVersion, 2);
+  assert.equal(stored.raw.provider.restoreId, restoreProjectRef);
   const rawText = stored.bytes.toString("utf8");
   for (const [name, secret] of Object.entries(environment)) {
     if (!name.startsWith("FOUNDATION_BACKUP_")) continue;
@@ -578,98 +780,125 @@ test("runs backup, immutable-ID poll, nonproduction restore, DB comparison, and 
   }
 });
 
-test("RTO includes TLS database integrity verification after provider readiness", async () => {
-  const fixture = await collectFixture();
-  const stored = fixture.store.objects.get(
-    fixture.observation.rawRehearsal.sha256,
+test("rechecks the exact restore identity immediately before DELETE", async () => {
+  const calls = [];
+  await assert.rejects(
+    collectFixture({
+      providerOverride: ({ name, variables, contract, count }) => {
+        calls.push(name);
+        if (name !== "getRestoreProject" || count !== 2) return undefined;
+        return providerResult(contract, name, variables, {
+          occurrence: count,
+          project: {
+            ...restoreProject,
+            databaseHost: "replacement.db.acme.test",
+          },
+        });
+      },
+    }),
+    /changed before cleanup/u,
   );
-  const raw = JSON.parse(stored.bytes.toString("utf8"));
-  const prerequisitePolicy = structuredClone(fixture.prerequisitePolicy);
-  prerequisitePolicy.backupRestore.recoveryTimeObjectiveSeconds = 44;
-  raw.policy.recoveryTimeObjectiveSeconds = 44;
-  raw.policy.prerequisitePolicySha256 = sha256Bytes(
-    canonicalJsonBytes(prerequisitePolicy),
+  assert.equal(calls.includes("deleteRestoreProject"), false);
+});
+
+test("pins sanitized TLS URLs to the inspected Management API database hosts", async () => {
+  const observedConnections = new Map();
+  await collectFixture({
+    databaseOverride: (target, { connection }) => {
+      observedConnections.set(target, connection);
+      return databaseReceipt(target);
+    },
+  });
+  for (const [target, connection] of observedConnections) {
+    const runtimeUrl = new URL(connection.connectionString);
+    assert.equal(runtimeUrl.search, "", `${target} URL retained query options`);
+    assert.equal(runtimeUrl.hash, "");
+    assert.equal(connection.projection.port, 5432);
+  }
+
+  const calls = [];
+  await assert.rejects(
+    collectFixture({
+      providerOverride: ({ name, variables, contract }) => {
+        calls.push(name);
+        if (name !== "getRestoreProject") return undefined;
+        return providerResult(contract, name, variables, {
+          project: {
+            ...restoreProject,
+            databaseHost: "unrelated.db.acme.test",
+          },
+        });
+      },
+    }),
+    /database endpoints differ/u,
   );
-  assert.throws(
-    () =>
-      summarizeBackupRestoreRehearsal(raw, {
-        prerequisitePolicy,
-        providerContract: fixture.providerContract,
-      }),
-    /exceeds its RPO or RTO/,
+  assert.equal(calls.includes("deleteRestoreProject"), false);
+
+  await assert.rejects(
+    collectFixture({
+      environmentOverride: {
+        FOUNDATION_BACKUP_SOURCE_DATABASE_URL:
+          "postgresql://foundation_backup_source_reader:source-password@source.db.acme.test/postgres?sslmode=disable",
+      },
+    }),
+    /configured authority/u,
   );
 });
 
-test("rejects caller authority, production target, unknown state, ID drift, and DB drift", async () => {
-  const validOptions = {
-    current,
-    environment,
-    namespace,
-    oidcAuthority,
-    oidcReceipt,
-    prerequisitePolicy: configuredPrerequisitePolicy(),
-    providerContract: configuredProviderContract(),
-    store: memoryStore(),
-    callerStatus: true,
-  };
+test("rejects an overlapping database endpoint or decoded password before provider access", async () => {
+  let providerCalls = 0;
   await assert.rejects(
-    collectAndStoreBackupRestoreRehearsal(validOptions),
-    /unknown or missing fields/,
-  );
-
-  const production = configuredPrerequisitePolicy();
-  production.backupRestore.restoreTarget.projectRef =
-    production.backupRestore.sourceProjectRef;
-  const withoutCallerStatus = { ...validOptions };
-  delete withoutCallerStatus.callerStatus;
-  await assert.rejects(
-    collectAndStoreBackupRestoreRehearsal({
-      ...withoutCallerStatus,
-      sourceSha,
+    collectFixture({
+      providerContractOverride: (contract) => {
+        contract.database.restore.allowedHosts = ["source.db.acme.test"];
+        contract.database.restore.allowedDatabases = ["postgres"];
+      },
+      environmentOverride: {
+        FOUNDATION_BACKUP_RESTORE_DATABASE_URL:
+          "postgresql://foundation_backup_restore_reader:restore-password@source.db.acme.test/postgres?sslmode=verify-full",
+      },
+      providerOverride: () => {
+        providerCalls += 1;
+      },
     }),
-    /unknown or missing fields/,
+    /authorities overlap/u,
   );
-  await assert.rejects(
-    collectAndStoreBackupRestoreRehearsal({
-      ...withoutCallerStatus,
-      prerequisitePolicy: production,
-    }),
-    /production/,
-  );
+  assert.equal(providerCalls, 0);
 
   await assert.rejects(
     collectFixture({
-      providerOverride: ({ name, variables, contract }) =>
-        name === "getBackup"
-          ? providerResult(contract, name, variables, { state: "alien-state" })
-          : undefined,
+      environmentOverride: {
+        FOUNDATION_BACKUP_SOURCE_DATABASE_URL:
+          "postgresql://foundation_backup_source_reader:shared%2Dpassword@source.db.acme.test/postgres?sslmode=verify-full",
+        FOUNDATION_BACKUP_RESTORE_DATABASE_URL:
+          "postgresql://foundation_backup_restore_reader:%73hared-password@restore.db.acme.test/postgres?sslmode=verify-full",
+      },
+      providerOverride: () => {
+        providerCalls += 1;
+      },
     }),
-    /receipt is invalid|unknown provider state/,
+    /authorities overlap/u,
   );
-  await assert.rejects(
-    collectFixture({
-      providerOverride: ({ name, variables, contract }) =>
-        name === "getBackup"
-          ? providerResult(contract, name, variables, {
-              resourceId: "changed-backup-id",
-            })
-          : undefined,
-    }),
-    /immutable provider ID changed/,
-  );
-  const failed = await assert.rejects(
-    collectFixture({
-      databaseOverride: (target) =>
-        target === "restore"
-          ? { ...databaseReceipt(target), integritySha256: "9".repeat(64) }
-          : undefined,
-    }),
-    /differs from source integrity/,
-  );
-  assert.equal(failed, undefined);
+  assert.equal(providerCalls, 0);
 });
 
-test("always cleans a created restore after DB verification failure", async () => {
+test("polls cleanup and always deletes an authorized target after DB failure", async () => {
+  let cleanupPoll = 0;
+  const fixture = await collectFixture({
+    providerOverride: ({ name, variables, contract }) => {
+      if (name !== "confirmRestoreDeleted") return undefined;
+      cleanupPoll += 1;
+      return providerResult(contract, name, variables, {
+        pendingCleanup: cleanupPoll === 1,
+        pendingCleanupState: "GOING_DOWN",
+      });
+    },
+  });
+  assert.equal(
+    fixture.calls.filter((name) => name === "confirmRestoreDeleted").length,
+    2,
+  );
+
   const calls = [];
   await assert.rejects(
     collectFixture({
@@ -681,477 +910,151 @@ test("always cleans a created restore after DB verification failure", async () =
         throw new Error("injected DB integrity failure");
       },
     }),
-    /injected DB integrity failure/,
+    /Backup database observations failed|injected DB integrity failure/u,
   );
-  assert.deepEqual(calls.slice(-2), ["cleanupRestore", "getCleanup"]);
+  assert.deepEqual(calls.slice(-2), [
+    "deleteRestoreProject",
+    "confirmRestoreDeleted",
+  ]);
 });
 
-test("rejects tamper, wrong media, stale authority, and current fingerprint drift", async () => {
-  const fixture = await collectFixture();
-  const reference = fixture.observation.rawRehearsal;
-  const original = fixture.store.objects.get(reference.sha256);
-  fixture.store.objects.set(reference.sha256, {
-    ...original,
-    bytes: Buffer.concat([original.bytes, Buffer.from(" ")]),
+test("waits for both database observers to settle before deleting the restore project", async () => {
+  const calls = [];
+  let releaseRestore;
+  const restoreSettled = new Promise((resolve) => {
+    releaseRestore = resolve;
   });
-  await assert.rejects(
-    readStoredBackupRestoreRehearsal({
-      store: fixture.store,
-      namespace,
-      reference,
-      prerequisitePolicy: fixture.prerequisitePolicy,
-      providerContract: fixture.providerContract,
-    }),
-    /differs/,
-  );
-  fixture.store.objects.set(reference.sha256, {
-    ...original,
-    mediaType: "application/json",
+  const collection = collectFixture({
+    providerOverride: ({ name }) => {
+      calls.push(name);
+      return undefined;
+    },
+    databaseOverride: (target) => {
+      if (target === "source") {
+        throw new Error("source observation failed");
+      }
+      return restoreSettled.then(() => databaseReceipt("restore"));
+    },
   });
-  await assert.rejects(
-    readStoredBackupRestoreRehearsal({
-      store: fixture.store,
-      namespace,
-      reference,
-      prerequisitePolicy: fixture.prerequisitePolicy,
-      providerContract: fixture.providerContract,
-    }),
-    /differs/,
-  );
-  fixture.store.objects.set(reference.sha256, original);
-  let oidcRead = null;
-  const live = await readStoredBackupRestoreRehearsalAuthority(
-    {
-      store: fixture.store,
-      namespace,
-      reference,
-      prerequisitePolicy: fixture.prerequisitePolicy,
-      providerContract: fixture.providerContract,
-      current,
-      approvalPolicy: { repository: "acme/planner" },
-      now: () => Date.parse("2026-08-09T12:06:00.000Z"),
-    },
-    {
-      readOidcAuthority: async (options) => {
-        oidcRead = options;
-      },
-    },
-  );
-  assert.equal(live.result.outcome, "succeeded");
-  assert.equal(oidcRead.sourceSha, sourceSha);
-  assert.equal(oidcRead.runId, "7001");
-  assert.equal(oidcRead.runAttempt, "2");
-  await assert.rejects(
-    readStoredBackupRestoreRehearsalAuthority({
-      store: fixture.store,
-      namespace,
-      reference,
-      prerequisitePolicy: fixture.prerequisitePolicy,
-      providerContract: fixture.providerContract,
-      current,
-      approvalPolicy: {},
-      now: () => Date.parse("2026-09-10T12:05:55.000Z"),
-    }),
-    /stale or future/,
-  );
-  await assert.rejects(
-    readStoredBackupRestoreRehearsalAuthority({
-      store: fixture.store,
-      namespace,
-      reference,
-      prerequisitePolicy: fixture.prerequisitePolicy,
-      providerContract: fixture.providerContract,
-      current: {
-        ...current,
-        snapshot: {
-          currentDbCompatibility: { fingerprint: "8".repeat(64) },
-        },
-      },
-      approvalPolicy: {},
-      now: () => Date.parse("2026-08-09T12:06:00.000Z"),
-    }),
-    /current Release State/,
-  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.includes("deleteRestoreProject"), false);
+  releaseRestore();
+  await assert.rejects(collection, /source observation failed/u);
+  assert.deepEqual(calls.slice(-2), [
+    "deleteRestoreProject",
+    "confirmRestoreDeleted",
+  ]);
 });
 
-test("generic HTTP executor derives only configured URL/body/status/pointers", async () => {
-  const prerequisitePolicy = configuredPrerequisitePolicy();
+test("requires function-only readers with distinct roles and migration head", () => {
   const providerContract = configuredProviderContract();
-  const variables = { sourceProjectRef };
-  const responseBody = canonicalJsonBytes({
-    id: "backup-id-immutable",
-    state: "backup-ready",
-    recovery_point_at: "2026-08-09T12:03:00.000Z",
-  });
-  const requests = [];
-  const result = await executeBackupProviderOperation({
-    prerequisitePolicy,
-    providerContract,
-    operation: "createBackup",
-    variables,
-    token,
-    clock: (() => {
-      const values = [
-        Date.parse("2026-08-09T12:05:00.000Z"),
-        Date.parse("2026-08-09T12:05:01.000Z"),
-      ];
-      return () => values.shift();
-    })(),
-    fetchImpl: async (url, options) => {
-      requests.push({ url, options });
-      return new Response(responseBody, {
-        status: 202,
-        headers: {
-          "content-type": "application/json",
-          "x-request-id": "provider-request-1",
-        },
-      });
-    },
-  });
-  assert.equal(result.normalized.state, "backup-ready");
-  assert.equal(
-    requests[0].url,
-    `https://api.supabase.com/v1/projects/${sourceProjectRef}/backups`,
-  );
-  assert.equal(requests[0].options.headers.Authorization, `Bearer ${token}`);
-  assert.equal(
-    result.receipt.requestBodySha256,
-    sha256Bytes(canonicalJsonBytes({ type: "pitr" })),
-  );
-  await assert.rejects(
-    executeBackupProviderOperation({
-      prerequisitePolicy,
-      providerContract,
-      operation: "createBackup",
-      variables,
-      token,
-      fetchImpl: async () =>
-        new Response('{"error":"unknown"}', {
-          status: 409,
-          headers: { "content-type": "application/json" },
-        }),
-    }),
-    /response is unexpected/,
-  );
-});
-
-test("default DB executor enforces verify-full read-only identity and fixed integrity function", async () => {
-  const queries = [];
-  const client = {
-    async connect() {},
-    async end() {},
-    async query(query) {
-      queries.push(query);
-      if (typeof query === "string") {
-        if (/^(?:delete from|create table)/u.test(query)) {
-          const error = new Error("permission denied");
-          error.code = "42501";
-          throw error;
-        }
-        return { rows: [] };
-      }
-      if (query.name.endsWith("-identity")) {
-        return {
-          rows: [
-            {
-              role: "backup_source",
-              session_role: "backup_source",
-              database: "app_source",
-              read_only: "on",
-              server_version_num: "170002",
-            },
-          ],
-        };
-      }
-      if (query.name.endsWith("-role-authority")) {
-        return {
-          rows: [
-            {
-              superuser: false,
-              create_role: false,
-              create_database: false,
-              replication: false,
-              bypass_rls: false,
-            },
-          ],
-        };
-      }
-      if (query.name.endsWith("-memberships")) return { rows: [] };
-      if (query.name.endsWith("-ownership")) {
-        return { rows: [{ owned_object_count: "0" }] };
-      }
-      if (query.name.endsWith("-privileges")) {
-        return {
-          rows: [
-            {
-              table_count: "4",
-              first_relation_schema: "public",
-              first_relation_name: "events",
-              schema_usage: true,
-              schema_create: false,
-              database_create: false,
-              all_tables_select: true,
-              any_table_insert: false,
-              any_table_update: false,
-              any_table_delete: false,
-              any_table_truncate: false,
-              any_table_references: false,
-              any_table_trigger: false,
-              integrity_function_execute: true,
-              integrity_function_security_definer: true,
-            },
-          ],
-        };
-      }
-      return {
-        rows: [
-          {
-            database_head: databaseHead,
-            compatibility_fingerprint: fingerprint,
-            integrity_sha256: integritySha256,
-          },
-        ],
-      };
-    },
-  };
-  const contract = configuredProviderContract();
-  const receipt = await observeBackupRestoreDatabase({
-    connection: {
-      connectionString: environment.FOUNDATION_BACKUP_SOURCE_DATABASE_URL,
-      ca: sourceCa,
-      projection: {
-        host: "source.db.acme.test",
-        database: "app_source",
-        role: "backup_source",
-      },
-    },
-    authority: contract.database.source,
-    databaseContract: contract.database,
+  const expectation = {
     target: "source",
     projectRef: sourceProjectRef,
-    clock: () => Date.parse("2026-08-09T12:05:50.500Z"),
-    createClient: async () => client,
-  });
-  assert.equal(receipt.transactionReadOnly, true);
-  assert.equal(receipt.authorization.denialProbes.length, 2);
-  assert.equal(
-    queries[0],
-    "begin transaction isolation level repeatable read read only",
-  );
-  assert.equal(
-    queries.filter(
-      (query) =>
-        typeof query === "string" &&
-        /^(?:delete from|create table)/u.test(query),
-    ).length,
-    2,
-  );
-  assert.match(
-    queries.find(
-      (query) =>
-        typeof query === "object" &&
-        query.name === "foundation-backup-restore-integrity-v1",
-    ).text,
-    /read_foundation_backup_restore_integrity/u,
-  );
-
-  const wrongSqlStateClient = {
-    ...client,
-    async query(query) {
-      if (
-        typeof query === "string" &&
-        /^(?:delete from|create table)/u.test(query)
-      ) {
-        const error = new Error(
-          "transaction is read-only, not permission denied",
-        );
-        error.code = "25006";
-        throw error;
-      }
-      return client.query(query);
-    },
+    authority: providerContract.database.source,
+    expectedFingerprint: fingerprint,
+    expectedMigrationVersion: migrationVersion,
   };
-  await assert.rejects(
-    observeBackupRestoreDatabase({
-      connection: {
-        connectionString: environment.FOUNDATION_BACKUP_SOURCE_DATABASE_URL,
-        ca: sourceCa,
-        projection: {
-          host: "source.db.acme.test",
-          database: "app_source",
-          role: "backup_source",
-        },
-      },
-      authority: contract.database.source,
-      databaseContract: contract.database,
-      target: "source",
-      projectRef: sourceProjectRef,
-      clock: () => Date.parse("2026-08-09T12:05:50.500Z"),
-      createClient: async () => wrongSqlStateClient,
-    }),
-    (error) => error?.code === "25006",
+  assert.equal(
+    assertBackupDatabaseReceipt(databaseReceipt("source"), expectation).role,
+    "foundation_backup_source_reader",
   );
-});
-
-test("CLI forbids authority flags and fails unconfigured before any network/store access", async () => {
-  assert.deepEqual(
-    parseBackupRestoreRehearsalArguments([
-      "--namespace",
-      namespace,
-      "--output",
-      "backup.json",
-    ]),
-    { namespace, outputPath: "backup.json" },
-  );
-  for (const argv of [
-    ["--namespace", namespace, "--source-sha", sourceSha],
-    ["--namespace", namespace, "--status", "succeeded"],
+  for (const mutate of [
+    (receipt) => {
+      receipt.authorization.memberships = ["service_role"];
+    },
+    (receipt) => {
+      receipt.authorization.ownedObjectCount = 1;
+    },
+    (receipt) => {
+      receipt.authorization.privileges.anyTableSelect = true;
+    },
+    (receipt) => {
+      receipt.authorization.privileges.anyTableDelete = true;
+    },
+    (receipt) => {
+      receipt.authorization.privileges.integrityFunctionExecute = false;
+    },
+    (receipt) => {
+      receipt.authorization.privileges.executablePublicFunctions.push(
+        "public.unapproved_function()",
+      );
+    },
+    (receipt) => {
+      receipt.migrationVersion = "20260809000000";
+    },
   ]) {
+    const receipt = databaseReceipt("source");
+    mutate(receipt);
     assert.throws(
-      () => parseBackupRestoreRehearsalArguments(argv),
-      /arguments are invalid|Usage/,
+      () => assertBackupDatabaseReceipt(receipt, expectation),
+      /authorization|receipt/u,
     );
   }
-  let protectedCalls = 0;
-  let storeCalls = 0;
-  const loadPolicy = async (filePath) => {
-    if (filePath.endsWith("phase-exit-external-prerequisites.json")) {
-      return basePrerequisitePolicy;
-    }
-    if (filePath.endsWith("backup-restore-provider-contract.json")) {
-      return unconfiguredProviderContract;
-    }
-    return {};
-  };
-  await assert.rejects(
-    runBackupRestoreRehearsalCli(
-      {
-        argv: ["--namespace", namespace, "--output", "backup.json"],
-        environment: {},
-      },
-      {
-        loadPolicy,
-        assertProtected: async () => {
-          protectedCalls += 1;
-        },
-        createStore: async () => {
-          storeCalls += 1;
-        },
-      },
+});
+
+test("tracked migrations contain no password and use core PostgreSQL SHA-256", async () => {
+  const [observer, integrity] = await Promise.all([
+    readFile(
+      new URL(
+        "../../supabase/migrations/20260810000000_foundation_application_observer.sql",
+        import.meta.url,
+      ),
+      "utf8",
     ),
-    /provider contract is not configured/,
+    readFile(
+      new URL(
+        "../../supabase/migrations/20260810010000_foundation_backup_integrity.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  ]);
+  assert.match(observer, /create role foundation_db_observer/iu);
+  assert.match(observer, /default_transaction_read_only = on/iu);
+  assert.match(
+    observer,
+    /revoke all on all tables in schema public from public/iu,
   );
-  assert.equal(protectedCalls, 0);
-  assert.equal(storeCalls, 0);
-});
-
-test("configured CLI derives workflow, OIDC, and collector inputs without project or status flags", async () => {
-  const fixture = await collectFixture();
-  const prerequisitePolicy = configuredPrerequisitePolicy();
-  const providerContract = configuredProviderContract();
-  const loaded = [];
-  let closed = 0;
-  let written = null;
-  const cliStore = {
-    namespace,
-    async close() {
-      closed += 1;
-    },
-  };
-  const result = await runBackupRestoreRehearsalCli(
-    {
-      argv: ["--namespace", namespace, "--output", "backup.json"],
-      environment: {
-        ...environment,
-        RELEASE_STATE_DATABASE_URL: "postgresql://release-state.invalid/store",
-        RELEASE_STATE_DATABASE_CA_PEM: "release-state-ca",
-      },
-      cwd: "D:\\fixture",
-      stdout: { write() {} },
-    },
-    {
-      loadPolicy: async (filePath) => {
-        loaded.push(filePath);
-        if (filePath.endsWith("phase-exit-external-prerequisites.json")) {
-          return prerequisitePolicy;
-        }
-        if (filePath.endsWith("backup-restore-provider-contract.json")) {
-          return providerContract;
-        }
-        if (filePath.endsWith("approval-policy.json")) {
-          return { repository: "acme/planner" };
-        }
-        return { bindingStatus: "configured" };
-      },
-      assertProtected: async ({ namespace: actual, sourceSha: actualSha }) => {
-        assert.equal(actual, namespace);
-        assert.equal(actualSha, sourceSha);
-        return { runId: "7001", runAttempt: "2" };
-      },
-      createStore: async ({ namespace: actual }) => {
-        assert.equal(actual, namespace);
-        return cliStore;
-      },
-      readState: async () => current,
-      collectOidc: async (options) => {
-        assert.equal(options.sourceSha, sourceSha);
-        assert.equal(options.runId, "7001");
-        assert.equal(options.runAttempt, "2");
-        return { reference: oidcReceipt };
-      },
-      collect: async (options, dependencies) => {
-        assert.deepEqual(Object.keys(options).sort(), [
-          "current",
-          "environment",
-          "namespace",
-          "oidcAuthority",
-          "oidcReceipt",
-          "prerequisitePolicy",
-          "providerContract",
-          "store",
-        ]);
-        assert.equal(options.oidcAuthority.runId, "7001");
-        assert.equal(typeof dependencies.readState, "function");
-        return fixture.observation;
-      },
-      writeOutput: async (outputPath, observation) => {
-        written = { outputPath, observation };
-      },
-    },
+  assert.match(
+    observer,
+    /revoke execute on all functions in schema public from public/iu,
   );
-  assert.equal(result, fixture.observation);
-  assert.equal(written.observation, fixture.observation);
-  assert.equal(closed, 1);
-  assert.equal(loaded.length, 4);
-});
-
-test("raw authority rejects arbitrary result booleans and receipt normalization tamper", async () => {
-  const fixture = await collectFixture();
-  const stored = await readStoredBackupRestoreRehearsal({
-    store: fixture.store,
-    namespace,
-    reference: fixture.observation.rawRehearsal,
-    prerequisitePolicy: fixture.prerequisitePolicy,
-    providerContract: fixture.providerContract,
-  });
-  const callerStatus = structuredClone(stored.raw);
-  callerStatus.restoreSucceeded = true;
-  assert.throws(
-    () =>
-      assertBackupRestoreRehearsalRaw(callerStatus, {
-        prerequisitePolicy: fixture.prerequisitePolicy,
-        providerContract: fixture.providerContract,
-      }),
-    /unknown or missing fields/,
+  assert.match(
+    observer,
+    /alter default privileges\s+revoke execute on functions from public/iu,
   );
-  const changed = structuredClone(stored.raw);
-  changed.provider.backupReceipts[1].normalized.resourceId = "caller-backup-id";
-  assert.throws(
-    () =>
-      summarizeBackupRestoreRehearsal(changed, {
-        prerequisitePolicy: fixture.prerequisitePolicy,
-        providerContract: fixture.providerContract,
-      }),
-    /lifecycle is invalid/,
+  assert.match(
+    observer,
+    /alter default privileges in schema public[\s\S]*revoke execute on functions from public/iu,
+  );
+  assert.match(
+    observer,
+    /revoke all\s+on all tables in schema supabase_migrations\s+from foundation_db_observer/iu,
+  );
+  assert.match(observer, /errcode = '42710'/iu);
+  assert.match(observer, /foundation_db_observer role already exists/iu);
+  assert.match(integrity, /pg_catalog\.sha256/iu);
+  assert.match(integrity, /set search_path = pg_catalog, pg_temp/iu);
+  assert.match(integrity, /string_agg\(row_sha256, '' order by row_sha256\)/iu);
+  assert.match(integrity, /errcode = '42710'/iu);
+  assert.match(integrity, /foundation_backup_source_reader/iu);
+  assert.match(integrity, /foundation_backup_restore_reader/iu);
+  assert.match(
+    integrity,
+    /revoke execute on all functions in schema public from public/iu,
+  );
+  assert.match(
+    integrity,
+    /alter default privileges in schema public\s+revoke execute on functions from public/iu,
+  );
+  assert.doesNotMatch(`${observer}\n${integrity}`, /password\s+['"]/iu);
+  assert.doesNotMatch(
+    `${observer}\n${integrity}`,
+    /create role[^;]*if not exists/iu,
+  );
+  assert.doesNotMatch(
+    integrity,
+    /extensions\.digest|restore-pitr|hashtextextended|bit_xor/iu,
   );
 });

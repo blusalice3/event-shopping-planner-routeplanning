@@ -44,7 +44,9 @@ const BACKUP_KEYS = Object.freeze([
   "credentialEnvironmentAllowlist",
 ]);
 const RESTORE_TARGET_KEYS = Object.freeze([
+  "cleanupApproval",
   "environment",
+  "maximumProjectAgeSeconds",
   "projectRef",
   "namespacePrefix",
 ]);
@@ -408,6 +410,17 @@ const validateBackupPolicy = (policy) => {
   );
   if (policy.restoreTarget.environment !== "nonproduction") {
     throw new Error("Backup restore target must be explicitly nonproduction");
+  }
+  if (
+    policy.restoreTarget.cleanupApproval !==
+      "delete-exact-project-after-verification" ||
+    !Number.isSafeInteger(policy.restoreTarget.maximumProjectAgeSeconds) ||
+    policy.restoreTarget.maximumProjectAgeSeconds < 60 ||
+    policy.restoreTarget.maximumProjectAgeSeconds > 86_400
+  ) {
+    throw new Error(
+      "Backup restore target must explicitly authorize bounded cleanup",
+    );
   }
   assertOptionalString(
     policy.restoreTarget.projectRef,

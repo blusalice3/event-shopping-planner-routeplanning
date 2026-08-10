@@ -23,7 +23,7 @@ Release State event である。
 - `config/release-state-store.json` の host/database/executor/CA/backup owner が未設定
 - `config/approval-policy.json` の Organization repository と三つの reviewer team が未設定
 - Team membership確認用の`FOUNDATION_APPROVAL_GITHUB_TOKEN`が未設定
-- `config/foundation-baseline.json` の `bootstrapBaselineSourceSha` と raw-dist manifest hash が未設定
+- `config/foundation-p0a-authorities.json` のpreview alias authorityが未設定で、bootstrap seed 4値が未採取・未固定
 - `config/metrics-retention-policy.json` の backup owner、remote cron、last-success observation が未設定
 - startup burst API の production WAF/rate 値と provider log retention が未観測
 
@@ -85,9 +85,10 @@ evidence確定後の別actionとして後の時刻を記録する。producer/rev
 source/build/deployment/profile、24時間観測、minimum sampleなどの非人物分離は変更しない。
 
 またapproval policyのhashが変わるため、手順10の最終binding/configをprotected `main`へmergeしたSHAで
-`collect-foundation-external-bindings`を再実行し、別runで
-`collect-foundation-bootstrap-recovery`も再実行する。続いて旧policy hashを参照する後続の
+`collect-foundation-bootstrap-recovery`を再実行し、その後の別runで
+`produce-foundation-baseline-closure`を再実行する。続いて旧policy hashを参照する後続の
 bundle、closure、approvalをすべて再生成し、旧証跡を流用しない。
+`collect-foundation-external-bindings`は診断用に再実行してよいが、P0-BASELINE bundleの正式入力ではない。
 
 ## 不変条件
 
@@ -174,38 +175,102 @@ production build を成功させるために policy check を迂回してはな�
 正式な採取は protected `Foundation release` workflow を使い、入力は常に
 `source_sha`、`operation`、`request_json` の3件だけにする。
 
-1. `collect-foundation-external-bindings` を `request_json={}` で実行し、provider、application DB
-   read-only binding、sequence/headが0の未初期化 control store、approval/OIDCを採取する。
-2. 別 run の `collect-foundation-bootstrap-recovery` を `request_json={}` で実行し、historical
-   bootstrap sourceのraw dist/archiveをbuildせずpreviewへforward deployし、同じarchiveからrecovery
-   redeploy、route/provider再観測、全preview cleanupまで実行する。
-3. 2 runのRun API、Artifact API digest、ZIP、exact fileをreviewし、`P0-BASELINE`用の
-   `produce-phase-exit-authority-bundle` → `publish-phase-exit-authority-bundle`へ渡す。
+Phase 0A は次の順序を変えない。すべて protected `main` の別runで実行する。seed、recovery、closureの
+`request_json`はexact `{}`、bundleの`request_json`は手順7のclosed objectだけにする。
+
+1. provider、application DB、control store、approval policyを構成したPRで
+   `config/foundation-p0a-authorities.json` を `bootstrap-seed-pending` にする。
+   `blockerCodes` は `p0a-bootstrap-deployment-binding-seed-pending` の1件、
+   `bootstrapSourceSha`、`rawDistManifestSha256`、`deploymentBindingSha256`、
+   `deploymentSeedAuthoritySha256` はすべて `null` にする。`previewAliasSuffix`にはproviderで所有・使用可能な
+   非production専用suffixを固定し、production domain、その親domain、そのsubdomainは指定しない。
+   P0Aのseed/recovery/closureはこのP0A policyだけをpreview containment authorityとして使うため、
+   `config/artifact-control-store-drill.json`の構成を前提にしない。P0Cは未構成のままP0Aを完了できる。
+2. merge後の40桁main SHAを`source_sha`にし、
+   `seed-foundation-bootstrap-deployment-binding`を`request_json={}`で実行する。このrunだけが
+   pinned Node 24.19.0/npm 11.19.0でcurrent mainのraw distをbuildし、containment deployment、
+   deployment binding、seed authorityをcreate-onlyで保存する。callerがsource以外のhash、run、
+   artifact pathを入力する欄はない。
+3. 成功runのSummaryに表示される次の4値をコピーする。
+   `Bootstrap source SHA`、`Bootstrap raw-dist manifest SHA-256`、
+   `Bootstrap deployment binding SHA-256`、`Bootstrap deployment seed authority SHA-256`である。
+   Artifact内JSONやローカル再buildの計算値で置き換えない。
+4. 次のPRでは`config/foundation-p0a-authorities.json`だけを正本として、上の4値をそれぞれ
+   `bootstrapSourceSha`、`rawDistManifestSha256`、`deploymentBindingSha256`、
+   `deploymentSeedAuthoritySha256`へ固定する。`bindingStatus`を`configured`、
+   `blockerCodes`を空配列にしてmergeする。`config/foundation-baseline.json`は変更しない。
+5. 4値を固定した新しいmain SHAで`collect-foundation-bootstrap-recovery`を
+   `request_json={}`で実行する。collectorはP0Aに固定された完了済みseed runをGitHub Run APIで
+   reviewし、seed runと異なるcurrent runのOIDCでforward/recovery preview、route/provider再観測、
+   全preview cleanupを行う。deployment URL取得後はprovider解決やroute probeが失敗してもそのURLを使って
+   compensating deletionを行う。collector自身のrunをreviewしてはならない。
+6. 5と同じmain SHAの後続runで`produce-foundation-baseline-closure`を
+   `request_json={}`で実行する。CLIはcurrent runを除外して、同じsourceの完了済みrecovery
+   artifactを自動検出し、Run API、Artifact API digest、ZIP、exact
+   `foundation-bootstrap-recovery.json`をreviewする。run ID、attempt、hash、pathは入力しない。
+   保存される`foundation-baseline-closure/v2`自体がreviewed recovery artifact authorityを参照し、
+   readback時にも同じchainを再検証する。
+7. 6の成功runのSummaryに表示される`Foundation baseline closure SHA-256`をコピーする。
+   `P0-BASELINE`用の`produce-phase-exit-authority-bundle`を、次のexact `request_json`で別runとして
+   実行する。closure/recovery/seedのrun ID、attempt、artifact path、個別evidence hashは入力しない。
+
+   ```json
+   {
+     "phase_authority_foundation_baseline_closure_sha256": "<Summaryの64桁SHA-256>",
+     "target_gate": "P0-BASELINE"
+   }
+   ```
+
+   producerはclosureをRelease Stateからreadbackし、closure内のprovider、application DB read-only
+   binding、sequence/headが0の未初期化control store、approval/OIDC、review済みrecovery artifactを
+   再検証して、既存の二つのformal authority (`external-bindings`と`bootstrap-recovery-drill`)を生成する。
+
+8. 成功したbundle producerのSummary/artifactからpackage SHA-256、review SHA-256、run ID/attemptを確認し、
+   別runの`publish-phase-exit-authority-bundle`へ渡す。seed、recovery、closure、bundle producer、publisherは
+   それぞれ別runにし、同じaccountで順番に実行してよい。
 
 workflow が呼ぶ下位CLIは次のとおりである。local実行結果はformal authorityに昇格しない。
 
 ```powershell
-npm run provider:foundation-external-bindings:collect -- `
+npm run provider:foundation-bootstrap-deployment:seed -- `
   --namespace $env:RELEASE_STATE_NAMESPACE `
-  --output $externalBindingsPath
+  --binding $bindingPath `
+  --output $seedAuthorityPath
 
 npm run provider:foundation-bootstrap-recovery:collect -- `
   --namespace $env:RELEASE_STATE_NAMESPACE `
   --output $bootstrapRecoveryPath
+
+npm run release:produce-baseline-closure -- `
+  --namespace $env:RELEASE_STATE_NAMESPACE `
+  --output $closureResultPath
+
 ```
+
+`provider:foundation-external-bindings:collect`はprovider/DB/store/approvalの独立診断には使用できるが、
+そのartifactまたはrun selectorをP0-BASELINE bundleへ渡す経路はない。formal bundleの唯一の上流入力は、
+上記のreview済みclosure SHA-256である。
 
 `config/foundation-baseline.json` は historical baseline の正本であり、production binding が
 確定しても書き換えない。Phase 0A の解消結果は、clean closure producer source と独立した
-provider-bound `bootstrapBaselineSourceSha`、historical `baselineEvidenceSha256`、provider
+P0Aのprovider-bound `bootstrapSourceSha`、historical `baselineEvidenceSha256`、provider
 observation/deployment binding、application DB provisioning binding、control store、raw-dist
-manifest、recovery rehearsal を束縛する immutable baseline closure として保存する。
+manifest、recovery rehearsal、reviewed recovery artifactを束縛するimmutable baseline closure
+として保存する。
+
+`foundation-p0a-authorities-policy/v1`はFormal authorityがまだ0件のpre-admission draft中に、
+上記4値、`previewAliasSuffix`、`bootstrap-seed-pending`を追加して置換した。最初の正式seedをadmitした後は
+同じv1を再定義せず、将来shapeを変更する場合はv2へ上げる。bootstrap recoveryのraw authorityと
+公開observationは、P0A-safe preview authorityと補償cleanupを含む現在shapeをそれぞれ
+`foundation-bootstrap-recovery-raw/v2`、`foundation-bootstrap-recovery-observation/v2`として保存し、
+旧v1 media/kind/schemaは受理しない。
 
 Phase 0A の application DB authority は configured host/database/read-only observer role/TLS/CA
 までを固定する。migration checksum、remote schema/privilege fingerprint、retention は Phase 0D
 の authority で後から確定するため、baseline closure の作成に `remote-verified` observation を
 要求しない。historical metrics DB fingerprint が `null` だった事実も closure に明示して残す。
 
-先行する別の protected run で、次を Release State store に保存して review する。
+先行する別の protected run で、次を Release State store に保存してreviewする。
 
 1. fresh provider observation を使って作成した legacy bootstrap の deployment binding。producer が
    保存した provider observation SHA-256 と binding 内の provider policy reference を記録する。
@@ -214,25 +279,10 @@ Phase 0A の application DB authority は configured host/database/read-only obs
    deployment ID、archive SHA-256、raw-dist manifest SHA-256、復元時間、data-loss absence を exact に
    束縛する。
 
-closure producer run は full history を checkout し、closure source の worktree が clean であること、
-bootstrap source commit/tree が存在することを確認する。両 source SHA は同一である必要はない。
-provider binding、package index、recovery rehearsal の source は bootstrap source と一致しなければ
-ならない。
-
-```powershell
-npm run release:produce-baseline-closure -- `
-  --namespace $env:RELEASE_STATE_NAMESPACE `
-  --source-sha $env:GITHUB_SHA `
-  --bootstrap-source-sha $bootstrapSourceSha `
-  --run-id $env:GITHUB_RUN_ID `
-  --provider-binding-sha256 $providerBindingSha256 `
-  --provider-observation-sha256 $providerObservationSha256 `
-  --provider-policy-sha256 $providerPolicySha256 `
-  --raw-dist-manifest $rawDistManifestPath `
-  --raw-dist-manifest-sha256 $rawDistManifestSha256 `
-  --recovery-rehearsal-sha256 $recoveryRehearsalSha256 `
-  --output $closureResultPath
-```
+closure producer run はfull historyをcheckoutし、closure sourceのworktreeがcleanであること、
+P0Aのbootstrap source commit/treeが存在することを確認する。seedのbootstrap/workflow sourceは
+同じSHA、後続recovery/closureのworkflow sourceは新しいmain SHAでよい。provider binding、package
+index、recovery rehearsalのsourceはbootstrap sourceと一致しなければならない。
 
 下位の closure producerを診断する場合、protected environment には
 `REQUESTED_OPERATION=produce-foundation-baseline-closure`、Release State
@@ -269,6 +319,52 @@ observer role、production CA hash、freshness）と `config/release-state-store
    workflow ref、source、run ID/attempt を束縛した receipt だけを保存する。最後に operation、source、
    run ID/attempt、remote DB observation、provider observation/policy、OIDC receipt の全 reference を束縛した
    canonical production receipt を保存・readbackした後だけ成功する。
+
+`operatorBoundedFunctionOnly`はDB全体の管理権限ではなく、production application dataに対する
+**bounded application observer**の権限を示す。collectorは接続中の`foundation_db_observer`について、
+role membershipが0、所有objectが0、`NOINHERIT`、current DBの`CONNECT`だけを許可し、`CREATE`は全DBで0件、
+current DBのplatform既定`TEMPORARY`はgrant optionなしだけを許可する。`TEMPORARY`は一時object用であり、
+application relationへの権限を表さない。`default_transaction_read_only=on`とproduction objectへのexact ACLを
+別々に検証する。
+
+relation/table/column/sequenceは`public`だけでなく、`auth`、`storage`、`net`、`extensions`を含む
+contract記載のmanaged schemaと、未知のprivate schemaを含む全non-system schemaを列挙する。
+application-data側で許可するrelation権限は`supabase_migrations.schema_migrations`の`SELECT`だけである。
+一方、stock Supabaseが`PUBLIC`へ付与するplatform object権限は、`cron.job`の`SELECT`、
+`cron.job_run_details`の`SELECT/DELETE`、`extensions.pg_stat_statements`と`_info`の`SELECT`、
+`net._http_response`と`net.http_request_queue`の8 table権限、対応sequenceの`USAGE/SELECT/UPDATE`に限り、
+object/table/column/sequenceの完全なmatrixをcontractへ固定したreview済みplatform baselineとして許可する。
+これはapplication dataの閲覧・更新権限を表さず、`operatorBoundedFunctionOnly`をDB-wide権限証明へ拡張しない。
+baseline外のcolumn-only grant、全grant option、未知object、missing/extra privilegeは拒否する。
+schemaの実効`USAGE`は`public`、`supabase_migrations`、contractで固定したmanaged baselineの`net`だけ、
+`CREATE`と全grant optionは0件とする。未知schemaの`USAGE`、object権限、managed schemaのrelation/sequence権限が
+1件でもあれば証跡を作らない。
+
+application routineは全non-system schemaから列挙し、`public`/`supabase_migrations`で実行可能なのは定義SHA-256、
+owner、language、result signatureを固定した3つのbounded read functionだけとする。managed schemaで
+platformが`PUBLIC`へ与えるroutine権限はSupabase管理面のbaselineであり、このapplication-data proofの対象外だが、
+observerへの直接`EXECUTE`またはgrant optionは拒否する。`pg_catalog`/`information_schema`のsystem routineも
+application proofの対象外である。managed relation/column/sequenceについてもobserverへの直接ACLは0件とし、
+許可したmatrixが`PUBLIC`継承baselineと完全一致することを確認する。managed schemaの既存ACLをobserver migrationから
+一括`REVOKE`してはならず、operatorへstock platform ACLの削除を要求しない。baseline driftはcontractを自動緩和せず、
+Supabase changeとして独立reviewする。
+
+同じsnapshotで、2つのraw tableのowner、RLS/force-RLS、全columnの型/null/default/identity、空のpolicy/trigger set、
+全constraintの種類と定義SHA-256、5つのrequired routineすべての定義SHA-256/owner/language/resultを完全一致で確認する。
+service_roleは両raw tableへのtable-level `INSERT`と対応identity sequenceへの`USAGE`だけを持ち、column-only
+partial INSERTで代用できず、他のtable/column/sequence権限とgrant optionはすべてfalseでなければならない。
+CSP dormant期間は`PUBLIC`、`anon`、`authenticated`のCSP table/column/sequence/routine権限が0件、policy setも
+空であることをprovider credential不在とは独立して確認する。
+
+Supabase migration historyはcontractで固定した6行のversion、name、statement count、statement bytes hashと
+完全一致させる。expected rowだけをfilterして確認せず、後から追加された未review migrationが1行でもあれば拒否する。
+
+remote DB observationの14-key v1 shape自体は変更していない。この強化はFormal admissionが0件の
+pre-admission期間中に既存booleanの意味を狭めたreplacementであり、observer migration SHA-256を更新して
+`db-compatibility-contract` fingerprintを変更した。従って旧collectorのv1 bytesは新contract fingerprint、
+exact source SHA、protected producer runの照合を通らず、再利用できない。最初のFormal observationをadmitした後に
+shapeまたは意味を変更する場合は同じv1を再定義せず、media/kind/schemaをv2へ上げる。
+
 3. 完了した producer run の summary/artifact と GitHub Run API 上の `completed` / `success`、source、
    workflow path を review し、observation SHA-256、production authority SHA-256、run ID、run attempt を
    記録する。artifact に含まれる authority output は reference だけであり、secret や OIDC token を含まない。
@@ -278,8 +374,7 @@ observer role、production CA hash、freshness）と `config/release-state-store
    response と canonical reviewed-run receipt を immutable store に保存し、producer run が同じ source、
    workflow、completed/success であり、現在 run とは異なることを再検証する。
    production receipt、reviewed GitHub run receipt、observation reference の対応を閉じた canonical
-   authority bundle にして保存するため、別operationの成功runと任意observation hashの組合せは拒否する。
-5. subject bytes と SHA-256 を review した後、さらに別 run の `initialize-release-state` または
+   authority bundle にして保存するため、別operationの成功runと任意observation hashの組合せは拒否する。5. subject bytes と SHA-256 を review した後、さらに別 run の `initialize-release-state` または
    `activate-db-contract` で実行する。実行直前にも reviewed producer receipt、remote observation の
    canonical bytes/media type/hash/freshness に加え、provider observation/policy と OIDC receipt の
    canonical bytes/media type/hash/semantic binding/freshness、current Release State を再読込する。
@@ -319,7 +414,8 @@ review/publishはgate単位に行う。
 1. exact sourceの必要collectorをそれぞれ別runで完了する。同じrunでproducerとreview actionを兼ねないが、
    同じaccountが各別runを順番に担当してよい。
 2. `produce-phase-exit-authority-bundle`をdispatchする。`request_json`には`target_gate`と、対象gateが
-   必要とするexact run ID/attemptまたはremote DBの4 referenceだけを含める。
+   必要とするexact selectorだけを含める。`P0-BASELINE`は上記closure SHA-256の1件、その他のgateは
+   exact run ID/attemptまたはremote DBの4 referenceを使う。
 3. producerはGitHub Run API → Artifact API digest → downloaded ZIP bytes → ZIP内exact single file →
    authority固有semantic verifierの順に照合する。API response、ZIP、file、closed receiptをimmutable
    storeへ保存・readbackしてから`phase-exit-authority-package.json`を生成する。
@@ -336,24 +432,67 @@ wrong workflow/gate/kind/media、duplicate、extra key、tamper、generic substi
 ## P0C artifact/control-store drill
 
 `config/artifact-control-store-drill.json`をproduction namespaceと分離したprovider/DB値で構成する。
-credentialはadministrator、drill executor、production readerの3種類を混用しない。
+credentialはadministrator、drill executor、denied-reader projectionの3種類を混用しない。
+denied-reader projectionは同じdisposable drill DBにだけ作るnon-production credentialであり、production
+Release Stateのcredentialをdrill DBへ渡してはならない。旧
+`ARTIFACT_DRILL_PRODUCTION_READER_DATABASE_URL`は互換fallbackとして扱わず、
+`ARTIFACT_DRILL_DENIED_READER_DATABASE_URL`を別credentialとして設定する。
 
 protected releaseで`operation=collect-artifact-control-store-drill`、`request_json={}`を実行する。
 collectorは専用non-promotable build purpose、standard/containment二重build、preview deploy/route、
-CAS/idempotency、stale transaction、実SQLSTATE `40001` / `42501`、production readerからdrill objectが
-見えないこと、alias/deployment/schemaのcleanupと404/absenceを確認する。production alias/domainへの
+CAS/idempotency、stale transaction、実SQLSTATE `40001` / `42501`、denied-reader projectionによる
+drill evidenceの直接`SELECT`とfunction経由writeがともに`42501`で拒否されること、
+alias/deployment/schemaのcleanupと404/absenceを確認する。production alias/domainへの
 接触があれば失敗する。artifactをreview後、`P0-ARTIFACT`のauthority bundleへrun ID/attemptを渡す。
 
 ## Backup/restore rehearsal
 
 `config/backup-restore-provider-contract.json`と`config/phase-exit-external-prerequisites.json`を構成し、
-restore targetはnonproductionに限定する。protected secretは設定が許可する環境変数名だけを使う。
+restore targetはnonproductionに限定する。tracked migration
+`20260810000000_foundation_application_observer.sql`と
+`20260810010000_foundation_backup_integrity.sql`は通常のSupabase migration history経由でproductionへ
+適用し、SQLだけをDashboardで個別実行しない。既存の同名roleが見つかってmigrationが`42710`で止まった場合は
+衝突として調査し、既存roleを自動変更・削除して続行しない。
+
+migrationはpasswordを保存しない。production source側で`foundation_db_observer`、
+`foundation_backup_source_reader`、`foundation_backup_restore_reader`へそれぞれ別passwordを外部secret管理から
+設定する。3 roleは同じ一人が管理できるが、credentialを共用しない。physical backupはcustom roleのpasswordを
+新projectへ引き継ぐ証明にならないため、clone作成後はrestore project側の
+`foundation_backup_restore_reader` passwordを別値で再設定してからprotected secretへ登録する。
+
+Supabase Dashboardのsource projectで`Database` → `Backups`から対象recovery pointを選び、
+**Restore to a New Project**で新しいprojectを先に作る。public Management APIにはこのclone provenanceを
+取得・検証するdocumented endpointがないため、collector自身はcloneを作成しない。また
+`restore-pitr`によるsource projectへのin-place restoreは一切呼ばない。Management APIが返すlatest PITR
+recovery pointはDashboardで選択したpointのprovenanceではない。実行者はDashboardでlatest recovery pointを
+明示的に選択し、その画面と作成されたproject refをreview対象の外部証跡として保存する。これを確認できないrunは
+Formal evidenceとして承認しない。
+
+新projectはsourceと同じorganization/region、sourceとは異なるproject ref、
+`restoreTarget.namespacePrefix`で始まる固有名、選択recovery point以後かつ
+`maximumProjectAgeSeconds`以内の作成時刻にする。Dashboardでrefを再確認したうえで
+`restoreTarget.projectRef`へexact値を設定し、削除対象であることを確認して
+`cleanupApproval=delete-exact-project-after-verification`を維持する。この承認は、identity safety checkを通過した
+exact projectをcollectorが最終的にDELETEする明示許可であり、DB integrity検証が失敗した場合も安全確認後なら
+cleanupを実行する。残したいprojectを指定してはならない。protected secretは設定が許可する環境変数名だけを使う。
 
 `operation=collect-backup-restore-rehearsal`、`request_json={}`で実行する。collectorはprovider APIの
-backup/PITR/restore status、RPOを照合し、restore DBへTLS接続してintegrityを検証した時点までをRTOとする。
+completed physical backup/PITR recovery pointとsource/restore両projectをGETで観測する。DELETE前にexact ref、
+別project、同一`organization_slug`/region、name prefix、作成時刻/freshness、各`database.host`を
+fail-closed照合する。DB URLはManagement APIのexact direct host、port `5432`、database `postgres`だけを許可し、
+source/restoreでhost・role・passwordが異なる別TLS credentialを使う。URL内の`sslmode`は検証後にruntime URLから
+除去し、pin済みCAと`rejectUnauthorized=true`だけを`pg`へ渡す。両DBのmigration headと、各rowをcore PostgreSQL
+SHA-256で正規化した内容hashが一致した時点までをRTOとする。その後restore projectをもう一度GETし、ref /
+`organization_slug` / region / name / created_at / `database.host`が最初のinspectionから不変であることを
+確認してからだけDELETEする。
+APIだけではclone由来を証明できないという限界は、このmanual Dashboard action、
+project identity/freshness、DB cryptographic equalityの組合せで閉じる。
+
 read-only証明はrole属性、membership、ownership、schema/table/function privilegeに加え、read-write
-transactionでの実DML/DDLがSQLSTATE `42501`になることを含む。restore resourceのcleanupとabsenceまでを
-一つのclosureにし、review後に`P0-DATA` bundleへrun ID/attemptを渡す。
+transactionでの実DML/DDLがSQLSTATE `42501`になることを含む。backup readerはraw tableをSELECTできず、
+`read_foundation_backup_restore_integrity()`だけを実行できる。collectorはexact restore projectをDELETEし、
+`GOING_DOWN`等の限定transitionでもproject identityが不変であることを再検証しながら404までpollする。
+cleanup/absenceを一つのclosureにし、review後に`P0-DATA` bundleへrun ID/attemptを渡す。
 
 ## Managed-device PWA / IDB drill
 
@@ -505,9 +644,9 @@ artifact bytesへ minimum safety floor を単調に適用する。
 
 ## Legacy bootstrap package
 
-bootstrap は一時 containment 専用であり、standard acceptance には使わない。先に
-provider-bound `bootstrapBaselineSourceSha`、recorded Node/npm/lockfile、raw-dist manifest
-hash、final DB fingerprint を baseline evidence に確定する。
+bootstrap は一時 containment 専用であり、standard acceptance には使わない。先にP0Aの
+provider-bound `bootstrapSourceSha`、recorded Node/npm/lockfile、raw-dist manifest hashをseed
+authorityへ確定する。final DB fingerprintは後続のP0D authorityで確定する。
 
 raw `dist/**` は baseline source を recorded toolchain で build した bytes を使う。古い
 checkout で Vercel build を実行しない。

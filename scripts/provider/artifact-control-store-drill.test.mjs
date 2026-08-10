@@ -17,6 +17,7 @@ import {
 } from "./artifact-control-store-drill.mjs";
 import {
   parseArtifactControlStoreDrillArguments,
+  prepareArtifactControlStoreDrillExternalInputs,
   runArtifactControlStoreDrillCli,
   writeArtifactControlStoreDrillOutput,
 } from "./collect-artifact-control-store-drill.mjs";
@@ -75,7 +76,11 @@ const providerPolicy = {
 const artifactDrillPolicy = {
   providerPreviewAliasSuffix: "preview.example.invalid",
 };
-const roleProjection = (roleSha256, label, { direct = false } = {}) => ({
+const roleProjection = (
+  roleSha256,
+  label,
+  { deniedReader = false, direct = false } = {},
+) => ({
   canLogin: true,
   createDatabase: false,
   createRole: false,
@@ -96,29 +101,35 @@ const roleProjection = (roleSha256, label, { direct = false } = {}) => ({
           }),
         ),
         privileges: {
+          appendFunctionExecute: !deniedReader,
           directEvidenceWrite: false,
-          functionExecute: true,
+          putFunctionExecute: true,
           schemaCreate: false,
           schemaUsage: true,
-          selectEvidence: true,
+          selectEvidence: !deniedReader,
         },
       }
     : {}),
 });
 const controlStoreReceipt = {
   schemaVersion: 1,
-  kind: "artifact-drill-control-store-receipt/v1",
+  kind: "artifact-drill-control-store-receipt/v2",
   namespace: drillNamespace,
   databaseEndpointSha256: hash("7"),
   administratorRoleSha256: hash("a"),
   executorRoleSha256: hash("b"),
-  productionReaderRoleSha256: hash("c"),
+  deniedReaderProjectionRoleSha256: hash("c"),
   roleAuthority: {
     administrator: roleProjection(hash("a"), "administrator"),
     executor: roleProjection(hash("b"), "executor", { direct: true }),
-    productionReader: roleProjection(hash("c"), "production-reader", {
-      direct: true,
-    }),
+    deniedReaderProjection: roleProjection(
+      hash("c"),
+      "denied-reader-projection",
+      {
+        deniedReader: true,
+        direct: true,
+      },
+    ),
   },
   immutableEvidence: {
     committedAt: "2026-08-09T00:00:00.000Z",
@@ -139,10 +150,17 @@ const controlStoreReceipt = {
     roleSha256: hash("b"),
     sqlstate: "40001",
   },
-  credentialDenial: {
+  readerVisibilityDenial: {
     schemaVersion: 1,
     kind: "artifact-drill-postgres-error/v1",
-    operation: "production-reader-put-evidence",
+    operation: "denied-reader-projection-select-evidence",
+    roleSha256: hash("c"),
+    sqlstate: "42501",
+  },
+  readerWriteDenial: {
+    schemaVersion: 1,
+    kind: "artifact-drill-postgres-error/v1",
+    operation: "denied-reader-projection-put-evidence",
     roleSha256: hash("c"),
     sqlstate: "42501",
   },
@@ -452,7 +470,8 @@ const operations = () => ({
   ],
   controlStore: {
     casConflictDenied: true,
-    credentialDenialVerified: true,
+    readerVisibilityDenied: true,
+    readerWriteDenied: true,
     idempotencyVerified: true,
     putReadbackVerified: true,
     receiptSha256: receiptHash("control-store"),
@@ -482,8 +501,8 @@ const operations = () => ({
 });
 
 const raw = (overrides = {}) => ({
-  schemaVersion: 1,
-  kind: "artifact-provider-control-store-drill-raw/v1",
+  schemaVersion: 2,
+  kind: "artifact-provider-control-store-drill-raw/v2",
   productionNamespace,
   drillNamespace,
   sourceSha,
@@ -688,8 +707,8 @@ test("rejects archive, CAS, credential, route, redeploy, and reconcile failures"
     ],
     [
       "credential",
-      (value) => (value.controlStore.credentialDenialVerified = false),
-      /credentialDenialVerified failed/,
+      (value) => (value.controlStore.readerVisibilityDenied = false),
+      /readerVisibilityDenied failed/,
     ],
     [
       "route",
@@ -952,6 +971,105 @@ test("default CLI reaches the closed binding gate before opening a database", as
   assert.equal(storeOpenCount, 0);
 });
 
+test("external input failure waits for bootstrap and cleans temp authority and store", async () => {
+  const events = [];
+  const bootstrapMaterialization = {
+    async cleanup() {
+      events.push("bootstrap:cleanup");
+    },
+  };
+  await assert.rejects(
+    prepareArtifactControlStoreDrillExternalInputs({
+      createProductionStore: async () => {
+        events.push("store:open");
+        return {
+          async close() {
+            events.push("store:close");
+          },
+        };
+      },
+      collectProviderObservation: () => {
+        events.push("provider:failed");
+        throw new Error("provider unavailable");
+      },
+      prepareBootstrap: async () => {
+        events.push("bootstrap:start");
+        await new Promise((resolve) => setImmediate(resolve));
+        events.push("bootstrap:finish");
+        return bootstrapMaterialization;
+      },
+      environment: {
+        RELEASE_STATE_DATABASE_URL: "postgresql://release-state.invalid/db",
+        RELEASE_STATE_DATABASE_CA_PEM: "fixture-ca",
+        VERCEL_TOKEN: "provider-token",
+      },
+      storePolicy: {
+        databaseUrlEnvironmentName: "RELEASE_STATE_DATABASE_URL",
+      },
+      productionNamespace,
+      providerPolicy,
+      p0aPolicy: { bootstrapRecovery: { requiredRoutes: ["/"] } },
+      bootstrapSourceResolution: {
+        gitCommitSha: sourceSha,
+        treeSha: sourceSha,
+      },
+      foundationBaseline: { bootstrapBaselineSourceSha: sourceSha },
+    }),
+    (error) => {
+      assert.equal(error instanceof AggregateError, true);
+      assert.match(
+        error.errors.map(({ message }) => message).join("\n"),
+        /provider unavailable/,
+      );
+      return true;
+    },
+  );
+  assert.deepEqual(events, [
+    "store:open",
+    "provider:failed",
+    "bootstrap:start",
+    "bootstrap:finish",
+    "store:close",
+    "bootstrap:cleanup",
+  ]);
+});
+
+test("empty external input also cleans a completed bootstrap authority", async () => {
+  const events = [];
+  await assert.rejects(
+    prepareArtifactControlStoreDrillExternalInputs({
+      createProductionStore: async () => ({
+        async close() {
+          events.push("store:close");
+        },
+      }),
+      collectProviderObservation: async () => null,
+      prepareBootstrap: async () => ({
+        async cleanup() {
+          events.push("bootstrap:cleanup");
+        },
+      }),
+      environment: {
+        RELEASE_STATE_DATABASE_URL: "postgresql://release-state.invalid/db",
+        RELEASE_STATE_DATABASE_CA_PEM: "fixture-ca",
+      },
+      storePolicy: {
+        databaseUrlEnvironmentName: "RELEASE_STATE_DATABASE_URL",
+      },
+      productionNamespace,
+      providerPolicy,
+      p0aPolicy: { bootstrapRecovery: { requiredRoutes: ["/"] } },
+      bootstrapSourceResolution: {
+        gitCommitSha: sourceSha,
+        treeSha: sourceSha,
+      },
+      foundationBaseline: { bootstrapBaselineSourceSha: sourceSha },
+    }),
+    /external input preparation or cleanup failed/,
+  );
+  assert.deepEqual(events, ["store:close", "bootstrap:cleanup"]);
+});
+
 test("uses a dedicated immutable transcript media type", () => {
   assert.match(
     ARTIFACT_CONTROL_STORE_DRILL_RAW_MEDIA_TYPE,
@@ -981,8 +1099,8 @@ test("captures a self-contained closure before disposable database cleanup", asy
     committedAt: "2026-08-09T00:00:00.500Z",
   });
   const observation = {
-    schemaVersion: 1,
-    kind: "artifact-provider-control-store-drill-observation/v1",
+    schemaVersion: 2,
+    kind: "artifact-provider-control-store-drill-observation/v2",
     collectorIdentity,
     productionNamespace,
     productionProviderObservation: { ...productionProviderObservation },

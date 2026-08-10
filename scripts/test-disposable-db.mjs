@@ -13,10 +13,12 @@ import {
 } from "./lib/canonical-json.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const [packageJson, releaseStateStorePolicy] = await Promise.all([
-  readJsonStrict(path.join(root, "package.json")),
-  readJsonStrict(path.join(root, "config", "release-state-store.json")),
-]);
+const [packageJson, releaseStateStorePolicy, dbCompatibilityContract] =
+  await Promise.all([
+    readJsonStrict(path.join(root, "package.json")),
+    readJsonStrict(path.join(root, "config", "release-state-store.json")),
+    readJsonStrict(path.join(root, "config", "db-compatibility-contract.json")),
+  ]);
 const cspContractMigration = await readFile(
   path.join(
     root,
@@ -147,6 +149,2343 @@ const isPostgresError = (error, expectedCode, messagePattern = null) => {
     typeof error.message === "string" &&
     messagePattern.test(error.message)
   );
+};
+
+const FOUNDATION_OBSERVER_ROLE = "foundation_db_observer";
+const FOUNDATION_BACKUP_SOURCE_ROLE = "foundation_backup_source_reader";
+const FOUNDATION_BACKUP_RESTORE_ROLE = "foundation_backup_restore_reader";
+const FOUNDATION_ROLE_PASSWORDS = Object.freeze({
+  [FOUNDATION_OBSERVER_ROLE]: "disposable-foundation-observer",
+  [FOUNDATION_BACKUP_SOURCE_ROLE]: "disposable-backup-source",
+  [FOUNDATION_BACKUP_RESTORE_ROLE]: "disposable-backup-restore",
+});
+const UTF8_COMPARE = (left, right) =>
+  Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
+const METRICS_TABLE = "public.persistence_release_a_metric_events";
+const CSP_TABLE = "public.csp_violation_reports";
+const METRICS_SEQUENCE = "public.persistence_release_a_metric_events_id_seq";
+const CSP_SEQUENCE = "public.csp_violation_reports_id_seq";
+const PROVIDER_MANAGED_SCHEMAS = Object.freeze([
+  "_realtime",
+  "auth",
+  "cron",
+  "extensions",
+  "graphql",
+  "graphql_public",
+  "net",
+  "pgbouncer",
+  "realtime",
+  "storage",
+  "supabase_functions",
+  "vault",
+]);
+const REQUIRED_MIGRATION_VERSIONS = Object.freeze([
+  "20260803000000",
+  "20260805000000",
+  "20260808000000",
+  "20260809000000",
+  "20260810000000",
+  "20260810010000",
+]);
+const EXPECTED_OBSERVER_FUNCTIONS = Object.freeze([
+  Object.freeze({
+    definition_sha256:
+      "d840ff64e316a5e0726e3168e7c44e4c8a1bde7229521a01f3fb9298d9150d9a",
+    function_language: "plpgsql",
+    function_owner: "postgres",
+    function_result:
+      "TABLE(effective_directive text, disposition text, blocked_target text, violation_count bigint, first_received_at timestamp with time zone, last_received_at timestamp with time zone)",
+    function_signature:
+      "public.read_csp_deployment_violation_aggregates(timestamp with time zone, timestamp with time zone, text, text, integer)",
+    observer_execute: true,
+    observer_execute_grantable: false,
+  }),
+  Object.freeze({
+    definition_sha256:
+      "0bd18e5377c32f27fa8a72c7c7b2d4dbc497cd076c2c7c28584bfc02497fb712",
+    function_language: "plpgsql",
+    function_owner: "postgres",
+    function_result:
+      "TABLE(source_sha text, effective_directive text, disposition text, blocked_target text, violation_count bigint, first_received_at timestamp with time zone, last_received_at timestamp with time zone)",
+    function_signature:
+      "public.read_csp_violation_aggregates(timestamp with time zone, timestamp with time zone, integer)",
+    observer_execute: true,
+    observer_execute_grantable: false,
+  }),
+  Object.freeze({
+    definition_sha256:
+      "a26aae5d280b49cf403721cbcd7eff85c6b78e258301dcd69df8925d40e6cb63",
+    function_language: "plpgsql",
+    function_owner: "postgres",
+    function_result:
+      "TABLE(received_at timestamp with time zone, build_id text, browser_family text, app_mode text, online boolean, event_name text, outcome text, duration_bucket text, cleanup_mode text, cleanup_reason text)",
+    function_signature:
+      "public.read_persistence_release_a_metrics(timestamp with time zone, timestamp with time zone, integer)",
+    observer_execute: true,
+    observer_execute_grantable: false,
+  }),
+]);
+const REQUIRED_FUNCTION_AUTHORITIES = Object.freeze([
+  Object.freeze({
+    definition_sha256:
+      "d840ff64e316a5e0726e3168e7c44e4c8a1bde7229521a01f3fb9298d9150d9a",
+    function_language: "plpgsql",
+    function_owner: "postgres",
+    function_result:
+      "TABLE(effective_directive text, disposition text, blocked_target text, violation_count bigint, first_received_at timestamp with time zone, last_received_at timestamp with time zone)",
+    identity_arguments:
+      "timestamp with time zone, timestamp with time zone, text, text, integer",
+    leakproof: false,
+    parallel: "u",
+    qualified_name: "public.read_csp_deployment_violation_aggregates",
+    security_definer: true,
+    strict: false,
+    volatility: "v",
+  }),
+  Object.freeze({
+    definition_sha256:
+      "0bd18e5377c32f27fa8a72c7c7b2d4dbc497cd076c2c7c28584bfc02497fb712",
+    function_language: "plpgsql",
+    function_owner: "postgres",
+    function_result:
+      "TABLE(source_sha text, effective_directive text, disposition text, blocked_target text, violation_count bigint, first_received_at timestamp with time zone, last_received_at timestamp with time zone)",
+    identity_arguments:
+      "timestamp with time zone, timestamp with time zone, integer",
+    leakproof: false,
+    parallel: "u",
+    qualified_name: "public.read_csp_violation_aggregates",
+    security_definer: true,
+    strict: false,
+    volatility: "v",
+  }),
+  Object.freeze({
+    definition_sha256:
+      "a26aae5d280b49cf403721cbcd7eff85c6b78e258301dcd69df8925d40e6cb63",
+    function_language: "plpgsql",
+    function_owner: "postgres",
+    function_result:
+      "TABLE(received_at timestamp with time zone, build_id text, browser_family text, app_mode text, online boolean, event_name text, outcome text, duration_bucket text, cleanup_mode text, cleanup_reason text)",
+    identity_arguments:
+      "timestamp with time zone, timestamp with time zone, integer",
+    leakproof: false,
+    parallel: "u",
+    qualified_name: "public.read_persistence_release_a_metrics",
+    security_definer: true,
+    strict: false,
+    volatility: "v",
+  }),
+  Object.freeze({
+    definition_sha256:
+      "7bfbffd5e152d0fe6fce71e5b3a6390a84a0578143aa3e6f0d68060ea603d6a9",
+    function_language: "plpgsql",
+    function_owner: "postgres",
+    function_result:
+      "TABLE(cutoff timestamp with time zone, affected_rows bigint, batch_count integer, dry_run boolean)",
+    identity_arguments: "boolean, integer, integer",
+    leakproof: false,
+    parallel: "u",
+    qualified_name: "public.retain_csp_violation_reports",
+    security_definer: true,
+    strict: false,
+    volatility: "v",
+  }),
+  Object.freeze({
+    definition_sha256:
+      "a2518f229ae4ac700702713bab16790c966f78a61b4d4b74b2722ecea8bf9cc2",
+    function_language: "plpgsql",
+    function_owner: "postgres",
+    function_result:
+      "TABLE(cutoff timestamp with time zone, affected_rows bigint, batch_count integer, dry_run boolean)",
+    identity_arguments: "boolean, integer, integer",
+    leakproof: false,
+    parallel: "u",
+    qualified_name: "public.retain_persistence_release_a_metrics",
+    security_definer: true,
+    strict: false,
+    volatility: "v",
+  }),
+]);
+const REQUIRED_RELATION_AUTHORITIES = Object.freeze(
+  [CSP_TABLE, METRICS_TABLE].sort(UTF8_COMPARE).map((object_name) =>
+    Object.freeze({
+      force_row_security: false,
+      object_name,
+      persistence: "p",
+      relation_kind: "r",
+      relation_owner: "postgres",
+      replica_identity: "d",
+      row_security: true,
+    }),
+  ),
+);
+const columnAuthority = (
+  object_name,
+  ordinal,
+  data_type,
+  not_null,
+  default_expression = null,
+  identity = "",
+) =>
+  Object.freeze({
+    data_type,
+    default_expression,
+    generated: "",
+    identity,
+    not_null,
+    object_name,
+    ordinal,
+  });
+const REQUIRED_COLUMN_AUTHORITIES = Object.freeze([
+  columnAuthority(`${CSP_TABLE}.id`, 1, "bigint", true, null, "a"),
+  columnAuthority(
+    `${CSP_TABLE}.received_at`,
+    2,
+    "timestamp with time zone",
+    true,
+    "clock_timestamp()",
+  ),
+  columnAuthority(`${CSP_TABLE}.schema_version`, 3, "smallint", true, "1"),
+  columnAuthority(`${CSP_TABLE}.effective_directive`, 4, "text", true),
+  columnAuthority(`${CSP_TABLE}.disposition`, 5, "text", true),
+  columnAuthority(`${CSP_TABLE}.blocked_target`, 6, "text", true),
+  columnAuthority(`${CSP_TABLE}.source_sha`, 7, "text", true),
+  columnAuthority(`${CSP_TABLE}.provider_deployment_id`, 8, "text", true),
+  columnAuthority(`${METRICS_TABLE}.id`, 1, "bigint", true, null, "a"),
+  columnAuthority(
+    `${METRICS_TABLE}.received_at`,
+    2,
+    "timestamp with time zone",
+    true,
+    "now()",
+  ),
+  columnAuthority(`${METRICS_TABLE}.schema_version`, 3, "smallint", true),
+  columnAuthority(`${METRICS_TABLE}.event_version`, 4, "smallint", true),
+  columnAuthority(`${METRICS_TABLE}.event_name`, 5, "text", true),
+  columnAuthority(`${METRICS_TABLE}.outcome`, 6, "text", true),
+  columnAuthority(`${METRICS_TABLE}.duration_bucket`, 7, "text", false),
+  columnAuthority(`${METRICS_TABLE}.cleanup_mode`, 8, "text", false),
+  columnAuthority(`${METRICS_TABLE}.cleanup_reason`, 9, "text", false),
+  columnAuthority(`${METRICS_TABLE}.build_id`, 10, "text", true),
+  columnAuthority(`${METRICS_TABLE}.browser_family`, 11, "text", true),
+  columnAuthority(`${METRICS_TABLE}.app_mode`, 12, "text", true),
+  columnAuthority(`${METRICS_TABLE}.online`, 13, "boolean", true),
+]);
+const constraintAuthority = (
+  object_name,
+  constraint_name,
+  constraint_type,
+  definition_sha256,
+) =>
+  Object.freeze({
+    constraint_name,
+    constraint_type,
+    definition_sha256,
+    object_name,
+    validated: true,
+  });
+const REQUIRED_CONSTRAINT_AUTHORITIES = Object.freeze([
+  constraintAuthority(
+    CSP_TABLE,
+    "csp_violation_reports_blocked_target_check",
+    "c",
+    "0fa27a8b1088a469706d420cf2c1d682994760d7cfa02a5dc2048457e068f083",
+  ),
+  constraintAuthority(
+    CSP_TABLE,
+    "csp_violation_reports_disposition_check",
+    "c",
+    "9e74a5ed76caa073ffd8aa01c9672e1f7d02db71b40e72e7d01a9dd5fc99aa5c",
+  ),
+  constraintAuthority(
+    CSP_TABLE,
+    "csp_violation_reports_effective_directive_check",
+    "c",
+    "318baa76c9070355215fd667e454cf88c6b60a8408330994c5f1f73578dffe39",
+  ),
+  constraintAuthority(
+    CSP_TABLE,
+    "csp_violation_reports_pkey",
+    "p",
+    "8c8464f42472e42ee190fc91ca8db79b5351d3a4609040516578d229c56f6fa5",
+  ),
+  constraintAuthority(
+    CSP_TABLE,
+    "csp_violation_reports_provider_deployment_id_check",
+    "c",
+    "cba5a772e493925359436258e19adf9270cab5ac2010eb61abb0846a59a8c964",
+  ),
+  constraintAuthority(
+    CSP_TABLE,
+    "csp_violation_reports_schema_version_check",
+    "c",
+    "99dafe6cdfeabc897fc0d1ab5cb666d4cb549e9e2e1e627c33b75a55c29a39a2",
+  ),
+  constraintAuthority(
+    CSP_TABLE,
+    "csp_violation_reports_source_sha_check",
+    "c",
+    "f24874f633de2e4fe0ff42b4012e67694ecd8fd28eaf00bf33c86c0808bb9509",
+  ),
+  constraintAuthority(
+    METRICS_TABLE,
+    "persistence_release_a_metric_app_mode_check",
+    "c",
+    "a78f4a8c56a95d04dc719005f78629bded832e47674f052296a558fdaf147b23",
+  ),
+  constraintAuthority(
+    METRICS_TABLE,
+    "persistence_release_a_metric_browser_family_check",
+    "c",
+    "7f71ba486f64af1d5057b0acaecd9548175803bbcfcabfa04d9a1d40ecf96507",
+  ),
+  constraintAuthority(
+    METRICS_TABLE,
+    "persistence_release_a_metric_build_id_check",
+    "c",
+    "9d2f4350ee087797fa77ff965dcfa7f369a502c6e23af55f6eb3aa1111731eb3",
+  ),
+  constraintAuthority(
+    METRICS_TABLE,
+    "persistence_release_a_metric_cleanup_mode_check",
+    "c",
+    "d5d9fffb4c1d2263ada5ee848aa86d2a20429280f11ff15fa49be20c0e8354a2",
+  ),
+  constraintAuthority(
+    METRICS_TABLE,
+    "persistence_release_a_metric_cleanup_reason_check",
+    "c",
+    "c9dc06b7d5db54b1a52e419ee153a356021a87d1501f174e039d293c1a156e3d",
+  ),
+  constraintAuthority(
+    METRICS_TABLE,
+    "persistence_release_a_metric_duration_check",
+    "c",
+    "ca4f1f49c835b90d3d6c2931469aecb8dfc0532c3d74b44418746a3e7ee8aea5",
+  ),
+  constraintAuthority(
+    METRICS_TABLE,
+    "persistence_release_a_metric_event_version_check",
+    "c",
+    "b373ca94512ba2d708d90360e7bcaca55cd523c78e33a0f451a5d384562d5f53",
+  ),
+  constraintAuthority(
+    METRICS_TABLE,
+    "persistence_release_a_metric_events_pkey",
+    "p",
+    "8c8464f42472e42ee190fc91ca8db79b5351d3a4609040516578d229c56f6fa5",
+  ),
+  constraintAuthority(
+    METRICS_TABLE,
+    "persistence_release_a_metric_name_check",
+    "c",
+    "beb86dfaf28d75363e14bfa51d54c97e4239e8554a3da0ef87911289cfb1a373",
+  ),
+  constraintAuthority(
+    METRICS_TABLE,
+    "persistence_release_a_metric_outcome_check",
+    "c",
+    "ce8eeb09a2d79ab4c76011631dfc81427e1a7dc05b8f809463230d21ce3bc0c2",
+  ),
+  constraintAuthority(
+    METRICS_TABLE,
+    "persistence_release_a_metric_schema_version_check",
+    "c",
+    "99dafe6cdfeabc897fc0d1ab5cb666d4cb549e9e2e1e627c33b75a55c29a39a2",
+  ),
+]);
+
+const assertDenied42501 = async (client, statement) => {
+  await client.query("begin transaction read write");
+  try {
+    await assert.rejects(client.query(statement), (error) =>
+      isPostgresError(error, "42501"),
+    );
+  } finally {
+    await client.query("rollback");
+  }
+};
+
+const connectFoundationRole = async ({ Client, role }) => {
+  const client = new Client({
+    host: "127.0.0.1",
+    port: 54322,
+    database: "postgres",
+    user: role,
+    password: FOUNDATION_ROLE_PASSWORDS[role],
+    ssl: false,
+    connectionTimeoutMillis: 10_000,
+    statement_timeout: 15_000,
+    application_name: `foundation-disposable-${role}`,
+  });
+  await client.connect();
+  return client;
+};
+
+const connectManagedAdministrator = async ({ Client }) => {
+  const client = new Client({
+    host: "127.0.0.1",
+    port: 54322,
+    database: "postgres",
+    user: "supabase_admin",
+    password: "postgres",
+    ssl: false,
+    connectionTimeoutMillis: 10_000,
+    statement_timeout: 15_000,
+    application_name: "foundation-disposable-managed-administrator",
+  });
+  await client.connect();
+  return client;
+};
+
+const observerRelationAuthority = ({
+  object_name,
+  select = false,
+  insert = false,
+  update = false,
+  delete: canDelete = false,
+  truncate = false,
+  references = false,
+  trigger = false,
+  maintain = false,
+}) =>
+  Object.freeze({
+    object_name,
+    observer_select: select,
+    observer_insert: insert,
+    observer_update: update,
+    observer_delete: canDelete,
+    observer_truncate: truncate,
+    observer_references: references,
+    observer_trigger: trigger,
+    observer_maintain: maintain,
+    observer_select_grantable: false,
+    observer_insert_grantable: false,
+    observer_update_grantable: false,
+    observer_delete_grantable: false,
+    observer_truncate_grantable: false,
+    observer_references_grantable: false,
+    observer_trigger_grantable: false,
+    observer_maintain_grantable: false,
+    observer_column_select: select,
+    observer_column_insert: insert,
+    observer_column_update: update,
+    observer_column_references: references,
+    observer_column_select_grantable: false,
+    observer_column_insert_grantable: false,
+    observer_column_update_grantable: false,
+    observer_column_references_grantable: false,
+  });
+const EXPECTED_OBSERVER_RELATIONS = Object.freeze([
+  observerRelationAuthority({ object_name: "cron.job", select: true }),
+  observerRelationAuthority({
+    object_name: "cron.job_run_details",
+    delete: true,
+    select: true,
+  }),
+  observerRelationAuthority({
+    object_name: "extensions.pg_stat_statements",
+    select: true,
+  }),
+  observerRelationAuthority({
+    object_name: "extensions.pg_stat_statements_info",
+    select: true,
+  }),
+  observerRelationAuthority({
+    object_name: "net._http_response",
+    delete: true,
+    insert: true,
+    maintain: true,
+    references: true,
+    select: true,
+    trigger: true,
+    truncate: true,
+    update: true,
+  }),
+  observerRelationAuthority({
+    object_name: "net.http_request_queue",
+    delete: true,
+    insert: true,
+    maintain: true,
+    references: true,
+    select: true,
+    trigger: true,
+    truncate: true,
+    update: true,
+  }),
+  observerRelationAuthority({
+    object_name: "supabase_migrations.schema_migrations",
+    select: true,
+  }),
+]);
+const EXPECTED_OBSERVER_SEQUENCES = Object.freeze([
+  Object.freeze({
+    object_name: "net.http_request_queue_id_seq",
+    observer_select: true,
+    observer_select_grantable: false,
+    observer_update: true,
+    observer_update_grantable: false,
+    observer_usage: true,
+    observer_usage_grantable: false,
+  }),
+]);
+const EXPECTED_OBSERVER_SCHEMAS = Object.freeze([
+  Object.freeze({
+    object_name: "net",
+    observer_create: false,
+    observer_create_grantable: false,
+    observer_usage: true,
+    observer_usage_grantable: false,
+  }),
+  Object.freeze({
+    object_name: "public",
+    observer_create: false,
+    observer_create_grantable: false,
+    observer_usage: true,
+    observer_usage_grantable: false,
+  }),
+  Object.freeze({
+    object_name: "supabase_migrations",
+    observer_create: false,
+    observer_create_grantable: false,
+    observer_usage: true,
+    observer_usage_grantable: false,
+  }),
+]);
+const OBSERVER_RELATION_PRIVILEGE_FIELDS = Object.freeze([
+  Object.freeze(["DELETE", "observer_delete"]),
+  Object.freeze(["INSERT", "observer_insert"]),
+  Object.freeze(["MAINTAIN", "observer_maintain"]),
+  Object.freeze(["REFERENCES", "observer_references"]),
+  Object.freeze(["SELECT", "observer_select"]),
+  Object.freeze(["TRIGGER", "observer_trigger"]),
+  Object.freeze(["TRUNCATE", "observer_truncate"]),
+  Object.freeze(["UPDATE", "observer_update"]),
+]);
+const OBSERVER_COLUMN_PRIVILEGE_FIELDS = Object.freeze([
+  Object.freeze(["INSERT", "observer_column_insert"]),
+  Object.freeze(["REFERENCES", "observer_column_references"]),
+  Object.freeze(["SELECT", "observer_column_select"]),
+  Object.freeze(["UPDATE", "observer_column_update"]),
+]);
+const OBSERVER_SEQUENCE_PRIVILEGE_FIELDS = Object.freeze([
+  Object.freeze(["SELECT", "observer_select"]),
+  Object.freeze(["UPDATE", "observer_update"]),
+  Object.freeze(["USAGE", "observer_usage"]),
+]);
+const isProviderManagedObject = (objectName) =>
+  PROVIDER_MANAGED_SCHEMAS.includes(objectName.split(".", 1)[0]);
+assert.deepEqual(
+  dbCompatibilityContract.remote.observerManagedSchemas,
+  PROVIDER_MANAGED_SCHEMAS,
+);
+assert.deepEqual(
+  dbCompatibilityContract.remote.observerManagedSchemaUsage,
+  EXPECTED_OBSERVER_SCHEMAS.filter(
+    ({ object_name: objectName, observer_usage: observerUsage }) =>
+      observerUsage && PROVIDER_MANAGED_SCHEMAS.includes(objectName),
+  ).map(({ object_name: objectName }) => objectName),
+);
+assert.deepEqual(
+  dbCompatibilityContract.remote.observerManagedRelationPrivilegeBaseline,
+  EXPECTED_OBSERVER_RELATIONS.filter(({ object_name: objectName }) =>
+    isProviderManagedObject(objectName),
+  ).map((authority) => ({
+    objectName: authority.object_name,
+    columnPrivileges: OBSERVER_COLUMN_PRIVILEGE_FIELDS.filter(
+      ([, field]) => authority[field],
+    ).map(([privilege]) => privilege),
+    privileges: OBSERVER_RELATION_PRIVILEGE_FIELDS.filter(
+      ([, field]) => authority[field],
+    ).map(([privilege]) => privilege),
+  })),
+);
+assert.deepEqual(
+  dbCompatibilityContract.remote.observerManagedSequencePrivilegeBaseline,
+  EXPECTED_OBSERVER_SEQUENCES.filter(({ object_name: objectName }) =>
+    isProviderManagedObject(objectName),
+  ).map((authority) => ({
+    objectName: authority.object_name,
+    privileges: OBSERVER_SEQUENCE_PRIVILEGE_FIELDS.filter(
+      ([, field]) => authority[field],
+    ).map(([privilege]) => privilege),
+  })),
+);
+
+const readObserverIdentity = async (client) => {
+  const result = await client.query(
+    `select
+      current_user::text as role,
+      session_user::text as session_role,
+      current_setting('default_transaction_read_only') as read_only,
+      pg_catalog.has_database_privilege(
+        current_user, current_database(), 'CONNECT'
+      ) as database_connect,
+      pg_catalog.has_database_privilege(
+        current_user, current_database(), 'CONNECT WITH GRANT OPTION'
+      ) as database_connect_grantable,
+      pg_catalog.has_database_privilege(
+        current_user, current_database(), 'CREATE'
+      ) as database_create,
+      pg_catalog.has_database_privilege(
+        current_user, current_database(), 'CREATE WITH GRANT OPTION'
+      ) as database_create_grantable,
+      pg_catalog.has_database_privilege(
+        current_user, current_database(), 'TEMPORARY'
+      ) as database_temporary,
+      pg_catalog.has_database_privilege(
+        current_user, current_database(), 'TEMPORARY WITH GRANT OPTION'
+      ) as database_temporary_grantable`,
+  );
+  assert.equal(result.rowCount, 1);
+  return result.rows[0];
+};
+
+const readObserverRelationPrivileges = async (client) => {
+  const result = await client.query(`
+    with observed as (
+      select
+        namespace.nspname || '.' || relation.relname as object_name,
+        pg_catalog.has_table_privilege(
+          current_user, relation.oid, 'SELECT'
+        ) as observer_select,
+        pg_catalog.has_table_privilege(
+          current_user, relation.oid, 'INSERT'
+        ) as observer_insert,
+        pg_catalog.has_table_privilege(
+          current_user, relation.oid, 'UPDATE'
+        ) as observer_update,
+        pg_catalog.has_table_privilege(
+          current_user, relation.oid, 'DELETE'
+        ) as observer_delete,
+        pg_catalog.has_table_privilege(
+          current_user, relation.oid, 'TRUNCATE'
+        ) as observer_truncate,
+        pg_catalog.has_table_privilege(
+          current_user, relation.oid, 'REFERENCES'
+        ) as observer_references,
+        pg_catalog.has_table_privilege(
+          current_user, relation.oid, 'TRIGGER'
+        ) as observer_trigger,
+        pg_catalog.has_table_privilege(
+          current_user, relation.oid, 'MAINTAIN'
+        ) as observer_maintain,
+        pg_catalog.has_table_privilege(
+          current_user, relation.oid, 'SELECT WITH GRANT OPTION'
+        ) as observer_select_grantable,
+        pg_catalog.has_table_privilege(
+          current_user, relation.oid, 'INSERT WITH GRANT OPTION'
+        ) as observer_insert_grantable,
+        pg_catalog.has_table_privilege(
+          current_user, relation.oid, 'UPDATE WITH GRANT OPTION'
+        ) as observer_update_grantable,
+        pg_catalog.has_table_privilege(
+          current_user, relation.oid, 'DELETE WITH GRANT OPTION'
+        ) as observer_delete_grantable,
+        pg_catalog.has_table_privilege(
+          current_user, relation.oid, 'TRUNCATE WITH GRANT OPTION'
+        ) as observer_truncate_grantable,
+        pg_catalog.has_table_privilege(
+          current_user, relation.oid, 'REFERENCES WITH GRANT OPTION'
+        ) as observer_references_grantable,
+        pg_catalog.has_table_privilege(
+          current_user, relation.oid, 'TRIGGER WITH GRANT OPTION'
+        ) as observer_trigger_grantable,
+        pg_catalog.has_table_privilege(
+          current_user, relation.oid, 'MAINTAIN WITH GRANT OPTION'
+        ) as observer_maintain_grantable,
+        pg_catalog.has_any_column_privilege(
+          current_user, relation.oid, 'SELECT'
+        ) as observer_column_select,
+        pg_catalog.has_any_column_privilege(
+          current_user, relation.oid, 'INSERT'
+        ) as observer_column_insert,
+        pg_catalog.has_any_column_privilege(
+          current_user, relation.oid, 'UPDATE'
+        ) as observer_column_update,
+        pg_catalog.has_any_column_privilege(
+          current_user, relation.oid, 'REFERENCES'
+        ) as observer_column_references,
+        pg_catalog.has_any_column_privilege(
+          current_user, relation.oid, 'SELECT WITH GRANT OPTION'
+        ) as observer_column_select_grantable,
+        pg_catalog.has_any_column_privilege(
+          current_user, relation.oid, 'INSERT WITH GRANT OPTION'
+        ) as observer_column_insert_grantable,
+        pg_catalog.has_any_column_privilege(
+          current_user, relation.oid, 'UPDATE WITH GRANT OPTION'
+        ) as observer_column_update_grantable,
+        pg_catalog.has_any_column_privilege(
+          current_user, relation.oid, 'REFERENCES WITH GRANT OPTION'
+        ) as observer_column_references_grantable
+      from pg_catalog.pg_class relation
+      join pg_catalog.pg_namespace namespace
+        on namespace.oid = relation.relnamespace
+      where relation.relkind in ('r', 'p', 'v', 'm', 'f')
+        and namespace.nspname not like 'pg\\_%' escape '\\'
+        and namespace.nspname <> 'information_schema'
+    )
+    select *
+    from observed
+    where observer_select
+      or observer_insert
+      or observer_update
+      or observer_delete
+      or observer_truncate
+      or observer_references
+      or observer_trigger
+      or observer_maintain
+      or observer_select_grantable
+      or observer_insert_grantable
+      or observer_update_grantable
+      or observer_delete_grantable
+      or observer_truncate_grantable
+      or observer_references_grantable
+      or observer_trigger_grantable
+      or observer_maintain_grantable
+      or observer_column_select
+      or observer_column_insert
+      or observer_column_update
+      or observer_column_references
+      or observer_column_select_grantable
+      or observer_column_insert_grantable
+      or observer_column_update_grantable
+      or observer_column_references_grantable
+    order by object_name
+  `);
+  return result.rows;
+};
+
+const readObserverExecutableFunctions = async (client) => {
+  const result = await client.query({
+    text: `select
+      namespace.nspname || '.' || function_definition.proname || '(' ||
+        pg_catalog.oidvectortypes(function_definition.proargtypes) || ')'
+        as function_signature,
+      pg_catalog.has_function_privilege(
+        current_user, function_definition.oid, 'EXECUTE'
+      ) as observer_execute,
+      pg_catalog.has_function_privilege(
+        current_user,
+        function_definition.oid,
+        'EXECUTE WITH GRANT OPTION'
+      ) as observer_execute_grantable,
+      pg_catalog.pg_get_userbyid(function_definition.proowner)
+        as function_owner,
+      language.lanname as function_language,
+      pg_catalog.pg_get_function_result(function_definition.oid)
+        as function_result,
+      pg_catalog.encode(
+        pg_catalog.sha256(
+          pg_catalog.convert_to(
+            pg_catalog.pg_get_functiondef(function_definition.oid), 'UTF8'
+          )
+        ),
+        'hex'
+      ) as definition_sha256
+    from pg_catalog.pg_proc function_definition
+    join pg_catalog.pg_namespace namespace
+      on namespace.oid = function_definition.pronamespace
+    join pg_catalog.pg_language language
+      on language.oid = function_definition.prolang
+    where namespace.nspname not like 'pg\\_%' escape '\\'
+      and namespace.nspname <> 'information_schema'
+      and namespace.nspname <> all($1::text[])
+      and (
+        pg_catalog.has_function_privilege(
+          current_user, function_definition.oid, 'EXECUTE'
+        )
+        or pg_catalog.has_function_privilege(
+          current_user,
+          function_definition.oid,
+          'EXECUTE WITH GRANT OPTION'
+        )
+      )
+    order by function_signature`,
+    values: [PROVIDER_MANAGED_SCHEMAS],
+  });
+  return result.rows;
+};
+
+const readObserverManagedDirectFunctions = async (client) => {
+  const result = await client.query({
+    text: `select
+      namespace.nspname || '.' || function_definition.proname || '(' ||
+        pg_catalog.oidvectortypes(function_definition.proargtypes) || ')'
+        as function_signature,
+      function_acl.is_grantable as observer_execute_grantable
+    from pg_catalog.pg_proc function_definition
+    join pg_catalog.pg_namespace namespace
+      on namespace.oid = function_definition.pronamespace
+    cross join lateral pg_catalog.aclexplode(
+      coalesce(
+        function_definition.proacl,
+        pg_catalog.acldefault('f', function_definition.proowner)
+      )
+    ) function_acl
+    where namespace.nspname = any($1::text[])
+      and function_acl.grantee = (
+        select roles.oid
+        from pg_catalog.pg_roles roles
+        where roles.rolname = current_user
+      )
+      and function_acl.privilege_type = 'EXECUTE'
+    order by function_signature`,
+    values: [PROVIDER_MANAGED_SCHEMAS],
+  });
+  return result.rows;
+};
+
+const readObserverSequencePrivileges = async (client) => {
+  const result = await client.query(`
+    with observed as (
+      select
+        namespace.nspname || '.' || sequence_definition.relname
+          as object_name,
+        pg_catalog.has_sequence_privilege(
+          current_user, sequence_definition.oid, 'USAGE'
+        ) as observer_usage,
+        pg_catalog.has_sequence_privilege(
+          current_user, sequence_definition.oid, 'SELECT'
+        ) as observer_select,
+        pg_catalog.has_sequence_privilege(
+          current_user, sequence_definition.oid, 'UPDATE'
+        ) as observer_update,
+        pg_catalog.has_sequence_privilege(
+          current_user,
+          sequence_definition.oid,
+          'USAGE WITH GRANT OPTION'
+        ) as observer_usage_grantable,
+        pg_catalog.has_sequence_privilege(
+          current_user,
+          sequence_definition.oid,
+          'SELECT WITH GRANT OPTION'
+        ) as observer_select_grantable,
+        pg_catalog.has_sequence_privilege(
+          current_user,
+          sequence_definition.oid,
+          'UPDATE WITH GRANT OPTION'
+        ) as observer_update_grantable
+      from pg_catalog.pg_class sequence_definition
+      join pg_catalog.pg_namespace namespace
+        on namespace.oid = sequence_definition.relnamespace
+      where sequence_definition.relkind = 'S'
+        and namespace.nspname not like 'pg\\_%' escape '\\'
+        and namespace.nspname <> 'information_schema'
+    )
+    select *
+    from observed
+    where observer_usage
+      or observer_select
+      or observer_update
+      or observer_usage_grantable
+      or observer_select_grantable
+      or observer_update_grantable
+    order by object_name
+  `);
+  return result.rows;
+};
+
+const readObserverSchemaPrivileges = async (client) => {
+  const result = await client.query(`with observed as (
+      select
+        namespace.nspname as object_name,
+        pg_catalog.has_schema_privilege(
+          current_user, namespace.oid, 'USAGE'
+        ) as observer_usage,
+        pg_catalog.has_schema_privilege(
+          current_user, namespace.oid, 'USAGE WITH GRANT OPTION'
+        ) as observer_usage_grantable,
+        pg_catalog.has_schema_privilege(
+          current_user, namespace.oid, 'CREATE'
+        ) as observer_create,
+        pg_catalog.has_schema_privilege(
+          current_user, namespace.oid, 'CREATE WITH GRANT OPTION'
+        ) as observer_create_grantable
+      from pg_catalog.pg_namespace namespace
+      where namespace.nspname not like 'pg\\_%' escape '\\'
+        and namespace.nspname <> 'information_schema'
+    )
+    select
+      object_name,
+      observer_usage,
+      observer_usage_grantable,
+      observer_create,
+      observer_create_grantable
+    from observed
+    where observer_create
+      or observer_create_grantable
+      or observer_usage
+      or observer_usage_grantable
+    order by object_name`);
+  return result.rows;
+};
+
+const readObserverDatabaseCreatePrivileges = async (client) => {
+  const result = await client.query(`
+    select database_definition.datname::text as database_name
+    from pg_catalog.pg_database database_definition
+    where pg_catalog.has_database_privilege(
+        current_user, database_definition.oid, 'CREATE'
+      )
+      or pg_catalog.has_database_privilege(
+        current_user,
+        database_definition.oid,
+        'CREATE WITH GRANT OPTION'
+      )
+    order by database_name
+  `);
+  return result.rows;
+};
+
+const assertExactObserverAuthorization = async (observer) => {
+  const identity = await readObserverIdentity(observer);
+  const relations = await readObserverRelationPrivileges(observer);
+  const functions = await readObserverExecutableFunctions(observer);
+  const managedDirectFunctions =
+    await readObserverManagedDirectFunctions(observer);
+  const sequences = await readObserverSequencePrivileges(observer);
+  const schemas = await readObserverSchemaPrivileges(observer);
+  const databaseCreatePrivileges =
+    await readObserverDatabaseCreatePrivileges(observer);
+  assert.deepEqual(identity, {
+    role: FOUNDATION_OBSERVER_ROLE,
+    session_role: FOUNDATION_OBSERVER_ROLE,
+    read_only: "on",
+    database_connect: true,
+    database_connect_grantable: false,
+    database_create: false,
+    database_create_grantable: false,
+    database_temporary: true,
+    database_temporary_grantable: false,
+  });
+  assert.deepEqual(relations, EXPECTED_OBSERVER_RELATIONS);
+  assert.deepEqual(functions, EXPECTED_OBSERVER_FUNCTIONS);
+  assert.deepEqual(managedDirectFunctions, []);
+  assert.deepEqual(sequences, EXPECTED_OBSERVER_SEQUENCES);
+  assert.deepEqual(schemas, EXPECTED_OBSERVER_SCHEMAS);
+  assert.deepEqual(databaseCreatePrivileges, []);
+};
+
+const readMigrationHistory = async (client) => {
+  const result = await client.query(`
+    select
+      version::text as version,
+      name::text as migration_name,
+      pg_catalog.cardinality(statements)::integer as statement_count,
+      pg_catalog.encode(
+        pg_catalog.sha256(
+          pg_catalog.convert_to(
+            coalesce(pg_catalog.array_to_string(statements, E'\\n'), ''),
+            'UTF8'
+          )
+        ),
+        'hex'
+      ) as statements_sha256
+    from supabase_migrations.schema_migrations
+    order by version
+  `);
+  return result.rows;
+};
+
+const expectedMigrationHistory = () => {
+  const history = dbCompatibilityContract?.remote?.migrationHistory;
+  if (!Array.isArray(history)) {
+    throw new Error("Disposable DB migration history contract is missing");
+  }
+  assert.deepEqual(
+    history.map(({ version }) => version),
+    REQUIRED_MIGRATION_VERSIONS,
+  );
+  return history.map(
+    ({ migrationName, statementCount, statementsSha256, version }) => ({
+      migration_name: migrationName,
+      statement_count: statementCount,
+      statements_sha256: statementsSha256,
+      version,
+    }),
+  );
+};
+
+const verifyExactMigrationHistory = async ({ administrator, observer }) => {
+  const expected = expectedMigrationHistory();
+  assert.deepEqual(await readMigrationHistory(observer), expected);
+
+  const futureVersion = "99999999999999";
+  try {
+    await administrator.query({
+      text: `
+      insert into supabase_migrations.schema_migrations (
+        version,
+        name,
+        statements
+      ) values (
+        $1,
+        'foundation_disposable_future_probe',
+        array['select 1']::text[]
+      )
+    `,
+      values: [futureVersion],
+    });
+    assert.notDeepEqual(await readMigrationHistory(observer), expected);
+  } finally {
+    await administrator.query({
+      text: `delete from supabase_migrations.schema_migrations
+        where version = $1`,
+      values: [futureVersion],
+    });
+  }
+  assert.deepEqual(await readMigrationHistory(observer), expected);
+};
+
+const readApplicationObjectMetadata = async (client) => {
+  const requiredTables = [CSP_TABLE, METRICS_TABLE];
+  const requiredFunctions = REQUIRED_FUNCTION_AUTHORITIES.map(
+    ({ qualified_name: qualifiedName }) => qualifiedName,
+  );
+  const relations = await client.query({
+    text: `select
+          namespace.nspname || '.' || relation.relname as object_name,
+          relation.relkind::text as relation_kind,
+          relation.relrowsecurity as row_security,
+          relation.relforcerowsecurity as force_row_security,
+          relation.relpersistence::text as persistence,
+          relation.relreplident::text as replica_identity,
+          pg_catalog.pg_get_userbyid(relation.relowner) as relation_owner
+        from pg_catalog.pg_class relation
+        join pg_catalog.pg_namespace namespace
+          on namespace.oid = relation.relnamespace
+        where namespace.nspname || '.' || relation.relname = any($1::text[])
+        order by object_name`,
+    values: [requiredTables],
+  });
+  const columns = await client.query({
+    text: `select
+          namespace.nspname || '.' || relation.relname || '.' ||
+            attribute.attname as object_name,
+          attribute.attnum::integer as ordinal,
+          pg_catalog.format_type(
+            attribute.atttypid, attribute.atttypmod
+          ) as data_type,
+          attribute.attnotnull as not_null,
+          attribute.attidentity::text as identity,
+          attribute.attgenerated::text as generated,
+          pg_catalog.pg_get_expr(
+            default_definition.adbin, default_definition.adrelid
+          ) as default_expression
+        from pg_catalog.pg_attribute attribute
+        join pg_catalog.pg_class relation on relation.oid = attribute.attrelid
+        join pg_catalog.pg_namespace namespace
+          on namespace.oid = relation.relnamespace
+        left join pg_catalog.pg_attrdef default_definition
+          on default_definition.adrelid = attribute.attrelid
+          and default_definition.adnum = attribute.attnum
+        where namespace.nspname || '.' || relation.relname = any($1::text[])
+          and attribute.attnum > 0
+          and not attribute.attisdropped
+        order by namespace.nspname, relation.relname, attribute.attnum`,
+    values: [requiredTables],
+  });
+  const constraints = await client.query({
+    text: `select
+          namespace.nspname || '.' || relation.relname as object_name,
+          constraint_definition.conname::text as constraint_name,
+          constraint_definition.contype::text as constraint_type,
+          constraint_definition.convalidated as validated,
+          pg_catalog.encode(
+            pg_catalog.sha256(
+              pg_catalog.convert_to(
+                pg_catalog.pg_get_constraintdef(
+                  constraint_definition.oid, true
+                ),
+                'UTF8'
+              )
+            ),
+            'hex'
+          ) as definition_sha256
+        from pg_catalog.pg_constraint constraint_definition
+        join pg_catalog.pg_class relation
+          on relation.oid = constraint_definition.conrelid
+        join pg_catalog.pg_namespace namespace
+          on namespace.oid = relation.relnamespace
+        where namespace.nspname || '.' || relation.relname = any($1::text[])
+        order by object_name, constraint_name`,
+    values: [requiredTables],
+  });
+  const policies = await client.query({
+    text: `select policy.polname::text as policy_name
+        from pg_catalog.pg_policy policy
+        join pg_catalog.pg_class relation on relation.oid = policy.polrelid
+        join pg_catalog.pg_namespace namespace
+          on namespace.oid = relation.relnamespace
+        where namespace.nspname || '.' || relation.relname = any($1::text[])
+        order by namespace.nspname, relation.relname, policy_name`,
+    values: [requiredTables],
+  });
+  const triggers = await client.query({
+    text: `select
+          namespace.nspname || '.' || relation.relname as object_name,
+          trigger_definition.tgname::text as trigger_name,
+          trigger_definition.tgisinternal as internal,
+          trigger_definition.tgenabled::text as enabled,
+          pg_catalog.encode(
+            pg_catalog.sha256(
+              pg_catalog.convert_to(
+                pg_catalog.pg_get_triggerdef(trigger_definition.oid, true),
+                'UTF8'
+              )
+            ),
+            'hex'
+          ) as definition_sha256
+        from pg_catalog.pg_trigger trigger_definition
+        join pg_catalog.pg_class relation
+          on relation.oid = trigger_definition.tgrelid
+        join pg_catalog.pg_namespace namespace
+          on namespace.oid = relation.relnamespace
+        where namespace.nspname || '.' || relation.relname = any($1::text[])
+        order by object_name, trigger_name`,
+    values: [requiredTables],
+  });
+  const functions = await client.query({
+    text: `select
+          namespace.nspname || '.' || function_definition.proname
+            as qualified_name,
+          pg_catalog.oidvectortypes(function_definition.proargtypes)
+            as identity_arguments,
+          function_definition.prosecdef as security_definer,
+          function_definition.proconfig as configuration,
+          pg_catalog.pg_get_userbyid(function_definition.proowner)
+            as function_owner,
+          language.lanname as function_language,
+          pg_catalog.pg_get_function_result(function_definition.oid)
+            as function_result,
+          function_definition.proleakproof as leakproof,
+          function_definition.provolatile::text as volatility,
+          function_definition.proparallel::text as parallel,
+          function_definition.proisstrict as strict,
+          pg_catalog.encode(
+            pg_catalog.sha256(
+              pg_catalog.convert_to(
+                pg_catalog.pg_get_functiondef(function_definition.oid),
+                'UTF8'
+              )
+            ),
+            'hex'
+          ) as definition_sha256
+        from pg_catalog.pg_proc function_definition
+        join pg_catalog.pg_namespace namespace
+          on namespace.oid = function_definition.pronamespace
+        join pg_catalog.pg_language language
+          on language.oid = function_definition.prolang
+        where namespace.nspname || '.' || function_definition.proname =
+          any($1::text[])
+        order by qualified_name, identity_arguments`,
+    values: [requiredFunctions],
+  });
+  const functionRows = functions.rows.map(({ configuration, ...authority }) => {
+    assert.deepEqual(configuration, ["search_path=pg_catalog, public"]);
+    return authority;
+  });
+  return {
+    columns: columns.rows,
+    constraints: constraints.rows,
+    functions: functionRows,
+    policies: policies.rows,
+    relations: relations.rows,
+    triggers: triggers.rows,
+  };
+};
+
+const verifyApplicationObjectMetadata = async (administrator) => {
+  const metadata = await readApplicationObjectMetadata(administrator);
+  assert.deepEqual(metadata.relations, REQUIRED_RELATION_AUTHORITIES);
+  assert.deepEqual(metadata.columns, REQUIRED_COLUMN_AUTHORITIES);
+  assert.deepEqual(metadata.constraints, REQUIRED_CONSTRAINT_AUTHORITIES);
+  assert.deepEqual(metadata.functions, REQUIRED_FUNCTION_AUTHORITIES);
+  assert.deepEqual(metadata.policies, []);
+  assert.deepEqual(metadata.triggers, []);
+
+  await administrator.query("begin");
+  try {
+    await administrator.query(`
+      alter table ${CSP_TABLE}
+        drop constraint csp_violation_reports_disposition_check;
+      alter table ${CSP_TABLE}
+        add constraint csp_violation_reports_disposition_check
+        check (
+          disposition in ('enforce', 'report', 'unknown')
+          and pg_catalog.length(disposition) > 0
+        );
+    `);
+    const mutated = await readApplicationObjectMetadata(administrator);
+    assert.notDeepEqual(mutated.constraints, REQUIRED_CONSTRAINT_AUTHORITIES);
+  } finally {
+    await administrator.query("rollback");
+  }
+
+  await administrator.query("begin");
+  try {
+    await administrator.query(`
+      create or replace function public.read_csp_violation_aggregates(
+        requested_from timestamptz,
+        requested_to timestamptz,
+        requested_limit integer default 1000
+      )
+      returns table (
+        source_sha text,
+        effective_directive text,
+        disposition text,
+        blocked_target text,
+        violation_count bigint,
+        first_received_at timestamptz,
+        last_received_at timestamptz
+      )
+      language plpgsql
+      security definer
+      set search_path = pg_catalog, public
+      as $function$
+      begin
+        return;
+      end;
+      $function$;
+    `);
+    const mutated = await readApplicationObjectMetadata(administrator);
+    assert.notDeepEqual(mutated.functions, REQUIRED_FUNCTION_AUTHORITIES);
+  } finally {
+    await administrator.query("rollback");
+  }
+  const restored = await readApplicationObjectMetadata(administrator);
+  assert.deepEqual(restored.constraints, REQUIRED_CONSTRAINT_AUTHORITIES);
+  assert.deepEqual(restored.functions, REQUIRED_FUNCTION_AUTHORITIES);
+};
+
+const readServiceRoleTablePrivileges = async (client) => {
+  const result = await client.query({
+    text: `select
+      requested.object_name,
+      pg_catalog.has_table_privilege(
+        'service_role', requested.object_name, 'SELECT'
+      ) as service_select,
+      pg_catalog.has_any_column_privilege(
+        'service_role', requested.object_name, 'SELECT'
+      ) as service_column_select,
+      pg_catalog.has_table_privilege(
+        'service_role', requested.object_name, 'INSERT'
+      ) as service_insert,
+      pg_catalog.has_any_column_privilege(
+        'service_role', requested.object_name, 'INSERT'
+      ) as service_column_insert,
+      pg_catalog.has_table_privilege(
+        'service_role', requested.object_name, 'UPDATE'
+      ) as service_update,
+      pg_catalog.has_table_privilege(
+        'service_role', requested.object_name, 'DELETE'
+      ) as service_delete,
+      pg_catalog.has_table_privilege(
+        'service_role', requested.object_name, 'TRUNCATE'
+      ) as service_truncate,
+      pg_catalog.has_table_privilege(
+        'service_role', requested.object_name, 'REFERENCES'
+      ) as service_references,
+      pg_catalog.has_table_privilege(
+        'service_role', requested.object_name, 'TRIGGER'
+      ) as service_trigger,
+      pg_catalog.has_table_privilege(
+        'service_role', requested.object_name, 'MAINTAIN'
+      ) as service_maintain,
+      pg_catalog.has_table_privilege(
+        'service_role', requested.object_name, 'SELECT WITH GRANT OPTION'
+      ) as service_select_grantable,
+      pg_catalog.has_table_privilege(
+        'service_role', requested.object_name, 'INSERT WITH GRANT OPTION'
+      ) as service_insert_grantable,
+      pg_catalog.has_table_privilege(
+        'service_role', requested.object_name, 'UPDATE WITH GRANT OPTION'
+      ) as service_update_grantable,
+      pg_catalog.has_table_privilege(
+        'service_role', requested.object_name, 'DELETE WITH GRANT OPTION'
+      ) as service_delete_grantable,
+      pg_catalog.has_table_privilege(
+        'service_role', requested.object_name, 'TRUNCATE WITH GRANT OPTION'
+      ) as service_truncate_grantable,
+      pg_catalog.has_table_privilege(
+        'service_role', requested.object_name, 'REFERENCES WITH GRANT OPTION'
+      ) as service_references_grantable,
+      pg_catalog.has_table_privilege(
+        'service_role', requested.object_name, 'TRIGGER WITH GRANT OPTION'
+      ) as service_trigger_grantable,
+      pg_catalog.has_table_privilege(
+        'service_role', requested.object_name, 'MAINTAIN WITH GRANT OPTION'
+      ) as service_maintain_grantable,
+      pg_catalog.has_any_column_privilege(
+        'service_role', requested.object_name, 'SELECT WITH GRANT OPTION'
+      ) as service_column_select_grantable,
+      pg_catalog.has_any_column_privilege(
+        'service_role', requested.object_name, 'INSERT WITH GRANT OPTION'
+      ) as service_column_insert_grantable,
+      pg_catalog.has_any_column_privilege(
+        'service_role', requested.object_name, 'UPDATE'
+      ) as service_column_update,
+      pg_catalog.has_any_column_privilege(
+        'service_role', requested.object_name, 'UPDATE WITH GRANT OPTION'
+      ) as service_column_update_grantable,
+      pg_catalog.has_any_column_privilege(
+        'service_role', requested.object_name, 'REFERENCES'
+      ) as service_column_references,
+      pg_catalog.has_any_column_privilege(
+        'service_role', requested.object_name, 'REFERENCES WITH GRANT OPTION'
+      ) as service_column_references_grantable
+    from unnest($1::text[]) as requested(object_name)
+    order by requested.object_name`,
+    values: [[CSP_TABLE, METRICS_TABLE]],
+  });
+  return result.rows;
+};
+
+const expectedServiceRoleTablePrivileges = (object_name) => ({
+  object_name,
+  service_select: false,
+  service_column_select: false,
+  service_insert: true,
+  service_column_insert: true,
+  service_update: false,
+  service_delete: false,
+  service_truncate: false,
+  service_references: false,
+  service_trigger: false,
+  service_maintain: false,
+  service_select_grantable: false,
+  service_insert_grantable: false,
+  service_update_grantable: false,
+  service_delete_grantable: false,
+  service_truncate_grantable: false,
+  service_references_grantable: false,
+  service_trigger_grantable: false,
+  service_maintain_grantable: false,
+  service_column_select_grantable: false,
+  service_column_insert_grantable: false,
+  service_column_update: false,
+  service_column_update_grantable: false,
+  service_column_references: false,
+  service_column_references_grantable: false,
+});
+const EXPECTED_SERVICE_ROLE_TABLE_PRIVILEGES = Object.freeze([
+  Object.freeze(expectedServiceRoleTablePrivileges(CSP_TABLE)),
+  Object.freeze(expectedServiceRoleTablePrivileges(METRICS_TABLE)),
+]);
+
+const readServiceRoleSequencePrivileges = async (client) => {
+  const result = await client.query({
+    text: `select
+      requested.object_name,
+      pg_catalog.has_sequence_privilege(
+        'service_role', requested.object_name, 'USAGE'
+      ) as service_usage,
+      pg_catalog.has_sequence_privilege(
+        'service_role', requested.object_name, 'SELECT'
+      ) as service_select,
+      pg_catalog.has_sequence_privilege(
+        'service_role', requested.object_name, 'UPDATE'
+      ) as service_update,
+      pg_catalog.has_sequence_privilege(
+        'service_role',
+        requested.object_name,
+        'USAGE WITH GRANT OPTION'
+      ) as service_usage_grantable,
+      pg_catalog.has_sequence_privilege(
+        'service_role',
+        requested.object_name,
+        'SELECT WITH GRANT OPTION'
+      ) as service_select_grantable,
+      pg_catalog.has_sequence_privilege(
+        'service_role',
+        requested.object_name,
+        'UPDATE WITH GRANT OPTION'
+      ) as service_update_grantable
+    from unnest($1::text[]) as requested(object_name)
+    order by requested.object_name`,
+    values: [[CSP_SEQUENCE, METRICS_SEQUENCE]],
+  });
+  return result.rows;
+};
+
+const expectedServiceRoleSequencePrivileges = (object_name) => ({
+  object_name,
+  service_select: false,
+  service_select_grantable: false,
+  service_update: false,
+  service_update_grantable: false,
+  service_usage: true,
+  service_usage_grantable: false,
+});
+const EXPECTED_SERVICE_ROLE_SEQUENCE_PRIVILEGES = Object.freeze([
+  Object.freeze(expectedServiceRoleSequencePrivileges(CSP_SEQUENCE)),
+  Object.freeze(expectedServiceRoleSequencePrivileges(METRICS_SEQUENCE)),
+]);
+
+const verifyServiceRoleAuthority = async (administrator) => {
+  assert.deepEqual(
+    await readServiceRoleTablePrivileges(administrator),
+    EXPECTED_SERVICE_ROLE_TABLE_PRIVILEGES,
+  );
+  assert.deepEqual(
+    await readServiceRoleSequencePrivileges(administrator),
+    EXPECTED_SERVICE_ROLE_SEQUENCE_PRIVILEGES,
+  );
+
+  await administrator.query(
+    `grant select (id) on table ${METRICS_TABLE} to service_role`,
+  );
+  try {
+    const mutated = await readServiceRoleTablePrivileges(administrator);
+    const metrics = mutated.find(
+      ({ object_name: name }) => name === METRICS_TABLE,
+    );
+    assert.equal(metrics?.service_select, false);
+    assert.equal(metrics?.service_column_select, true);
+    assert.notDeepEqual(mutated, EXPECTED_SERVICE_ROLE_TABLE_PRIVILEGES);
+  } finally {
+    await administrator.query(
+      `revoke select (id) on table ${METRICS_TABLE} from service_role`,
+    );
+  }
+  assert.deepEqual(
+    await readServiceRoleTablePrivileges(administrator),
+    EXPECTED_SERVICE_ROLE_TABLE_PRIVILEGES,
+  );
+};
+
+const CSP_ROUTINE_SIGNATURES = Object.freeze([
+  "public.read_csp_deployment_violation_aggregates(timestamp with time zone, timestamp with time zone, text, text, integer)",
+  "public.read_csp_violation_aggregates(timestamp with time zone, timestamp with time zone, integer)",
+  "public.retain_csp_violation_reports(boolean, integer, integer)",
+]);
+
+const readCspDormantAuthority = async (client) => {
+  const result = await client.query({
+    text: `with requested_principals as (
+      select principal
+      from unnest($1::text[]) as requested(principal)
+    ),
+    requested_routines as (
+      select signature, pg_catalog.to_regprocedure(signature) as routine_oid
+      from unnest($2::text[]) as requested(signature)
+    ),
+    public_relation_acl as (
+      select
+        'PUBLIC'::text as principal,
+        case when relation.relkind = 'S' then 'sequence' else 'table' end
+          as object_type,
+        namespace.nspname || '.' || relation.relname as object_name,
+        relation_acl.privilege_type::text as privilege,
+        relation_acl.is_grantable as grantable
+      from pg_catalog.pg_class relation
+      join pg_catalog.pg_namespace namespace
+        on namespace.oid = relation.relnamespace
+      cross join lateral pg_catalog.aclexplode(
+        coalesce(
+          relation.relacl,
+          pg_catalog.acldefault(
+            case
+              when relation.relkind = 'S' then 'S'::"char"
+              else 'r'::"char"
+            end,
+            relation.relowner
+          )
+        )
+      ) relation_acl
+      where namespace.nspname = 'public'
+        and relation.relname in (
+          'csp_violation_reports',
+          'csp_violation_reports_id_seq'
+        )
+        and relation_acl.grantee = 0
+    ),
+    public_column_acl as (
+      select
+        'PUBLIC'::text as principal,
+        'column'::text as object_type,
+        namespace.nspname || '.' || relation.relname || '.' ||
+          attribute.attname as object_name,
+        column_acl.privilege_type::text as privilege,
+        column_acl.is_grantable as grantable
+      from pg_catalog.pg_attribute attribute
+      join pg_catalog.pg_class relation on relation.oid = attribute.attrelid
+      join pg_catalog.pg_namespace namespace
+        on namespace.oid = relation.relnamespace
+      cross join lateral pg_catalog.aclexplode(
+        attribute.attacl
+      ) column_acl
+      where namespace.nspname = 'public'
+        and relation.relname = 'csp_violation_reports'
+        and attribute.attnum > 0
+        and not attribute.attisdropped
+        and column_acl.grantee = 0
+    ),
+    public_routine_acl as (
+      select
+        'PUBLIC'::text as principal,
+        'routine'::text as object_type,
+        requested.signature as object_name,
+        routine_acl.privilege_type::text as privilege,
+        routine_acl.is_grantable as grantable
+      from requested_routines requested
+      join pg_catalog.pg_proc routine on routine.oid = requested.routine_oid
+      cross join lateral pg_catalog.aclexplode(
+        coalesce(
+          routine.proacl,
+          pg_catalog.acldefault('f'::"char", routine.proowner)
+        )
+      ) routine_acl
+      where routine_acl.grantee = 0
+    ),
+    effective_principal_authority as (
+      select
+        requested.principal,
+        'table'::text as object_type,
+        $3::text as object_name,
+        privilege.name as privilege,
+        pg_catalog.has_table_privilege(
+          requested.principal, $3::text, privilege.name
+        ) as granted,
+        pg_catalog.has_table_privilege(
+          requested.principal,
+          $3::text,
+          privilege.name || ' WITH GRANT OPTION'
+        ) as grantable
+      from requested_principals requested
+      cross join (values
+        ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'),
+        ('REFERENCES'), ('TRIGGER'), ('MAINTAIN')
+      ) privilege(name)
+      union all
+      select
+        requested.principal,
+        'column'::text,
+        $3::text,
+        privilege.name,
+        pg_catalog.has_any_column_privilege(
+          requested.principal, $3::text, privilege.name
+        ),
+        pg_catalog.has_any_column_privilege(
+          requested.principal,
+          $3::text,
+          privilege.name || ' WITH GRANT OPTION'
+        )
+      from requested_principals requested
+      cross join (values
+        ('SELECT'), ('INSERT'), ('UPDATE'), ('REFERENCES')
+      ) privilege(name)
+      union all
+      select
+        requested.principal,
+        'sequence'::text,
+        $4::text,
+        privilege.name,
+        pg_catalog.has_sequence_privilege(
+          requested.principal, $4::text, privilege.name
+        ),
+        pg_catalog.has_sequence_privilege(
+          requested.principal,
+          $4::text,
+          privilege.name || ' WITH GRANT OPTION'
+        )
+      from requested_principals requested
+      cross join (values ('USAGE'), ('SELECT'), ('UPDATE')) privilege(name)
+      union all
+      select
+        requested.principal,
+        'routine'::text,
+        routine.signature,
+        'EXECUTE'::text,
+        pg_catalog.has_function_privilege(
+          requested.principal, routine.routine_oid, 'EXECUTE'
+        ),
+        pg_catalog.has_function_privilege(
+          requested.principal,
+          routine.routine_oid,
+          'EXECUTE WITH GRANT OPTION'
+        )
+      from requested_principals requested
+      cross join requested_routines routine
+    )
+    select principal, object_type, object_name, privilege, grantable
+    from public_relation_acl
+    union all
+    select principal, object_type, object_name, privilege, grantable
+    from public_column_acl
+    union all
+    select principal, object_type, object_name, privilege, grantable
+    from public_routine_acl
+    union all
+    select principal, object_type, object_name, privilege, grantable
+    from effective_principal_authority
+    where granted or grantable
+    order by principal, object_type, object_name, privilege, grantable`,
+    values: [
+      ["anon", "authenticated"],
+      CSP_ROUTINE_SIGNATURES,
+      CSP_TABLE,
+      CSP_SEQUENCE,
+    ],
+  });
+  return result.rows;
+};
+
+const readCspPolicies = async (client) => {
+  const result = await client.query(`
+    select policy.polname::text as policy_name
+    from pg_catalog.pg_policy policy
+    where policy.polrelid = pg_catalog.to_regclass('${CSP_TABLE}')
+    order by policy_name
+  `);
+  return result.rows;
+};
+
+const verifyCspDormantAuthority = async (administrator) => {
+  const assertClosed = async () => {
+    assert.deepEqual(await readCspDormantAuthority(administrator), []);
+    assert.deepEqual(await readCspPolicies(administrator), []);
+  };
+  const assertAuthorityDetected = async () => {
+    assert.ok((await readCspDormantAuthority(administrator)).length > 0);
+  };
+  await assertClosed();
+
+  await administrator.query(
+    `grant select (blocked_target) on table ${CSP_TABLE} to anon`,
+  );
+  try {
+    await assertAuthorityDetected();
+  } finally {
+    await administrator.query(
+      `revoke select (blocked_target) on table ${CSP_TABLE} from anon`,
+    );
+  }
+
+  await administrator.query(`grant select on table ${CSP_TABLE} to public`);
+  try {
+    await assertAuthorityDetected();
+  } finally {
+    await administrator.query(
+      `revoke select on table ${CSP_TABLE} from public`,
+    );
+  }
+
+  await administrator.query(
+    `grant usage on sequence ${CSP_SEQUENCE} to public`,
+  );
+  try {
+    await assertAuthorityDetected();
+  } finally {
+    await administrator.query(
+      `revoke usage on sequence ${CSP_SEQUENCE} from public`,
+    );
+  }
+
+  await administrator.query(`
+    grant execute on function public.read_csp_violation_aggregates(
+      timestamptz,
+      timestamptz,
+      integer
+    ) to public
+  `);
+  try {
+    await assertAuthorityDetected();
+  } finally {
+    await administrator.query(`
+      revoke execute on function public.read_csp_violation_aggregates(
+        timestamptz,
+        timestamptz,
+        integer
+      ) from public
+    `);
+  }
+
+  await administrator.query(`
+    create policy foundation_disposable_csp_public_probe
+      on ${CSP_TABLE}
+      for select
+      to public
+      using (true)
+  `);
+  try {
+    assert.deepEqual(await readCspPolicies(administrator), [
+      { policy_name: "foundation_disposable_csp_public_probe" },
+    ]);
+  } finally {
+    await administrator.query(`
+      drop policy foundation_disposable_csp_public_probe on ${CSP_TABLE}
+    `);
+  }
+  await assertClosed();
+};
+
+const verifyDisposableManagedRelationBaseline = async (observer) => {
+  assert.deepEqual(
+    await readObserverRelationPrivileges(observer),
+    EXPECTED_OBSERVER_RELATIONS,
+  );
+  assert.deepEqual(
+    await readObserverSequencePrivileges(observer),
+    EXPECTED_OBSERVER_SEQUENCES,
+  );
+};
+
+const verifyObserverMutationDetection = async ({
+  administrator,
+  managedAdministrator,
+  observer,
+}) => {
+  const probeTable = "public.foundation_observer_authority_probe";
+  const probeSequence = "public.foundation_observer_authority_probe_seq";
+  const probeFunction = "public.foundation_observer_authority_probe()";
+  const privateSchema = "foundation_observer_private_probe";
+  const unknownManagedTable =
+    "extensions.foundation_observer_unknown_table_probe";
+  const unknownManagedSequence =
+    "extensions.foundation_observer_unknown_sequence_probe";
+  const unknownManagedFunction =
+    "extensions.foundation_observer_unknown_function_probe()";
+  await administrator.query(`
+    create table ${probeTable} (id integer, payload text);
+    create sequence ${probeSequence};
+    create function ${probeFunction}
+      returns integer
+      language sql
+      as 'select 1';
+    create schema ${privateSchema};
+    create table ${privateSchema}.private_table (id integer);
+    create table ${unknownManagedTable} (id integer);
+    create sequence ${unknownManagedSequence};
+    create function ${unknownManagedFunction}
+      returns integer
+      language sql
+      as 'select 1';
+    revoke all on table ${probeTable} from public, ${FOUNDATION_OBSERVER_ROLE};
+    revoke all on sequence ${probeSequence}
+      from public, ${FOUNDATION_OBSERVER_ROLE};
+    revoke all on function ${probeFunction}
+      from public, ${FOUNDATION_OBSERVER_ROLE};
+    revoke all on schema ${privateSchema}
+      from public, ${FOUNDATION_OBSERVER_ROLE};
+    revoke all on table ${privateSchema}.private_table
+      from public, ${FOUNDATION_OBSERVER_ROLE};
+    revoke all on table ${unknownManagedTable}
+      from public, ${FOUNDATION_OBSERVER_ROLE};
+    revoke all on sequence ${unknownManagedSequence}
+      from public, ${FOUNDATION_OBSERVER_ROLE};
+    revoke all on function ${unknownManagedFunction}
+      from public, ${FOUNDATION_OBSERVER_ROLE};
+  `);
+  try {
+    await assertExactObserverAuthorization(observer);
+
+    await managedAdministrator.query(
+      "revoke delete on table cron.job_run_details from public",
+    );
+    try {
+      const mutated = await readObserverRelationPrivileges(observer);
+      assert.equal(
+        mutated.find(
+          ({ object_name: objectName }) =>
+            objectName === "cron.job_run_details",
+        )?.observer_delete,
+        false,
+      );
+      assert.notDeepEqual(mutated, EXPECTED_OBSERVER_RELATIONS);
+    } finally {
+      await managedAdministrator.query(
+        "grant delete on table cron.job_run_details to public",
+      );
+    }
+
+    await managedAdministrator.query(
+      "grant update on table cron.job to public",
+    );
+    try {
+      const mutated = await readObserverRelationPrivileges(observer);
+      assert.equal(
+        mutated.find(({ object_name: objectName }) => objectName === "cron.job")
+          ?.observer_update,
+        true,
+      );
+      assert.notDeepEqual(mutated, EXPECTED_OBSERVER_RELATIONS);
+    } finally {
+      await managedAdministrator.query(
+        "revoke update on table cron.job from public",
+      );
+    }
+
+    await managedAdministrator.query(`
+      grant select on table cron.job
+        to ${FOUNDATION_OBSERVER_ROLE} with grant option
+    `);
+    try {
+      const mutated = await readObserverRelationPrivileges(observer);
+      assert.equal(
+        mutated.find(({ object_name: objectName }) => objectName === "cron.job")
+          ?.observer_select_grantable,
+        true,
+      );
+      assert.notDeepEqual(mutated, EXPECTED_OBSERVER_RELATIONS);
+    } finally {
+      await managedAdministrator.query(`
+        revoke select on table cron.job from ${FOUNDATION_OBSERVER_ROLE}
+      `);
+    }
+
+    await administrator.query(`
+      grant select on table ${unknownManagedTable} to public;
+      grant usage on sequence ${unknownManagedSequence} to public;
+    `);
+    try {
+      assert.ok(
+        (await readObserverRelationPrivileges(observer)).some(
+          ({ object_name: objectName }) => objectName === unknownManagedTable,
+        ),
+      );
+      assert.ok(
+        (await readObserverSequencePrivileges(observer)).some(
+          ({ object_name: objectName }) =>
+            objectName === unknownManagedSequence,
+        ),
+      );
+    } finally {
+      await administrator.query(`
+        revoke select on table ${unknownManagedTable} from public;
+        revoke usage on sequence ${unknownManagedSequence} from public;
+      `);
+    }
+
+    await assertExactObserverAuthorization(observer);
+
+    await administrator.query(`
+      grant select (id) on table ${probeTable}
+        to ${FOUNDATION_OBSERVER_ROLE} with grant option
+    `);
+    try {
+      const probe = (await readObserverRelationPrivileges(observer)).find(
+        ({ object_name: objectName }) => objectName === probeTable,
+      );
+      assert.equal(probe?.observer_select, false);
+      assert.equal(probe?.observer_column_select, true);
+      assert.equal(probe?.observer_column_select_grantable, true);
+    } finally {
+      await administrator.query(
+        `revoke all on table ${probeTable} from ${FOUNDATION_OBSERVER_ROLE}`,
+      );
+    }
+
+    await administrator.query(`
+      grant select, maintain on table ${probeTable}
+        to ${FOUNDATION_OBSERVER_ROLE} with grant option
+    `);
+    try {
+      const probe = (await readObserverRelationPrivileges(observer)).find(
+        ({ object_name: objectName }) => objectName === probeTable,
+      );
+      assert.equal(probe?.observer_select, true);
+      assert.equal(probe?.observer_select_grantable, true);
+      assert.equal(probe?.observer_maintain, true);
+      assert.equal(probe?.observer_maintain_grantable, true);
+    } finally {
+      await administrator.query(
+        `revoke all on table ${probeTable} from ${FOUNDATION_OBSERVER_ROLE}`,
+      );
+    }
+
+    await administrator.query(`
+      grant usage on sequence ${probeSequence}
+        to ${FOUNDATION_OBSERVER_ROLE} with grant option
+    `);
+    try {
+      const probe = (await readObserverSequencePrivileges(observer)).find(
+        ({ object_name: objectName }) => objectName === probeSequence,
+      );
+      assert.equal(probe?.observer_usage, true);
+      assert.equal(probe?.observer_usage_grantable, true);
+    } finally {
+      await administrator.query(
+        `revoke all on sequence ${probeSequence} from ${FOUNDATION_OBSERVER_ROLE}`,
+      );
+    }
+
+    await administrator.query(`
+      grant execute on function ${probeFunction}
+        to ${FOUNDATION_OBSERVER_ROLE} with grant option
+    `);
+    try {
+      const probe = (await readObserverExecutableFunctions(observer)).find(
+        ({ function_signature: signature }) => signature === probeFunction,
+      );
+      assert.equal(probe?.observer_execute, true);
+      assert.equal(probe?.observer_execute_grantable, true);
+    } finally {
+      await administrator.query(
+        `revoke all on function ${probeFunction} from ${FOUNDATION_OBSERVER_ROLE}`,
+      );
+    }
+
+    await administrator.query(`
+      grant usage on schema ${privateSchema} to ${FOUNDATION_OBSERVER_ROLE};
+      grant select on table ${privateSchema}.private_table
+        to ${FOUNDATION_OBSERVER_ROLE};
+    `);
+    try {
+      assert.ok(
+        (await readObserverSchemaPrivileges(observer)).some(
+          ({ object_name: objectName, observer_usage: usage }) =>
+            objectName === privateSchema && usage,
+        ),
+      );
+      assert.ok(
+        (await readObserverRelationPrivileges(observer)).some(
+          ({ object_name: objectName, observer_select: select }) =>
+            objectName === `${privateSchema}.private_table` && select,
+        ),
+      );
+    } finally {
+      await administrator.query(`
+        revoke all on table ${privateSchema}.private_table
+          from ${FOUNDATION_OBSERVER_ROLE};
+        revoke all on schema ${privateSchema}
+          from ${FOUNDATION_OBSERVER_ROLE};
+      `);
+    }
+
+    await administrator.query(`
+      grant create on schema ${privateSchema}
+        to ${FOUNDATION_OBSERVER_ROLE} with grant option
+    `);
+    try {
+      const probe = (await readObserverSchemaPrivileges(observer)).find(
+        ({ object_name: objectName }) => objectName === privateSchema,
+      );
+      assert.equal(probe?.observer_create, true);
+      assert.equal(probe?.observer_create_grantable, true);
+    } finally {
+      await administrator.query(
+        `revoke all on schema ${privateSchema} from ${FOUNDATION_OBSERVER_ROLE}`,
+      );
+    }
+
+    await administrator.query(`
+      grant create on database postgres
+        to ${FOUNDATION_OBSERVER_ROLE} with grant option
+    `);
+    try {
+      const identity = await readObserverIdentity(observer);
+      assert.equal(identity.database_create, true);
+      assert.equal(identity.database_create_grantable, true);
+      assert.deepEqual(await readObserverDatabaseCreatePrivileges(observer), [
+        { database_name: "postgres" },
+      ]);
+    } finally {
+      await administrator.query(
+        `revoke create on database postgres from ${FOUNDATION_OBSERVER_ROLE}`,
+      );
+    }
+
+    await administrator.query(`
+      grant temporary on database postgres
+        to ${FOUNDATION_OBSERVER_ROLE} with grant option
+    `);
+    try {
+      const identity = await readObserverIdentity(observer);
+      assert.equal(identity.database_temporary, true);
+      assert.equal(identity.database_temporary_grantable, true);
+    } finally {
+      await administrator.query(
+        `revoke temporary on database postgres from ${FOUNDATION_OBSERVER_ROLE}`,
+      );
+    }
+
+    await administrator.query(`
+      grant execute on function ${unknownManagedFunction}
+        to ${FOUNDATION_OBSERVER_ROLE} with grant option
+    `);
+    try {
+      assert.deepEqual(await readObserverManagedDirectFunctions(observer), [
+        {
+          function_signature: unknownManagedFunction,
+          observer_execute_grantable: true,
+        },
+      ]);
+    } finally {
+      await administrator.query(
+        `revoke all on function ${unknownManagedFunction} from ${FOUNDATION_OBSERVER_ROLE}`,
+      );
+    }
+
+    await assertExactObserverAuthorization(observer);
+  } finally {
+    await managedAdministrator.query(`
+      grant delete on table cron.job_run_details to public;
+      revoke update on table cron.job from public;
+      revoke select on table cron.job from ${FOUNDATION_OBSERVER_ROLE};
+    `);
+    await administrator.query(`
+      revoke create on database postgres from ${FOUNDATION_OBSERVER_ROLE};
+      revoke temporary on database postgres from ${FOUNDATION_OBSERVER_ROLE};
+      revoke all on function ${unknownManagedFunction}
+        from ${FOUNDATION_OBSERVER_ROLE};
+      drop schema if exists ${privateSchema} cascade;
+      drop table if exists ${unknownManagedTable};
+      drop sequence if exists ${unknownManagedSequence};
+      drop function if exists ${unknownManagedFunction};
+      drop table if exists ${probeTable};
+      drop sequence if exists ${probeSequence};
+      drop function if exists ${probeFunction};
+    `);
+  }
+};
+
+const verifyFoundationDatabaseRoles = async ({ Client, administrator }) => {
+  const roleNames = [
+    FOUNDATION_BACKUP_RESTORE_ROLE,
+    FOUNDATION_BACKUP_SOURCE_ROLE,
+    FOUNDATION_OBSERVER_ROLE,
+  ];
+  const roleAuthority = await administrator.query({
+    text: `select
+      rolname,
+      rolcanlogin,
+      rolinherit,
+      rolsuper,
+      rolcreatedb,
+      rolcreaterole,
+      rolreplication,
+      rolbypassrls,
+      rolpassword is null as passwordless
+    from pg_catalog.pg_authid
+    where rolname = any($1::name[])
+    order by rolname`,
+    values: [roleNames],
+  });
+  assert.deepEqual(
+    roleAuthority.rows.map((row) => row.rolname),
+    roleNames,
+  );
+  if (
+    roleAuthority.rows.some(
+      (role) =>
+        role.rolcanlogin !== true ||
+        role.rolinherit !== false ||
+        role.rolsuper !== false ||
+        role.rolcreatedb !== false ||
+        role.rolcreaterole !== false ||
+        role.rolreplication !== false ||
+        role.rolbypassrls !== false ||
+        role.passwordless !== true,
+    )
+  ) {
+    throw new Error("Disposable DB foundation role attributes differ");
+  }
+  const membershipCount = Number(
+    await scalar(
+      administrator,
+      `select count(*)::integer
+       from pg_catalog.pg_auth_members membership
+       where membership.member = any(
+           array(
+             select oid from pg_catalog.pg_roles
+             where rolname in (
+               '${FOUNDATION_OBSERVER_ROLE}',
+               '${FOUNDATION_BACKUP_SOURCE_ROLE}',
+               '${FOUNDATION_BACKUP_RESTORE_ROLE}'
+             )
+           )
+         )`,
+    ),
+  );
+  if (membershipCount !== 0) {
+    throw new Error("Disposable DB foundation roles have memberships");
+  }
+  const ownedObjectCount = Number(
+    await scalar(
+      administrator,
+      `with foundation_roles as (
+         select oid from pg_catalog.pg_roles
+         where rolname in (
+           '${FOUNDATION_OBSERVER_ROLE}',
+           '${FOUNDATION_BACKUP_SOURCE_ROLE}',
+           '${FOUNDATION_BACKUP_RESTORE_ROLE}'
+         )
+       ), owners as (
+         select relowner as owner from pg_catalog.pg_class
+         union all select proowner from pg_catalog.pg_proc
+         union all select nspowner from pg_catalog.pg_namespace
+         union all select typowner from pg_catalog.pg_type
+         union all select datdba from pg_catalog.pg_database
+         union all select extowner from pg_catalog.pg_extension
+       )
+       select count(*)::integer
+       from owners
+       where owner = any(array(select oid from foundation_roles))`,
+    ),
+  );
+  if (ownedObjectCount !== 0) {
+    throw new Error("Disposable DB foundation roles own database objects");
+  }
+
+  const rolePrivileges = await administrator.query({
+    text: `select
+      requested.role_name,
+      has_schema_privilege(requested.role_name, 'public', 'USAGE') as public_usage,
+      has_schema_privilege(requested.role_name, 'public', 'CREATE') as public_create,
+      (
+        select coalesce(
+          bool_or(
+            has_table_privilege(requested.role_name, relation.oid, 'SELECT')
+          ),
+          false
+        )
+        from pg_catalog.pg_class relation
+        join pg_catalog.pg_namespace namespace
+          on namespace.oid = relation.relnamespace
+        where namespace.nspname = 'public'
+          and relation.relkind in ('r', 'p')
+      ) as any_public_table_select,
+      has_table_privilege(
+        requested.role_name,
+        'public.persistence_release_a_metric_events',
+        'SELECT'
+      ) as metrics_select,
+      has_table_privilege(
+        requested.role_name,
+        'public.csp_violation_reports',
+        'SELECT'
+      ) as csp_select,
+      has_table_privilege(
+        requested.role_name,
+        'supabase_migrations.schema_migrations',
+        'SELECT'
+      ) as migration_select,
+      has_function_privilege(
+        requested.role_name,
+        'public.read_persistence_release_a_metrics(timestamptz,timestamptz,integer)',
+        'EXECUTE'
+      ) as metrics_execute,
+      has_function_privilege(
+        requested.role_name,
+        'public.read_csp_violation_aggregates(timestamptz,timestamptz,integer)',
+        'EXECUTE'
+      ) as csp_execute,
+      has_function_privilege(
+        requested.role_name,
+        'public.read_csp_deployment_violation_aggregates(timestamptz,timestamptz,text,text,integer)',
+        'EXECUTE'
+      ) as csp_deployment_execute,
+      has_function_privilege(
+        requested.role_name,
+        'public.read_foundation_backup_restore_integrity()',
+        'EXECUTE'
+      ) as integrity_execute,
+      has_function_privilege(
+        requested.role_name,
+        'public.retain_persistence_release_a_metrics(boolean,integer,integer)',
+        'EXECUTE'
+      ) as retention_execute
+    from unnest($1::text[]) as requested(role_name)
+    order by requested.role_name`,
+    values: [roleNames],
+  });
+  for (const privilege of rolePrivileges.rows) {
+    const observer = privilege.role_name === FOUNDATION_OBSERVER_ROLE;
+    if (
+      privilege.public_usage !== true ||
+      privilege.public_create !== false ||
+      privilege.any_public_table_select !== false ||
+      privilege.metrics_select !== false ||
+      privilege.csp_select !== false ||
+      privilege.migration_select !== observer ||
+      privilege.metrics_execute !== observer ||
+      privilege.csp_execute !== observer ||
+      privilege.csp_deployment_execute !== observer ||
+      privilege.integrity_execute !== !observer ||
+      privilege.retention_execute !== false
+    ) {
+      throw new Error(
+        `Disposable DB ${privilege.role_name} privilege floor differs`,
+      );
+    }
+  }
+
+  await administrator.query(`
+    alter role ${FOUNDATION_OBSERVER_ROLE}
+      password '${FOUNDATION_ROLE_PASSWORDS[FOUNDATION_OBSERVER_ROLE]}';
+    alter role ${FOUNDATION_BACKUP_SOURCE_ROLE}
+      password '${FOUNDATION_ROLE_PASSWORDS[FOUNDATION_BACKUP_SOURCE_ROLE]}';
+    alter role ${FOUNDATION_BACKUP_RESTORE_ROLE}
+      password '${FOUNDATION_ROLE_PASSWORDS[FOUNDATION_BACKUP_RESTORE_ROLE]}';
+  `);
+  const [managedAdministrator, observer, sourceReader, restoreReader] =
+    await Promise.all([
+      connectManagedAdministrator({ Client }),
+      connectFoundationRole({ Client, role: FOUNDATION_OBSERVER_ROLE }),
+      connectFoundationRole({ Client, role: FOUNDATION_BACKUP_SOURCE_ROLE }),
+      connectFoundationRole({ Client, role: FOUNDATION_BACKUP_RESTORE_ROLE }),
+    ]);
+  try {
+    const observerIdentity = await observer.query(
+      `select
+        current_user as role,
+        session_user as session_role,
+        current_setting('default_transaction_read_only') as read_only`,
+    );
+    assert.deepEqual(observerIdentity.rows, [
+      {
+        role: FOUNDATION_OBSERVER_ROLE,
+        session_role: FOUNDATION_OBSERVER_ROLE,
+        read_only: "on",
+      },
+    ]);
+    const observerMemberships = await observer.query(
+      `select roles.rolname::text as role
+       from pg_catalog.pg_roles roles
+       where roles.rolname <> current_user
+         and pg_catalog.pg_has_role(current_user, roles.oid, 'MEMBER')
+       order by role`,
+    );
+    assert.deepEqual(observerMemberships.rows, []);
+    const observerOwnership = await observer.query(
+      `select count(*)::integer as owned_object_count
+       from pg_catalog.pg_shdepend ownership
+       where ownership.refclassid =
+           pg_catalog.to_regclass('pg_catalog.pg_authid')
+         and ownership.refobjid = (
+           select roles.oid
+           from pg_catalog.pg_roles roles
+           where roles.rolname = current_user
+         )
+         and ownership.deptype = 'o'`,
+    );
+    assert.deepEqual(observerOwnership.rows, [{ owned_object_count: 0 }]);
+
+    await verifyDisposableManagedRelationBaseline(observer);
+    await assertExactObserverAuthorization(observer);
+    await verifyObserverMutationDetection({
+      administrator,
+      managedAdministrator,
+      observer,
+    });
+    await verifyExactMigrationHistory({ administrator, observer });
+    await observer.query(`select * from public.read_persistence_release_a_metrics(
+      clock_timestamp() - interval '1 minute',
+      clock_timestamp() + interval '1 minute',
+      10
+    )`);
+    await observer.query(`select * from public.read_csp_violation_aggregates(
+      clock_timestamp() - interval '1 minute',
+      clock_timestamp() + interval '1 minute',
+      10
+    )`);
+    await observer.query({
+      text: `select * from public.read_csp_deployment_violation_aggregates(
+        clock_timestamp() - interval '1 minute',
+        clock_timestamp() + interval '1 minute',
+        $1,
+        $2,
+        10
+      )`,
+      values: [
+        "89abcdef0123456789abcdef0123456789abcdef",
+        "deployment_disposable_csp_1",
+      ],
+    });
+    for (const statement of [
+      "select * from public.persistence_release_a_metric_events limit 1",
+      `insert into public.persistence_release_a_metric_events (
+        schema_version,
+        event_version,
+        event_name,
+        outcome,
+        build_id,
+        browser_family,
+        app_mode,
+        online
+      ) values (
+        1,
+        1,
+        'startup',
+        'ready',
+        '0123456789abcdef0123456789abcdef01234567',
+        'chromium',
+        'browser-tab',
+        true
+      )`,
+      "create table public.foundation_observer_forbidden(id integer)",
+    ]) {
+      await assertDenied42501(observer, statement);
+    }
+
+    const integrityRows = [];
+    for (const [client, role] of [
+      [sourceReader, FOUNDATION_BACKUP_SOURCE_ROLE],
+      [restoreReader, FOUNDATION_BACKUP_RESTORE_ROLE],
+    ]) {
+      const identity = await client.query(
+        `select
+          current_user as role,
+          session_user as session_role,
+          current_setting('default_transaction_read_only') as read_only`,
+      );
+      assert.deepEqual(identity.rows, [
+        { role, session_role: role, read_only: "on" },
+      ]);
+      const executablePublicFunctions = await client.query(
+        `select pg_catalog.format(
+          '%I.%I(%s)',
+          namespace.nspname,
+          function_definition.proname,
+          pg_catalog.pg_get_function_identity_arguments(function_definition.oid)
+        ) as function_signature
+        from pg_catalog.pg_proc function_definition
+        join pg_catalog.pg_namespace namespace
+          on namespace.oid = function_definition.pronamespace
+        where namespace.nspname = 'public'
+          and pg_catalog.has_function_privilege(
+            current_user,
+            function_definition.oid,
+            'EXECUTE'
+          )
+        order by function_signature`,
+      );
+      assert.deepEqual(executablePublicFunctions.rows, [
+        {
+          function_signature:
+            "public.read_foundation_backup_restore_integrity()",
+        },
+      ]);
+      const integrity = await client.query(
+        "select * from public.read_foundation_backup_restore_integrity()",
+      );
+      if (
+        integrity.rowCount !== 1 ||
+        !/^[0-9a-f]{64}$/u.test(integrity.rows[0].database_head) ||
+        integrity.rows[0].migration_version !== "20260810010000" ||
+        !/^[0-9a-f]{64}$/u.test(integrity.rows[0].integrity_sha256)
+      ) {
+        throw new Error(`Disposable DB ${role} integrity result differs`);
+      }
+      integrityRows.push(integrity.rows[0]);
+      for (const statement of [
+        "select * from public.csp_violation_reports limit 1",
+        "delete from public.csp_violation_reports where false",
+        `create table public.${role}_forbidden(id integer)`,
+      ]) {
+        await assertDenied42501(client, statement);
+      }
+    }
+    assert.deepEqual(integrityRows[0], integrityRows[1]);
+  } finally {
+    await Promise.allSettled([
+      managedAdministrator.end(),
+      observer.end(),
+      sourceReader.end(),
+      restoreReader.end(),
+    ]);
+  }
 };
 
 const RELEASE_STATE_NAMESPACE = "foundation-disposable-control";
@@ -1039,142 +3378,9 @@ try {
        where provider_deployment_id = 'deployment_disposable_csp_legacy'`,
     );
 
-    const grants = await client.query(`
-      select
-        has_table_privilege(
-          'service_role',
-          'public.persistence_release_a_metric_events',
-          'INSERT'
-        ) as metrics_insert,
-        has_table_privilege(
-          'service_role',
-          'public.persistence_release_a_metric_events',
-          'SELECT'
-        ) as metrics_select,
-        has_table_privilege(
-          'service_role',
-          'public.csp_violation_reports',
-          'INSERT'
-        ) as csp_insert,
-        has_table_privilege(
-          'service_role',
-          'public.csp_violation_reports',
-          'SELECT'
-        ) as csp_select,
-        has_function_privilege(
-          'service_role',
-          'public.read_persistence_release_a_metrics(timestamptz,timestamptz,integer)',
-          'EXECUTE'
-        ) as metrics_read_execute,
-        has_function_privilege(
-          'service_role',
-          'public.retain_persistence_release_a_metrics(boolean,integer,integer)',
-          'EXECUTE'
-        ) as metrics_retention_execute
-    `);
-    if (
-      grants.rowCount !== 1 ||
-      grants.rows[0].metrics_insert !== true ||
-      grants.rows[0].metrics_select !== false ||
-      grants.rows[0].csp_insert !== true ||
-      grants.rows[0].csp_select !== false ||
-      grants.rows[0].metrics_read_execute !== false ||
-      grants.rows[0].metrics_retention_execute !== false
-    ) {
-      throw new Error("Disposable DB service role privileges differ");
-    }
-    for (const role of ["anon", "authenticated"]) {
-      const roleGrants = await client.query({
-        text: `select
-          has_table_privilege(
-            $1,
-            'public.persistence_release_a_metric_events',
-            'SELECT'
-          ) as can_read,
-          has_table_privilege(
-            $1,
-            'public.persistence_release_a_metric_events',
-            'INSERT'
-          ) as can_insert`,
-        values: [role],
-      });
-      if (
-        roleGrants.rowCount !== 1 ||
-        roleGrants.rows[0].can_read ||
-        roleGrants.rows[0].can_insert
-      ) {
-        throw new Error(`Disposable DB grants application access to ${role}`);
-      }
-    }
-    const forbiddenAclCount = Number(
-      await scalar(
-        client,
-        `select count(*)::integer
-         from (
-           select c.oid
-           from pg_catalog.pg_class c
-           join pg_catalog.pg_namespace n on n.oid = c.relnamespace
-           cross join lateral pg_catalog.aclexplode(
-             coalesce(
-               c.relacl,
-               pg_catalog.acldefault(
-                 case when c.relkind = 'S' then 's' else 'r' end::"char",
-                 c.relowner
-               )
-             )
-           ) acl
-           where n.nspname = 'public'
-             and c.relname in (
-               'persistence_release_a_metric_events',
-               'persistence_release_a_metric_events_id_seq',
-               'persistence_release_a_metrics_dashboard_24h',
-               'persistence_release_a_metrics_dashboard_hourly_24h',
-               'persistence_release_a_cleanup_dashboard_24h',
-               'csp_violation_reports',
-               'csp_violation_reports_id_seq',
-               'foundation_retention_run_audit',
-               'foundation_retention_run_audit_id_seq'
-             )
-             and (
-               acl.grantee = 0
-               or pg_catalog.pg_get_userbyid(acl.grantee) in (
-                 'anon',
-                 'authenticated'
-               )
-             )
-           union all
-           select p.oid
-           from pg_catalog.pg_proc p
-           join pg_catalog.pg_namespace n on n.oid = p.pronamespace
-           cross join lateral pg_catalog.aclexplode(
-             coalesce(
-               p.proacl,
-               pg_catalog.acldefault('f'::"char", p.proowner)
-             )
-           ) acl
-           where n.nspname = 'public'
-             and p.proname in (
-               'read_persistence_release_a_metrics',
-               'read_csp_violation_aggregates',
-               'read_csp_deployment_violation_aggregates',
-               'retain_persistence_release_a_metrics',
-               'retain_csp_violation_reports'
-             )
-             and (
-               acl.grantee = 0
-               or pg_catalog.pg_get_userbyid(acl.grantee) in (
-                 'anon',
-                 'authenticated'
-               )
-             )
-         ) forbidden_acl`,
-      ),
-    );
-    if (forbiddenAclCount !== 0) {
-      throw new Error(
-        `Disposable DB exposes ${forbiddenAclCount} forbidden ACL entries`,
-      );
-    }
+    await verifyApplicationObjectMetadata(client);
+    await verifyServiceRoleAuthority(client);
+    await verifyCspDormantAuthority(client);
 
     await client.query("begin");
     try {
@@ -1434,12 +3640,13 @@ try {
         "Disposable DB retention schedule is missing or duplicated",
       );
     }
+    await verifyFoundationDatabaseRoles({ Client, administrator: client });
     await verifyReleaseStateControlStore({ Client, administrator: client });
   } finally {
     await client.end();
   }
   process.stdout.write(
-    "PASS disposable PostgreSQL 17 application/control migrations, CAS, privileges, immutability, retention, and cron\n",
+    "PASS disposable PostgreSQL 17 application/control migrations, observer/backup readers, CAS, privileges, immutability, retention, and cron\n",
   );
 } finally {
   if (started) {

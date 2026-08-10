@@ -1,4 +1,4 @@
-import { canonicalJsonBytes, sha256Json } from "../lib/canonical-json.mjs";
+import { sha256Json } from "../lib/canonical-json.mjs";
 import {
   BACKUP_CREDENTIAL_ENVIRONMENT_ALLOWLIST,
   verifyExternalPrerequisitePolicy,
@@ -9,28 +9,18 @@ import {
 } from "../release-state/releaseWorkflowValidation.mjs";
 
 export const BACKUP_RESTORE_PROVIDER_CONTRACT_KIND =
-  "backup-restore-provider-contract/v1";
+  "backup-restore-provider-contract/v2";
 export const BACKUP_RESTORE_PROVIDER = "supabase";
 export const BACKUP_RESTORE_INTEGRITY_FUNCTION =
   "read_foundation_backup_restore_integrity";
 export const BACKUP_RESTORE_INTEGRITY_QUERY_NAME =
-  "foundation-backup-restore-integrity-v1";
+  "foundation-backup-restore-integrity-v2";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const HOST = /^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/u;
 const POSTGRES_IDENTIFIER = /^[a-z_][a-z0-9_]{0,62}$/u;
-const POSTGRES_ROLE = /^[a-z_][a-z0-9_.-]{0,126}$/u;
-const PATH_TEMPLATE =
-  /^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@/-]|\{[a-zA-Z][a-zA-Z0-9]*\})+$/u;
-const JSON_POINTER = /^(?:\/(?:[^~/]|~[01])*)+$/u;
-const STATE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
-const PLACEHOLDER = /^\{([a-zA-Z][a-zA-Z0-9]*)\}$/u;
-const ALLOWED_PLACEHOLDERS = new Set([
-  "backupId",
-  "restoreId",
-  "restoreProjectRef",
-  "sourceProjectRef",
-]);
+const POSTGRES_ROLE = /^[a-z_][a-z0-9_]{0,62}$/u;
+const MIGRATION_VERSION = /^[0-9]{14}$/u;
 
 const ROOT_KEYS = [
   "api",
@@ -42,47 +32,49 @@ const ROOT_KEYS = [
 ];
 const API_KEYS = [
   "authentication",
-  "backupMode",
+  "backupReadyState",
+  "cleanupPolling",
   "maximumResponseBytes",
   "operations",
-  "polling",
+  "projectReadyState",
   "requestTimeoutMilliseconds",
-  "states",
+  "restoreMode",
 ];
 const AUTH_KEYS = ["credentialEnvironmentName", "scheme"];
 const POLLING_KEYS = ["intervalMilliseconds", "maximumAttempts"];
-const OPERATION_NAMES = [
-  "cleanupRestore",
-  "createBackup",
-  "getBackup",
-  "getCleanup",
-  "getRestore",
-  "restoreBackup",
-];
-const OPERATION_KEYS = [
-  "method",
-  "pathTemplate",
-  "requestBodyTemplate",
-  "response",
-  "successStatusCodes",
-];
-const RESPONSE_KEYS = [
-  "recoveryPointAtPointer",
-  "resourceIdPointer",
-  "statePointer",
-];
-const STATE_KEYS = [
-  "backupPending",
-  "backupReady",
-  "cleanupPending",
-  "cleanupReady",
-  "failed",
-  "restorePending",
-  "restoreReady",
-];
+const OPERATION_KEYS = ["method", "pathTemplate", "successStatusCodes"];
+const OPERATION_CONTRACTS = Object.freeze({
+  confirmRestoreDeleted: {
+    method: "GET",
+    pathTemplate: "/v1/projects/{restoreProjectRef}",
+    successStatusCodes: [200, 404],
+  },
+  deleteRestoreProject: {
+    method: "DELETE",
+    pathTemplate: "/v1/projects/{restoreProjectRef}",
+    successStatusCodes: [200],
+  },
+  getRestoreProject: {
+    method: "GET",
+    pathTemplate: "/v1/projects/{restoreProjectRef}",
+    successStatusCodes: [200],
+  },
+  getSourceProject: {
+    method: "GET",
+    pathTemplate: "/v1/projects/{sourceProjectRef}",
+    successStatusCodes: [200],
+  },
+  listSourceBackups: {
+    method: "GET",
+    pathTemplate: "/v1/projects/{sourceProjectRef}/database/backups",
+    successStatusCodes: [200],
+  },
+});
+const OPERATION_NAMES = Object.keys(OPERATION_CONTRACTS).sort();
 const DATABASE_KEYS = [
   "connectTimeoutMilliseconds",
   "integrityFunction",
+  "integrityMigrationVersion",
   "postgresMajor",
   "queryName",
   "restore",
@@ -93,47 +85,21 @@ const DATABASE_KEYS = [
 const DATABASE_AUTHORITY_KEYS = [
   "allowedDatabases",
   "allowedHosts",
+  "allowedPorts",
   "allowedRoles",
   "caSha256",
   "databaseCaEnvironmentName",
   "databaseUrlEnvironmentName",
 ];
 
-const OPERATION_CONTRACTS = Object.freeze({
-  createBackup: {
-    method: "POST",
-    requiredPlaceholders: ["sourceProjectRef"],
-    recoveryPoint: true,
-  },
-  getBackup: {
-    method: "GET",
-    requiredPlaceholders: ["backupId", "sourceProjectRef"],
-    recoveryPoint: true,
-  },
-  restoreBackup: {
-    method: "POST",
-    requiredPlaceholders: ["backupId", "restoreProjectRef"],
-    recoveryPoint: false,
-  },
-  getRestore: {
-    method: "GET",
-    requiredPlaceholders: ["restoreId", "restoreProjectRef"],
-    recoveryPoint: false,
-  },
-  cleanupRestore: {
-    method: "DELETE",
-    requiredPlaceholders: ["restoreId", "restoreProjectRef"],
-    recoveryPoint: false,
-  },
-  getCleanup: {
-    method: "GET",
-    requiredPlaceholders: ["restoreId", "restoreProjectRef"],
-    recoveryPoint: false,
-  },
-});
-
 const compareUtf8 = (left, right) =>
   Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
+
+const assertInteger = (value, minimum, maximum, label) => {
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${label} is outside its closed integer bounds`);
+  }
+};
 
 const assertSortedUniqueStrings = (
   values,
@@ -158,204 +124,22 @@ const assertSortedUniqueStrings = (
   ) {
     throw new Error(`${label} must be a sorted distinct closed string set`);
   }
-  return values;
 };
 
-const assertInteger = (value, minimum, maximum, label) => {
-  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
-    throw new Error(`${label} is outside its closed integer bounds`);
-  }
-};
-
-const templatePlaceholders = (value, label, depth = 0) => {
-  if (depth > 8) throw new Error(`${label} exceeds the maximum depth`);
-  if (
-    value === null ||
-    typeof value === "boolean" ||
-    (typeof value === "number" && Number.isFinite(value))
-  ) {
-    return [];
-  }
-  if (typeof value === "string") {
-    const match = value.match(PLACEHOLDER);
-    if (match === null) {
-      if (
-        value.length > 512 ||
-        [...value].some((character) => character.codePointAt(0) < 0x20)
-      ) {
-        throw new Error(`${label} contains an invalid string`);
-      }
-      return [];
-    }
-    if (!ALLOWED_PLACEHOLDERS.has(match[1])) {
-      throw new Error(`${label} contains an unknown placeholder`);
-    }
-    return [match[1]];
-  }
-  if (Array.isArray(value)) {
-    if (value.length > 32) throw new Error(`${label} is oversized`);
-    return value.flatMap((entry, index) =>
-      templatePlaceholders(entry, `${label}[${index}]`, depth + 1),
-    );
-  }
-  if (!isRecord(value) || Object.keys(value).length > 32) {
-    throw new Error(`${label} is not a bounded plain JSON template`);
-  }
-  return Object.entries(value).flatMap(([key, entry]) => {
-    if (
-      !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/u.test(key) ||
-      /token|authorization|password|secret/iu.test(key)
-    ) {
-      throw new Error(`${label} contains an unsafe member`);
-    }
-    return templatePlaceholders(entry, `${label}.${key}`, depth + 1);
-  });
-};
-
-const containsExactJsonValue = (value, expected) =>
-  value === expected ||
-  (Array.isArray(value) &&
-    value.some((entry) => containsExactJsonValue(entry, expected))) ||
-  (isRecord(value) &&
-    Object.values(value).some((entry) =>
-      containsExactJsonValue(entry, expected),
-    ));
-
-const pathPlaceholders = (pathTemplate, label) => {
-  if (
-    typeof pathTemplate !== "string" ||
-    pathTemplate.length > 1024 ||
-    !PATH_TEMPLATE.test(pathTemplate) ||
-    pathTemplate.includes("//") ||
-    pathTemplate.includes("?") ||
-    pathTemplate.includes("#") ||
-    pathTemplate.includes("..")
-  ) {
-    throw new Error(`${label} path template is invalid`);
-  }
-  const placeholders = [
-    ...pathTemplate.matchAll(/\{([a-zA-Z][a-zA-Z0-9]*)\}/gu),
-  ].map((match) => match[1]);
-  if (
-    placeholders.some((placeholder) => !ALLOWED_PLACEHOLDERS.has(placeholder))
-  ) {
-    throw new Error(`${label} path contains an unknown placeholder`);
-  }
-  return placeholders;
-};
-
-const assertOperation = (name, operation) => {
-  const semantics = OPERATION_CONTRACTS[name];
+const assertExactOperation = (name, operation) => {
+  const expected = OPERATION_CONTRACTS[name];
   assertExactKeys(operation, OPERATION_KEYS, `Backup API ${name}`);
-  if (operation.method !== semantics.method) {
-    throw new Error(`Backup API ${name} method is invalid`);
-  }
-  const placeholders = [
-    ...pathPlaceholders(operation.pathTemplate, `Backup API ${name}`),
-  ];
-  if (["GET", "DELETE"].includes(operation.method)) {
-    if (operation.requestBodyTemplate !== null) {
-      throw new Error(`Backup API ${name} must not declare a request body`);
-    }
-  } else {
-    if (!isRecord(operation.requestBodyTemplate)) {
-      throw new Error(`Backup API ${name} request body must be an object`);
-    }
-    placeholders.push(
-      ...templatePlaceholders(
-        operation.requestBodyTemplate,
-        `Backup API ${name} request body`,
-      ),
-    );
-    if (canonicalJsonBytes(operation.requestBodyTemplate).length > 16 * 1024) {
-      throw new Error(`Backup API ${name} request body is oversized`);
-    }
-    if (
-      name === "createBackup" &&
-      !containsExactJsonValue(operation.requestBodyTemplate, "pitr")
-    ) {
-      throw new Error("Backup API createBackup does not bind exact PITR mode");
-    }
-  }
   if (
-    new Set(placeholders).size !== placeholders.length ||
-    !semantics.requiredPlaceholders.every((value) =>
-      placeholders.includes(value),
-    )
-  ) {
-    throw new Error(`Backup API ${name} placeholder binding is incomplete`);
-  }
-  if (
+    operation.method !== expected.method ||
+    operation.pathTemplate !== expected.pathTemplate ||
     !Array.isArray(operation.successStatusCodes) ||
-    operation.successStatusCodes.length < 1 ||
-    operation.successStatusCodes.length > 4 ||
+    operation.successStatusCodes.length !==
+      expected.successStatusCodes.length ||
     operation.successStatusCodes.some(
-      (status) => !Number.isSafeInteger(status) || status < 200 || status > 299,
-    ) ||
-    new Set(operation.successStatusCodes).size !==
-      operation.successStatusCodes.length ||
-    operation.successStatusCodes.some(
-      (status, index) =>
-        index > 0 && operation.successStatusCodes[index - 1] >= status,
+      (status, index) => status !== expected.successStatusCodes[index],
     )
   ) {
-    throw new Error(`Backup API ${name} success status set is invalid`);
-  }
-  assertExactKeys(
-    operation.response,
-    RESPONSE_KEYS,
-    `Backup API ${name} response`,
-  );
-  for (const key of ["resourceIdPointer", "statePointer"]) {
-    if (!JSON_POINTER.test(operation.response[key] ?? "")) {
-      throw new Error(`Backup API ${name} ${key} is invalid`);
-    }
-  }
-  if (
-    semantics.recoveryPoint !==
-    (operation.response.recoveryPointAtPointer !== null)
-  ) {
-    throw new Error(`Backup API ${name} recovery-point response is invalid`);
-  }
-  if (
-    operation.response.recoveryPointAtPointer !== null &&
-    !JSON_POINTER.test(operation.response.recoveryPointAtPointer)
-  ) {
-    throw new Error(`Backup API ${name} recovery-point pointer is invalid`);
-  }
-};
-
-const assertStates = (states) => {
-  assertExactKeys(states, STATE_KEYS, "Backup API states");
-  for (const key of [
-    "backupPending",
-    "cleanupPending",
-    "failed",
-    "restorePending",
-  ]) {
-    assertSortedUniqueStrings(states[key], `Backup API ${key}`, {
-      pattern: STATE,
-    });
-  }
-  for (const key of ["backupReady", "cleanupReady", "restoreReady"]) {
-    if (!STATE.test(states[key] ?? "")) {
-      throw new Error(`Backup API ${key} state is invalid`);
-    }
-  }
-  for (const [pending, ready] of [
-    [states.backupPending, states.backupReady],
-    [states.restorePending, states.restoreReady],
-    [states.cleanupPending, states.cleanupReady],
-  ]) {
-    if (
-      pending.includes(ready) ||
-      pending.some((state) => states.failed.includes(state)) ||
-      states.failed.includes(ready)
-    ) {
-      throw new Error(
-        "Backup API lifecycle states overlap within an operation",
-      );
-    }
+    throw new Error(`Backup API ${name} differs from the official endpoint`);
   }
 };
 
@@ -382,16 +166,39 @@ const assertDatabaseAuthority = (authority, kind) => {
     `Backup ${kind} allowed hosts`,
     { pattern: HOST, transform: (value) => value.toLowerCase() },
   );
+  if (authority.allowedHosts.length !== 1) {
+    throw new Error(`Backup ${kind} database host authority is not exact`);
+  }
+  if (
+    !Array.isArray(authority.allowedPorts) ||
+    authority.allowedPorts.length !== 1 ||
+    authority.allowedPorts[0] !== 5432
+  ) {
+    throw new Error(`Backup ${kind} database ports are invalid`);
+  }
   assertSortedUniqueStrings(
     authority.allowedDatabases,
     `Backup ${kind} allowed databases`,
     { pattern: POSTGRES_IDENTIFIER },
   );
+  if (
+    authority.allowedDatabases.length !== 1 ||
+    authority.allowedDatabases[0] !== "postgres"
+  ) {
+    throw new Error(`Backup ${kind} database name is invalid`);
+  }
   assertSortedUniqueStrings(
     authority.allowedRoles,
     `Backup ${kind} allowed roles`,
     { pattern: POSTGRES_ROLE },
   );
+  const expectedRole = `foundation_backup_${kind}_reader`;
+  if (
+    authority.allowedRoles.length !== 1 ||
+    authority.allowedRoles[0] !== expectedRole
+  ) {
+    throw new Error(`Backup ${kind} database role authority is invalid`);
+  }
 };
 
 export const assertBackupRestoreProviderContract = (
@@ -400,7 +207,7 @@ export const assertBackupRestoreProviderContract = (
 ) => {
   assertExactKeys(contract, ROOT_KEYS, "Backup/restore provider contract");
   if (
-    contract.schemaVersion !== 1 ||
+    contract.schemaVersion !== 2 ||
     contract.kind !== BACKUP_RESTORE_PROVIDER_CONTRACT_KIND ||
     !["configured", "unconfigured"].includes(contract.bindingStatus) ||
     ![null, BACKUP_RESTORE_PROVIDER].includes(contract.provider)
@@ -431,10 +238,8 @@ export const assertBackupRestoreProviderContract = (
       "Configured backup/restore provider contract is incomplete",
     );
   }
+
   assertExactKeys(contract.api, API_KEYS, "Backup provider API contract");
-  if (contract.api.backupMode !== "pitr") {
-    throw new Error("Backup provider mode must be exact PITR");
-  }
   assertExactKeys(
     contract.api.authentication,
     AUTH_KEYS,
@@ -443,9 +248,12 @@ export const assertBackupRestoreProviderContract = (
   if (
     contract.api.authentication.scheme !== "bearer" ||
     contract.api.authentication.credentialEnvironmentName !==
-      "FOUNDATION_BACKUP_API_TOKEN"
+      "FOUNDATION_BACKUP_API_TOKEN" ||
+    contract.api.restoreMode !== "dashboard-new-project" ||
+    contract.api.backupReadyState !== "COMPLETED" ||
+    contract.api.projectReadyState !== "ACTIVE_HEALTHY"
   ) {
-    throw new Error("Backup provider API authentication is invalid");
+    throw new Error("Backup provider API authority is invalid");
   }
   assertInteger(
     contract.api.maximumResponseBytes,
@@ -460,21 +268,21 @@ export const assertBackupRestoreProviderContract = (
     "Backup provider request timeout",
   );
   assertExactKeys(
-    contract.api.polling,
+    contract.api.cleanupPolling,
     POLLING_KEYS,
-    "Backup provider polling",
+    "Backup cleanup polling",
   );
   assertInteger(
-    contract.api.polling.intervalMilliseconds,
+    contract.api.cleanupPolling.intervalMilliseconds,
     100,
     60_000,
-    "Backup provider polling interval",
+    "Backup cleanup polling interval",
   );
   assertInteger(
-    contract.api.polling.maximumAttempts,
+    contract.api.cleanupPolling.maximumAttempts,
     1,
     240,
-    "Backup provider polling attempts",
+    "Backup cleanup polling attempts",
   );
   assertExactKeys(
     contract.api.operations,
@@ -482,9 +290,16 @@ export const assertBackupRestoreProviderContract = (
     "Backup provider operations",
   );
   for (const name of OPERATION_NAMES) {
-    assertOperation(name, contract.api.operations[name]);
+    assertExactOperation(name, contract.api.operations[name]);
   }
-  assertStates(contract.api.states);
+  if (
+    Object.values(contract.api.operations).some(
+      ({ method, pathTemplate }) =>
+        method === "POST" || pathTemplate.includes("restore-pitr"),
+    )
+  ) {
+    throw new Error("Backup contract must never perform in-place PITR");
+  }
 
   assertExactKeys(
     contract.database,
@@ -495,7 +310,8 @@ export const assertBackupRestoreProviderContract = (
     contract.database.postgresMajor !== 17 ||
     contract.database.tlsMode !== "verify-full" ||
     contract.database.integrityFunction !== BACKUP_RESTORE_INTEGRITY_FUNCTION ||
-    contract.database.queryName !== BACKUP_RESTORE_INTEGRITY_QUERY_NAME
+    contract.database.queryName !== BACKUP_RESTORE_INTEGRITY_QUERY_NAME ||
+    !MIGRATION_VERSION.test(contract.database.integrityMigrationVersion ?? "")
   ) {
     throw new Error("Backup database verification contract is invalid");
   }
@@ -514,10 +330,20 @@ export const assertBackupRestoreProviderContract = (
   assertDatabaseAuthority(contract.database.source, "source");
   assertDatabaseAuthority(contract.database.restore, "restore");
   const sourceRoles = new Set(contract.database.source.allowedRoles);
+  const sourceHosts = new Set(contract.database.source.allowedHosts);
+  const sourceDatabases = new Set(contract.database.source.allowedDatabases);
   if (
-    contract.database.restore.allowedRoles.some((role) => sourceRoles.has(role))
+    contract.database.restore.allowedRoles.some((role) =>
+      sourceRoles.has(role),
+    ) ||
+    (contract.database.restore.allowedHosts.some((host) =>
+      sourceHosts.has(host),
+    ) &&
+      contract.database.restore.allowedDatabases.some((database) =>
+        sourceDatabases.has(database),
+      ))
   ) {
-    throw new Error("Backup source and restore database roles overlap");
+    throw new Error("Backup source and restore database authorities overlap");
   }
   return contract;
 };
@@ -539,6 +365,7 @@ export const assertConfiguredBackupRestorePolicy = ({
     typeof backup.restoreTarget?.projectRef !== "string" ||
     backup.restoreTarget.environment !== "nonproduction" ||
     backup.sourceProjectRef === backup.restoreTarget.projectRef ||
+    typeof backup.restoreTarget.namespacePrefix !== "string" ||
     typeof backup.owner !== "string" ||
     !Array.isArray(backup.credentialEnvironmentAllowlist) ||
     backup.credentialEnvironmentAllowlist.length !==
@@ -551,11 +378,11 @@ export const assertConfiguredBackupRestorePolicy = ({
     throw new Error("Backup/restore prerequisite is not configured");
   }
   if (
-    providerContract.api.polling.intervalMilliseconds *
-      providerContract.api.polling.maximumAttempts >
+    providerContract.api.cleanupPolling.intervalMilliseconds *
+      providerContract.api.cleanupPolling.maximumAttempts >
     backup.recoveryTimeObjectiveSeconds * 1000
   ) {
-    throw new Error("Backup provider polling exceeds the configured RTO");
+    throw new Error("Backup cleanup polling exceeds the configured RTO");
   }
   return Object.freeze({
     prerequisitePolicySha256: sha256Json(prerequisitePolicy),

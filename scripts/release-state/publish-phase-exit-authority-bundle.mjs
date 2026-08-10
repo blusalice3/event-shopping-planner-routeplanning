@@ -12,6 +12,7 @@ import {
 } from "../db/remote-db-observation-authority.mjs";
 import {
   PHASE_EXIT_EXTERNAL_AUTHORITIES,
+  buildFoundationBaselinePhaseExitEvidence,
   buildBrowserPhaseExitEvidence,
   buildManagedDevicePhaseExitEvidence,
   getPhaseExitCollectorArtifactIdentity,
@@ -19,6 +20,7 @@ import {
   projectPhaseExitAuthoritySubject,
   readPhaseExitArtifactCollectorEvidence,
 } from "../lib/phase-exit-external-authority.mjs";
+import { readFoundationBaselineClosureForPhaseExit } from "../lib/foundation-baseline-closure-authority.mjs";
 import {
   canonicalJsonBytes,
   parseJsonStrict,
@@ -109,10 +111,7 @@ const IMPLEMENTED_AUTHORITIES_BY_GATE = new Map(
 );
 const PRODUCE_ARGUMENTS_BY_GATE = Object.freeze({
   "P0-BASELINE": Object.freeze([
-    ["--external-bindings-run-id", "externalBindingsRunId"],
-    ["--external-bindings-run-attempt", "externalBindingsRunAttempt"],
-    ["--bootstrap-recovery-run-id", "bootstrapRecoveryRunId"],
-    ["--bootstrap-recovery-run-attempt", "bootstrapRecoveryRunAttempt"],
+    ["--foundation-baseline-closure-sha256", "foundationBaselineClosureSha256"],
   ]),
   "P0-ARTIFACT": Object.freeze([
     ["--artifact-drill-run-id", "artifactDrillRunId"],
@@ -284,6 +283,9 @@ export const parsePhaseExitAuthorityArguments = (argv) => {
       targetGate === "P0-DATA" &&
       (!SHA256_PATTERN.test(values.remoteDbObservationSha256) ||
         !SHA256_PATTERN.test(values.remoteDbProductionSha256))) ||
+    (command === PRODUCE_COMMAND &&
+      targetGate === "P0-BASELINE" &&
+      !SHA256_PATTERN.test(values.foundationBaselineClosureSha256)) ||
     (command === PUBLISH_COMMAND &&
       (!SHA256_PATTERN.test(values.packageSha256) ||
         !SHA256_PATTERN.test(values.reviewReceiptSha256)))
@@ -484,14 +486,6 @@ const buildBundleInputs = async ({
     throw new Error("Phase authority target gate definition is absent");
   }
   const runByAuthority = {
-    "external-bindings": [
-      values.externalBindingsRunId,
-      values.externalBindingsRunAttempt,
-    ],
-    "bootstrap-recovery-drill": [
-      values.bootstrapRecoveryRunId,
-      values.bootstrapRecoveryRunAttempt,
-    ],
     "quality-run": [values.qualityRunId, values.qualityRunAttempt],
     "artifact-provider-control-store-drill": [
       values.artifactDrillRunId,
@@ -536,11 +530,17 @@ const buildBundleInputs = async ({
       ? [values.pwaReceiptRunId, values.pwaReceiptRunAttempt]
       : null;
   const targetArtifactAuthorities = targetDefinitions
-    .map(({ authority }) => authority)
-    .filter((authority) => ARTIFACT_AUTHORITIES.includes(authority));
+    .filter(
+      ({ authority, collectorAuthorityKind }) =>
+        ARTIFACT_AUTHORITIES.includes(authority) &&
+        collectorAuthorityKind !== "foundation-baseline-closure",
+    )
+    .map(({ authority }) => authority);
   const targetRuns =
     managedDeviceAuthority === null
-      ? targetDefinitions.map(({ authority }) => runByAuthority[authority])
+      ? targetDefinitions
+          .map(({ authority }) => runByAuthority[authority])
+          .filter(Array.isArray)
       : pwaStrictReceiptSelector === null
         ? managedDeviceSelectors
         : [pwaStrictReceiptSelector, ...managedDeviceSelectors];
@@ -751,8 +751,55 @@ const buildBundleInputs = async ({
     sourceSha,
     drillId: artifactDrillClosure?.drillNamespace ?? null,
     foundationBaseline: policies.foundationBaseline,
+    p0aPolicy: policies.p0aPolicy,
   });
   const evidenceBytesByAuthority = new Map();
+  let foundationBaselineClosure = null;
+  if (
+    targetDefinitions.some(
+      ({ collectorAuthorityKind }) =>
+        collectorAuthorityKind === "foundation-baseline-closure",
+    )
+  ) {
+    const closureReference = referenceFromSha256(
+      store.namespace,
+      values.foundationBaselineClosureSha256,
+    );
+    foundationBaselineClosure = await readFoundationBaselineClosureForPhaseExit(
+      {
+        store,
+        reference: closureReference,
+        expectedSourceSha: sourceSha,
+        cwd: root,
+        providerPolicy: policies.providerPolicy,
+        databaseContract: policies.databaseContract,
+        controlStorePolicy: policies.storePolicy,
+        approvalPolicy: policies.approvalPolicy,
+        p0aPolicy: policies.p0aPolicy,
+        currentWorkflowRunId,
+      },
+    );
+    const baselineEvidence = buildFoundationBaselinePhaseExitEvidence({
+      authorityReadback: foundationBaselineClosure,
+      subject,
+      sourceSha,
+      providerPolicy: policies.providerPolicy,
+      approvalPolicy: policies.approvalPolicy,
+      storePolicy: policies.storePolicy,
+      databaseContract: policies.databaseContract,
+    });
+    for (const definition of targetDefinitions) {
+      if (definition.collectorAuthorityKind === "foundation-baseline-closure") {
+        const evidence = baselineEvidence.get(definition.authority);
+        if (evidence === undefined) {
+          throw new Error(
+            `Foundation baseline closure does not resolve ${definition.authority}`,
+          );
+        }
+        evidenceBytesByAuthority.set(definition.authority, evidence.bytes);
+      }
+    }
+  }
   if (collectors.has("quality-run")) {
     evidenceBytesByAuthority.set(
       "quality-run",
@@ -880,7 +927,9 @@ const buildBundleInputs = async ({
         ? remoteProduction.authority.reviewedWorkflowRun
         : authority === managedDeviceAuthority
           ? managedDeviceCollectorAuthority.reference
-          : collectors.get(authority).reference,
+          : definition.collectorAuthorityKind === "foundation-baseline-closure"
+            ? foundationBaselineClosure.reference
+            : collectors.get(authority).reference,
       productionAuthority: isRemote ? reviewedRemote.reference : null,
       evidence: immutableReference(store.namespace, evidenceBytes),
     };

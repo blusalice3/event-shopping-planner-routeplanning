@@ -105,6 +105,8 @@ const AUTHORITY_DEFINITIONS = Object.freeze(
       kind: "phase-exit-external-bindings/v1",
       collectorWorkflowPath: ".github/workflows/release.yml",
       collectorImplemented: true,
+      collectorOperation: "produce-foundation-baseline-closure",
+      collectorAuthorityKind: "foundation-baseline-closure",
       collectorArtifact: {
         nameTemplate: "foundation-external-bindings-{sourceSha}-{runAttempt}",
         fileName: "foundation-external-bindings.json",
@@ -118,6 +120,8 @@ const AUTHORITY_DEFINITIONS = Object.freeze(
       kind: "phase-exit-bootstrap-recovery-drill/v1",
       collectorWorkflowPath: ".github/workflows/release.yml",
       collectorImplemented: true,
+      collectorOperation: "produce-foundation-baseline-closure",
+      collectorAuthorityKind: "foundation-baseline-closure",
       collectorArtifact: {
         nameTemplate: "foundation-bootstrap-recovery-{sourceSha}-{runAttempt}",
         fileName: "foundation-bootstrap-recovery.json",
@@ -194,7 +198,7 @@ const AUTHORITY_DEFINITIONS = Object.freeze(
     {
       gate: "P0-DATA",
       authority: "backup-restore-rehearsal",
-      kind: "phase-exit-backup-restore-rehearsal/v1",
+      kind: "phase-exit-backup-restore-rehearsal/v2",
       collectorWorkflowPath: ".github/workflows/release.yml",
       collectorImplemented: true,
       collectorArtifact: {
@@ -289,8 +293,8 @@ const AUTHORITY_DEFINITIONS = Object.freeze(
 );
 
 const AUTHORITY_READER_KIND_BY_ID = Object.freeze({
-  "external-bindings": "derived-reviewed-artifact",
-  "bootstrap-recovery-drill": "derived-reviewed-artifact",
+  "external-bindings": "foundation-baseline-closure",
+  "bootstrap-recovery-drill": "foundation-baseline-closure",
   "quality-run": "generic-reviewed-artifact",
   "physical-performance": "physical-performance-artifact",
   "artifact-provider-control-store-drill": "derived-reviewed-artifact",
@@ -344,6 +348,8 @@ export const PHASE_EXIT_EXTERNAL_AUTHORITIES = Object.freeze(
       mediaType,
       collectorWorkflowPath,
       collectorImplemented,
+      collectorOperation,
+      collectorAuthorityKind,
     }) =>
       Object.freeze({
         gate,
@@ -351,6 +357,8 @@ export const PHASE_EXIT_EXTERNAL_AUTHORITIES = Object.freeze(
         mediaType,
         collectorWorkflowPath,
         collectorImplemented,
+        collectorOperation: collectorOperation ?? null,
+        collectorAuthorityKind: collectorAuthorityKind ?? null,
       }),
   ),
 );
@@ -678,7 +686,7 @@ export const projectPhaseExitAuthoritySubject = ({
   targetGate,
   sourceSha,
   drillId = null,
-  foundationBaseline = null,
+  p0aPolicy = null,
 }) => {
   if (
     !FORMAL_PHASE_EXIT_GATES.includes(targetGate) ||
@@ -705,12 +713,9 @@ export const projectPhaseExitAuthoritySubject = ({
     const snapshot = current.snapshot;
     const initialized = current.records[0];
     const bootstrapSourceSha =
-      foundationBaseline?.bootstrapBaselineSourceSha ?? null;
+      p0aPolicy?.bootstrapRecovery?.bootstrapSourceSha ?? null;
     const rawDistManifestSha256 =
-      foundationBaseline?.external?.bootstrapBaseline?.rawDistManifestSha256 ??
-      foundationBaseline?.baselineEvidence?.artifactObservation
-        ?.rawDistManifestSha256 ??
-      null;
+      p0aPolicy?.bootstrapRecovery?.rawDistManifestSha256 ?? null;
     if (
       initialized?.event?.eventType !== "state-initialized" ||
       initialized.sequence !== 1 ||
@@ -1107,9 +1112,10 @@ const assertArtifactDrill = (result, context) => {
       "controlStoreReceiptSha256",
       "routeProbeCount",
       "casConflictDenied",
-      "credentialDenialVerified",
       "multiDomainAssignmentVerified",
       "packageRedeployVerified",
+      "readerVisibilityDenied",
+      "readerWriteDenied",
       "reconcileVerified",
       "outcome",
     ],
@@ -1135,9 +1141,10 @@ const assertArtifactDrill = (result, context) => {
     !Number.isSafeInteger(result.routeProbeCount) ||
     result.routeProbeCount < 1 ||
     result.casConflictDenied !== true ||
-    result.credentialDenialVerified !== true ||
     result.multiDomainAssignmentVerified !== true ||
     result.packageRedeployVerified !== true ||
+    result.readerVisibilityDenied !== true ||
+    result.readerWriteDenied !== true ||
     result.reconcileVerified !== true ||
     result.outcome !== "succeeded"
   ) {
@@ -1893,7 +1900,7 @@ const readBrowserCollectorEvidence = async ({
   if (definition.authority === "bootstrap-recovery-drill") {
     assertFoundationBootstrapRecoveryObservation(observation);
     const bootstrapSourceResolution = resolveBootstrapFoundationSource({
-      bootstrapSourceSha: foundationBaseline.bootstrapBaselineSourceSha,
+      bootstrapSourceSha: p0aPolicy.bootstrapRecovery.bootstrapSourceSha,
       cwd: repositoryRoot,
     });
     const raw = await readStoredFoundationBootstrapRecoveryAuthority({
@@ -1905,7 +1912,6 @@ const readBrowserCollectorEvidence = async ({
       databaseContract,
       storePolicy,
       approvalPolicy,
-      artifactDrillPolicy,
       foundationBaseline,
       toolchainPolicy,
       bootstrapSourceResolution,
@@ -1915,10 +1921,6 @@ const readBrowserCollectorEvidence = async ({
       observation.sourceSha !== sourceSha ||
       observation.collectorIdentity.runId !== workflowRun.runId ||
       observation.collectorIdentity.runAttempt !== workflowRun.runAttempt ||
-      !sameCanonicalValue(
-        raw.raw.collector.reviewedWorkflowRun,
-        collectorAuthority.artifactReceipt.reviewedWorkflowRun,
-      ) ||
       !sameCanonicalValue(
         observation.oidcReceipt,
         raw.raw.collector.oidcReceipt,
@@ -2329,7 +2331,8 @@ export const buildBrowserPhaseExitEvidence = ({
 }) => {
   const definition = AUTHORITY_BY_ID.get(authority);
   if (
-    !DERIVED_REVIEWED_ARTIFACT_AUTHORITIES.has(authority) ||
+    (!DERIVED_REVIEWED_ARTIFACT_AUTHORITIES.has(authority) &&
+      !["external-bindings", "bootstrap-recovery-drill"].includes(authority)) ||
     definition?.collectorImplemented !== true
   ) {
     throw new Error("Browser phase authority evidence kind is invalid");
@@ -2727,6 +2730,7 @@ export const resolveExternalPhaseExitAuthorities = async (options) => {
         ? bundle.entries?.[0]?.subject?.drillId
         : null,
     foundationBaseline: options.foundationBaseline,
+    p0aPolicy: options.p0aPolicy,
   });
   const entries = assertBundleShape({
     bundle,
@@ -2795,6 +2799,7 @@ export const resolveExternalPhaseExitAuthorities = async (options) => {
                 databaseContract: options.databaseContract,
                 controlStorePolicy: options.storePolicy,
                 approvalPolicy: options.approvalPolicy,
+                p0aPolicy: options.p0aPolicy,
                 currentWorkflowRunId: options.currentWorkflowRunId,
               })
             : definition.collectorAuthorityKind ===
