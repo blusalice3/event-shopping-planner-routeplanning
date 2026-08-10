@@ -260,7 +260,7 @@ begin
       0,
       null
     )
-    on conflict (namespace) do nothing;
+    on conflict on constraint release_state_heads_pkey do nothing;
   end if;
 
   select *
@@ -426,7 +426,7 @@ begin
     0,
     null
   )
-  on conflict (namespace) do nothing;
+  on conflict on constraint release_state_heads_pkey do nothing;
 
   committed_clock := clock_timestamp();
   insert into foundation_release.release_evidence_objects (
@@ -444,7 +444,7 @@ begin
     requested_object_bytes,
     committed_clock
   )
-  on conflict (namespace, sha256) do nothing;
+  on conflict on constraint release_evidence_objects_pkey do nothing;
 
   if found then
     return query

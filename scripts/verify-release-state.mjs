@@ -252,10 +252,10 @@ for (const definition of [
 const migrationText = migrationBytes[0].toString("utf8").toLowerCase();
 for (const fragment of [
   "insert into foundation_release.release_state_heads",
-  "on conflict (namespace) do nothing",
+  "on conflict on constraint release_state_heads_pkey do nothing",
   "event envelope does not match cas arguments",
   "append id replay bytes differ",
-  "on conflict (namespace, sha256) do nothing",
+  "on conflict on constraint release_evidence_objects_pkey do nothing",
   "revoke all on all tables in schema foundation_release from public",
 ]) {
   if (!migrationText.includes(fragment)) {

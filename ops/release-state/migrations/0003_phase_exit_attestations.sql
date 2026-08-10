@@ -195,7 +195,7 @@ begin
       0,
       null
     )
-    on conflict (namespace) do nothing;
+    on conflict on constraint release_state_heads_pkey do nothing;
   end if;
 
   select *

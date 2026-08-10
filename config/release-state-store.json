@@ -20,7 +20,7 @@
   "migrations": [
     {
       "path": "ops/release-state/migrations/0001_release_state_store.sql",
-      "sha256": "772493b153e661e284acc4a7442b8c1b6b6b9a803fd7e97af4b3dc7ab246f553"
+      "sha256": "5017b393af5120f96ccdd29bfcfd82be87969a34a930a331cc0682541af09365"
     },
     {
       "path": "ops/release-state/migrations/0002_acceptance_evidence_chains.sql",
@@ -28,10 +28,10 @@
     },
     {
       "path": "ops/release-state/migrations/0003_phase_exit_attestations.sql",
-      "sha256": "e24ca925ffa0d378df1d78b7eac595cc7458ab742977291d8023f684362ba61a"
+      "sha256": "f2456234be5c068c49ea2d28075112f9eb762ed865e5dccfc75ed03691660ab4"
     }
   ],
-  "migrationSetSha256": "af1087801f3546215b950cc0ac9458e0cdecde0974a7b91893f06eb6f6aec179",
+  "migrationSetSha256": "6c823b6333374606b58ac922b7f0dff12f2bdc593e68f4316630beb1f767c4e5",
   "blockerCodes": [
     "control-database-host-unconfigured",
     "control-database-name-unconfigured",
