@@ -6,6 +6,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
+import type { PreferencePersistencePort } from "../app/ports/PersistenceCommandPort";
 
 export type UIVisibilityConfig = {
   header: boolean;
@@ -47,11 +48,13 @@ type DeferredUIVisibilitySettingsParams = {
   setVisibilityOverride: Dispatch<SetStateAction<boolean>>;
 };
 
-export function useUIVisibilitySettings() {
+export function useUIVisibilitySettings(
+  preferences: PreferencePersistencePort,
+) {
   const [uiVisibilitySettings, setUiVisibilitySettings] =
     useState<UIVisibilitySettings>(() => {
       try {
-        const saved = localStorage.getItem("uiVisibilitySettings");
+        const saved = preferences.loadPreference("uiVisibilitySettings");
         if (saved) {
           return { ...DEFAULT_UI_VISIBILITY, ...JSON.parse(saved) };
         }
@@ -62,11 +65,11 @@ export function useUIVisibilitySettings() {
     });
 
   useEffect(() => {
-    localStorage.setItem(
+    preferences.savePreference(
       "uiVisibilitySettings",
       JSON.stringify(uiVisibilitySettings),
     );
-  }, [uiVisibilitySettings]);
+  }, [preferences, uiVisibilitySettings]);
 
   return { uiVisibilitySettings, setUiVisibilitySettings } as const;
 }

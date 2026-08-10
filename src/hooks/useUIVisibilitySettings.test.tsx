@@ -11,6 +11,11 @@ import {
 
 const cloneSettings = (settings: UIVisibilitySettings): UIVisibilitySettings =>
   structuredClone(settings);
+const preferences = {
+  loadPreference: (key: string) => localStorage.getItem(key),
+  savePreference: (key: string, value: string) =>
+    localStorage.setItem(key, value),
+};
 
 describe("useUIVisibilitySettings", () => {
   beforeEach(() => {
@@ -25,7 +30,7 @@ describe("useUIVisibilitySettings", () => {
       }),
     );
 
-    const { result } = renderHook(() => useUIVisibilitySettings());
+    const { result } = renderHook(() => useUIVisibilitySettings(preferences));
 
     expect(result.current.uiVisibilitySettings.execute_pc.header).toBe(false);
     expect(result.current.uiVisibilitySettings.showPersistenceStatus).toBe(
@@ -39,7 +44,7 @@ describe("useUIVisibilitySettings", () => {
       JSON.stringify({ showPersistenceStatus: false }),
     );
 
-    const { result } = renderHook(() => useUIVisibilitySettings());
+    const { result } = renderHook(() => useUIVisibilitySettings(preferences));
 
     expect(result.current.uiVisibilitySettings.showPersistenceStatus).toBe(
       false,

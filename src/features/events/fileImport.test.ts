@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { AppData } from "../../app/ports/PersistenceCommandPort";
 import type { ShoppingItem } from "../../types/item";
 import { DEFAULT_BLOCK_DETECTION_SETTINGS } from "../../types/map";
 import { createAppBackup, parseAppBackup } from "../../utils/appBackup";
-import type { AppData } from "../../utils/indexedDB";
 import { buildEventRestoreData } from "./backupRestore";
 import {
   buildXlsxEventRestoreSource,

@@ -19,9 +19,8 @@ import {
   rotatePointAroundCenter,
   useCanvasViewport,
 } from "../features/map/canvas/useCanvasViewport";
-import { extractNumberFromItemNumber } from "../utils/xlsxMapParser";
+import { extractNumberFromItemNumber } from "../xlsx/domain/itemNumber";
 import { findRouteLookupNumberCell } from "../utils/mapRoutingSignature";
-import { findPath, simplifyPath } from "../utils/pathfinding";
 import {
   buildSpaceKey,
   normalizeBaseSpaceNumber,
@@ -263,7 +262,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   hallDefinitions,
   rotationAngle = 0,
   onRotationAngleChange,
-  allVisitKeys = [],
   currentPhaseIndex = 0,
   formalCurrentPhaseIndex,
   currentRouteIndex = currentPhaseIndex,
@@ -274,8 +272,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   onViewportRestoreApplied,
   numberCellOutlineStyle = "rounded",
   mapCenteringMode = "prevToCurrent",
-  precomputedVisitKeyCellMap,
-  precomputedAllVisitCellCoords,
   precomputedRouteSegments,
   routeDiagnostics,
 }) => {
@@ -523,16 +519,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   // route-progress rendering continue to use the official position.
   const currentCellCoords = temporaryCellCoords ?? officialCellCoords;
 
-  const nextCellCoords = useMemo(() => {
-    for (const [key, state] of cellStates.entries()) {
-      if (state.isNextDestination) {
-        const [row, col] = key.split("-").map(Number);
-        return { row, col };
-      }
-    }
-    return null;
-  }, [cellStates]);
-
   const prevCellCoords = useMemo(() => {
     for (const [key, state] of cellStates.entries()) {
       if (state.isPreviousPosition) {
@@ -626,8 +612,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   }, [mapData.blocks]);
 
   // ルート再計算を避けるため、FocusMode 側で事前計算したデータを使用する。
-  const allVisitCellCoords = precomputedAllVisitCellCoords || [];
-  const routeSegments = precomputedRouteSegments || [];
+  const routeSegments = useMemo(
+    () => precomputedRouteSegments ?? [],
+    [precomputedRouteSegments],
+  );
 
   const findHallForCell = useCallback(
     (row: number, col: number): HallDefinition | null => {
@@ -677,61 +665,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     if (!prevInSameHall) return false;
     return true;
   }, [prevCellCoords, currentCellCoords, prevInSameHall]);
-
-  const routeBoundsAll = useMemo(() => {
-    if (!currentCellCoords) return null;
-
-    let minRow = currentCellCoords.row;
-    let maxRow = currentCellCoords.row;
-    let minCol = currentCellCoords.col;
-    let maxCol = currentCellCoords.col;
-
-    if (nextCellCoords) {
-      minRow = Math.min(minRow, nextCellCoords.row);
-      maxRow = Math.max(maxRow, nextCellCoords.row);
-      minCol = Math.min(minCol, nextCellCoords.col);
-      maxCol = Math.max(maxCol, nextCellCoords.col);
-    }
-
-    if (prevCellCoords && showPrevRoute) {
-      minRow = Math.min(minRow, prevCellCoords.row);
-      maxRow = Math.max(maxRow, prevCellCoords.row);
-      minCol = Math.min(minCol, prevCellCoords.col);
-      maxCol = Math.max(maxCol, prevCellCoords.col);
-    }
-
-    const margin = 3;
-    minRow = Math.max(1, minRow - margin);
-    maxRow = maxRow + margin;
-    minCol = Math.max(1, minCol - margin);
-    maxCol = maxCol + margin;
-
-    return { minRow, maxRow, minCol, maxCol };
-  }, [currentCellCoords, nextCellCoords, prevCellCoords, showPrevRoute]);
-
-  const routeBoundsCurrentNext = useMemo(() => {
-    if (!currentCellCoords) return null;
-
-    let minRow = currentCellCoords.row;
-    let maxRow = currentCellCoords.row;
-    let minCol = currentCellCoords.col;
-    let maxCol = currentCellCoords.col;
-
-    if (nextCellCoords) {
-      minRow = Math.min(minRow, nextCellCoords.row);
-      maxRow = Math.max(maxRow, nextCellCoords.row);
-      minCol = Math.min(minCol, nextCellCoords.col);
-      maxCol = Math.max(maxCol, nextCellCoords.col);
-    }
-
-    const margin = 3;
-    minRow = Math.max(1, minRow - margin);
-    maxRow = maxRow + margin;
-    minCol = Math.max(1, minCol - margin);
-    maxCol = maxCol + margin;
-
-    return { minRow, maxRow, minCol, maxCol };
-  }, [currentCellCoords, nextCellCoords]);
 
   const calcOptimalZoom = useCallback(
     (
@@ -918,8 +851,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         setOffset({ x: 0, y: 0 });
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    cellSize,
     selectedHall,
     routeBounds,
     currentCellCoords,
@@ -928,6 +861,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     mapCenteringMode,
     calcOptimalZoom,
     calculateCenteredOffset,
+    containerRef,
+    rotationRadians,
+    setOffset,
   ]);
 
   useEffect(() => {
@@ -977,7 +913,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         rotationRadians,
       ),
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     positionKeys.centerVisitKey,
     recenterRevision,
@@ -988,6 +923,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     mapCenteringMode,
     calcOptimalZoom,
     calculateCenteredOffset,
+    containerRef,
+    rotationRadians,
+    setOffset,
   ]);
 
   // 描画補助関数。
@@ -1036,7 +974,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         rotationRadians,
       ),
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     mapCenteringMode,
     routeBounds,
@@ -1045,6 +982,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     showPrevRoute,
     calcOptimalZoom,
     calculateCenteredOffset,
+    containerRef,
+    rotationRadians,
+    setOffset,
   ]);
 
   const restoredViewportRevisionRef = useRef<number | null>(null);
@@ -1114,8 +1054,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
-    canvas.style.width = `${containerWidth}px`;
-    canvas.style.height = `${containerHeight}px`;
     canvas.width = containerWidth * dpr;
     canvas.height = containerHeight * dpr;
 
@@ -2046,6 +1984,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
     ctx.restore();
   }, [
+    canvasRef,
+    containerRef,
     mapData,
     cellSize,
     cellStates,
@@ -2053,13 +1993,11 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     numberCellSet,
     mergedCellsMap,
     routeSegments,
-    resolvedFormalPhaseIndex,
     resolvedFormalRouteIndex,
     dpr,
     isDetailedView,
     showNumbers,
     showBorders,
-    currentCellCoords,
     resolvedFormalPhase,
     isDarkMode,
     isRotationInteracting,
@@ -2068,6 +2006,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     mapCenterY,
     numberCellOutlineStyle,
     routeCrossingData,
+    offsetRef,
   ]);
 
   // rAF から最新の描画関数を呼べるよう drawCanvasRef を更新する。
@@ -2197,7 +2136,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       minY: containerHeight - rotatedMaxY,
       maxY: -rotatedMinY,
     };
-  }, [activeScrollBounds, cellSize, mapCenterX, mapCenterY, rotationRadians]);
+  }, [
+    activeScrollBounds,
+    cellSize,
+    containerRef,
+    mapCenterX,
+    mapCenterY,
+    rotationRadians,
+  ]);
 
   const isCellInBlock = useCallback(
     (row: number, col: number, block: BlockDefinition): boolean => {
@@ -2236,7 +2182,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         viewY: (clientY - rect.top) / appScale,
       };
     },
-    [appScale],
+    [appScale, canvasRef],
   );
 
   const handleTapAtViewPosition = useCallback(
@@ -2340,7 +2286,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       if (!metrics) return;
       handleTapAtViewPosition(metrics.viewX, metrics.viewY);
     },
-    [getPointerViewMetrics, handleTapAtViewPosition],
+    [
+      getPointerViewMetrics,
+      handleTapAtViewPosition,
+      isDraggingRef,
+      suppressClickUntilRef,
+    ],
   );
 
   const handlePointerDown = useCallback(
@@ -2354,7 +2305,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       dragStartRef.current = { x: e.clientX, y: e.clientY };
       dragStartOffsetRef.current = { ...offsetRef.current };
     },
-    [],
+    [
+      activeTouchesRef,
+      dragStartOffsetRef,
+      dragStartRef,
+      isDraggingRef,
+      offsetRef,
+      setIsDragging,
+    ],
   );
 
   const handlePointerMove = useCallback(
@@ -2397,7 +2355,19 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         });
       }
     },
-    [appScale, calculateScrollLimits],
+    [
+      activeTouchesRef,
+      appScale,
+      calculateScrollLimits,
+      dragStartOffsetRef,
+      dragStartRef,
+      drawCanvasRef,
+      isDraggingRef,
+      isPinchGestureRef,
+      offsetRef,
+      rafPendingRef,
+      setIsDragging,
+    ],
   );
 
   const finishPointerInteraction = useCallback(() => {
@@ -2407,7 +2377,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     setTimeout(() => {
       setIsDragging(false);
     }, 100);
-  }, []);
+  }, [isDraggingRef, offsetRef, setIsDragging, setOffsetState]);
 
   const handlePointerUp = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -2434,7 +2404,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
       finishPointerInteraction();
     },
-    [finishPointerInteraction, getPointerViewMetrics, handleTapAtViewPosition],
+    [
+      finishPointerInteraction,
+      getPointerViewMetrics,
+      handleTapAtViewPosition,
+      isDraggingRef,
+      isPinchGestureRef,
+      suppressClickUntilRef,
+    ],
   );
 
   const handlePointerLeave = useCallback(() => {
@@ -2448,11 +2425,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   return (
     <div
       ref={containerRef}
-      className="relative bg-white dark:bg-slate-800 overflow-hidden"
-      style={{
-        width: "100%",
-        height: "100%",
-      }}
+      className="relative h-full w-full overflow-hidden bg-white dark:bg-slate-800"
     >
       <canvas
         ref={canvasRef}
@@ -2462,10 +2435,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerLeave}
         onPointerCancel={handlePointerCancel}
-        style={{
-          cursor: isDragging ? "grabbing" : "grab",
-          touchAction: "none",
-        }}
+        className={`block h-full w-full touch-none ${
+          isDragging ? "cursor-grabbing" : "cursor-grab"
+        }`}
       />
       {routeDiagnostics && (
         <RouteDiagnosticsOverlay diagnostics={routeDiagnostics} />

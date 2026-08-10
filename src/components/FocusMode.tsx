@@ -58,7 +58,7 @@ import { resolveResumeChoice } from "./focus/resumeChoice";
 import { useAutoSkipEmptyVisit } from "./focus/hooks/useAutoSkipEmptyVisit";
 import { useFocusSessionState } from "./focus/hooks/useFocusSessionState";
 import { useResumeFlow } from "./focus/hooks/useResumeFlow";
-import { extractNumberFromItemNumber } from "../utils/xlsxMapParser";
+import { extractNumberFromItemNumber } from "../xlsx/domain/itemNumber";
 import {
   buildItemRoutingSignature,
   sortItemsByHallOrder,
@@ -164,6 +164,7 @@ const SWIPE_THRESHOLD = 50;
 const FOOTER_HEIGHT_SP = 56;
 const HEADER_HEIGHT = 64;
 const FOOTER_HEIGHT_PC = 64;
+const FOOTER_OVERLAP_GUARD_PX = 1;
 const getVisitKey = (item: ShoppingItem): string => {
   const priority = item.priorityLevel || "none";
   return `${item.eventDate.trim()}-${buildSpaceKey(item.block, item.number)}-${priority}`;
@@ -326,10 +327,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     url: "",
     purchaseStatus: "Purchased" as "Purchased" | "Postpone" | "Late",
   });
-  // マップが利用可能かどうか
-  const hasMapData = useMemo(() => {
-    return mapData && Object.keys(mapData).length > 0;
-  }, [mapData]);
   const headerContainerClass = useMemo(
     () =>
       layoutMode === "smartphone"
@@ -677,6 +674,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
       currentPhaseIndex,
       currentPostponedItemIds,
       latePhaseItemIds,
+      setCurrentPhase,
+      setCurrentPhaseIndex,
+      setIsCompleted,
+      setIsNextButtonBlinking,
+      setLatePhaseItemIds,
+      setPostponedPhaseItemIds,
+      setSavedPhaseIndices,
     ],
   );
   const handleNavigatorGuardResult = useCallback(
@@ -688,7 +692,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
           : new Set(),
       );
     },
-    [],
+    [setBlinkingPriceItemIds],
   );
   const getNavigatorDeferredLimitedItemIds = useCallback(
     (entry: NavigatorEntry) => {
@@ -723,7 +727,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     recenterRevision,
     moveTemporaryBy,
     isSpaceAggregate,
-    aggregateSpaceKey,
     movementBasisPhase,
     temporarySubview,
     movementPhaseSelectionOpen,
@@ -773,34 +776,20 @@ const FocusMode: React.FC<FocusModeProps> = ({
     : 0;
   // FocusMode lives inside the app-level scale transform, while the rail is a
   // body portal. Convert its physical hit width back to FocusMode units.
-  const navPrevStyle = useMemo(
-    () => ({
-      left: `${16 + navButtonOffset.left + (activeNavigatorRailSide === "left" ? railClearance : 0)}px`,
-      transition: "left 0.2s ease-out",
-    }),
-    [activeNavigatorRailSide, navButtonOffset.left, railClearance],
-  );
-  const navNextStyle = useMemo(
-    () => ({
-      right: `${16 + navButtonOffset.right + (activeNavigatorRailSide === "right" ? railClearance : 0)}px`,
-      transition: "right 0.2s ease-out",
-    }),
-    [activeNavigatorRailSide, navButtonOffset.right, railClearance],
-  );
-  const splitMapNextStyle = useMemo(
-    () => ({
-      right: `${16 + (activeNavigatorRailSide === "right" ? railClearance : 0)}px`,
-      transition: "right 0.2s ease-out",
-    }),
-    [activeNavigatorRailSide, railClearance],
-  );
-  const completionPrevStyle = useMemo(
-    () => ({
-      left: `${16 + (activeNavigatorRailSide === "left" ? railClearance : 0)}px`,
-      transition: "left 0.2s ease-out",
-    }),
-    [activeNavigatorRailSide, railClearance],
-  );
+  const navPrevLeftPx =
+    16 +
+    navButtonOffset.left +
+    (activeNavigatorRailSide === "left" ? railClearance : 0);
+  const navNextRightPx =
+    16 +
+    navButtonOffset.right +
+    (activeNavigatorRailSide === "right" ? railClearance : 0);
+  const splitMapNextRightPx =
+    16 + (activeNavigatorRailSide === "right" ? railClearance : 0);
+  const completionPrevLeftPx =
+    16 + (activeNavigatorRailSide === "left" ? railClearance : 0);
+  const smartphoneFocusHeight = `calc((100dvh - ${measuredFooterHeight + FOOTER_OVERLAP_GUARD_PX}px) / ${safeAppScale})`;
+  const desktopFocusHeight = `calc((100dvh - ${HEADER_HEIGHT + measuredFooterHeight + FOOTER_OVERLAP_GUARD_PX}px) / ${safeAppScale})`;
   useEffect(() => {
     if (!isInspecting) return;
     closeNavigatorEditableSurfaces();
@@ -840,11 +829,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const nextVisit = useMemo(
     () =>
       resolveNavigatorEntryVisit(navigatorEntries[displayNavigatorIndex + 1]),
-    [displayNavigatorIndex, navigatorEntries, resolveNavigatorEntryVisit],
-  );
-  const prevVisit = useMemo(
-    () =>
-      resolveNavigatorEntryVisit(navigatorEntries[displayNavigatorIndex - 1]),
     [displayNavigatorIndex, navigatorEntries, resolveNavigatorEntryVisit],
   );
   const currentVisitDisplayItems = useMemo(
@@ -1393,7 +1377,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       ...prev,
       [currentPhase]: currentPhaseIndex,
     }));
-  }, [currentPhase, currentPhaseIndex]);
+  }, [currentPhase, currentPhaseIndex, setSavedPhaseIndices]);
   useEffect(() => {
     if (!onSessionStateChange) return;
     if (isResumeTransitioning) return;
@@ -1460,6 +1444,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
       isInspecting,
       isTemporaryActive,
       savedPhaseIndices,
+      setNotification,
+      setPhaseChangeDialog,
       visitsByPhase,
     ],
   );
@@ -1534,6 +1520,15 @@ const FocusMode: React.FC<FocusModeProps> = ({
     isInspecting,
     latePhaseItemIds,
     clearAutoAdvanceTimer,
+    setCurrentPhase,
+    setCurrentPhaseIndex,
+    setIsCompleted,
+    setIsNextButtonBlinking,
+    setLatePhaseItemIds,
+    setNotification,
+    setPhaseChangeDialog,
+    setPostponedPhaseItemIds,
+    setSavedPhaseIndices,
   ]);
   const executePhaseChangeFromSaved = useCallback(() => {
     if (isInspecting) {
@@ -1604,6 +1599,15 @@ const FocusMode: React.FC<FocusModeProps> = ({
     isInspecting,
     latePhaseItemIds,
     clearAutoAdvanceTimer,
+    setCurrentPhase,
+    setCurrentPhaseIndex,
+    setIsCompleted,
+    setIsNextButtonBlinking,
+    setLatePhaseItemIds,
+    setNotification,
+    setPhaseChangeDialog,
+    setPostponedPhaseItemIds,
+    setSavedPhaseIndices,
   ]);
   // フェーズ切り替えダイアログをキャンセル
   const cancelPhaseChange = useCallback(() => {
@@ -1613,7 +1617,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       hasSavedIndex: false,
       savedIndex: 0,
     });
-  }, []);
+  }, [setPhaseChangeDialog]);
   // 次へボタンの点滅を更新
   useEffect(() => {
     if (currentVisitDisplayItems.length === 0) {
@@ -1650,6 +1654,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
     currentVisitDisplayItems,
     currentVisitLimitedMissingItems,
     currentVisitUndefinedPriceItems,
+    setBlinkingPriceItemIds,
+    setIsNextButtonBlinking,
   ]);
   // 通知を自動で消す
   useEffect(() => {
@@ -1657,7 +1663,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       const timer = setTimeout(() => setNotification(null), 2000);
       return () => clearTimeout(timer);
     }
-  }, [notification]);
+  }, [notification, setNotification]);
 
   useEffect(() => {
     if (!bulkLimitedMessage) return;
@@ -1807,6 +1813,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
     executeItems,
     clearAutoAdvanceTimer,
     latePhaseItemIds,
+    setCurrentPhase,
+    setCurrentPhaseIndex,
+    setIsCompleted,
+    setIsNextButtonBlinking,
+    setLatePhaseItemIds,
+    setNotification,
+    setPostponedPhaseItemIds,
   ]);
   const handleNext = useCallback(() => {
     if (isInspecting) {
@@ -1869,6 +1882,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
     isTemporaryActive,
     moveTemporaryBy,
     moveToNext,
+    setBlinkingPriceItemIds,
+    setNotification,
   ]);
   // 前の訪問先へ
   const handlePrev = useCallback(() => {
@@ -1934,6 +1949,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
     postponedPhaseItemIds,
     latePhaseItemIds,
     moveTemporaryBy,
+    setCurrentPhase,
+    setCurrentPhaseIndex,
+    setIsCompleted,
+    setIsNextButtonBlinking,
+    setNotification,
   ]);
   // アイテム更新ハンドラ
   const handleUpdateItem = useCallback(
@@ -1978,6 +1998,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
       currentPhaseIndex,
       isInspecting,
       isTemporaryActive,
+      setLastInteractedItemId,
+      setLastPurchaseChangeAt,
+      setNotification,
     ],
   );
 
@@ -2377,6 +2400,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
       isSpaceAggregate,
       isTemporaryActive,
       isInspecting,
+      setLastInteractedItemId,
+      setLastPurchaseChangeAt,
       setNotification,
       startLimitedBulkFlow,
       updateItemWithDeferredCleanup,
@@ -2601,6 +2626,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       clearAutoAdvanceTimer,
       focusNavigatorRegistrationId,
       isInspecting,
+      setNotification,
       spaceNavigator,
     ],
   );
@@ -2683,7 +2709,14 @@ const FocusMode: React.FC<FocusModeProps> = ({
       `${addItemDialog.block}-${addItemDialog.number} を${statusText}に追加しました`,
     );
     closeAddItemDialog();
-  }, [onAddItem, addItemDialog, newItemForm, closeAddItemDialog, isInspecting]);
+  }, [
+    onAddItem,
+    addItemDialog,
+    newItemForm,
+    closeAddItemDialog,
+    isInspecting,
+    setNotification,
+  ]);
   // 価格のクイック選択オプション
   const priceOptions = useMemo(() => {
     const options: number[] = [0];
@@ -2742,6 +2775,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
       visitsByPhase,
       setResumeChoiceDialog,
       clearAutoAdvanceTimer,
+      setCurrentPhase,
+      setCurrentPhaseIndex,
+      setIsCompleted,
+      setIsNextButtonBlinking,
+      setLastPurchaseChangeAt,
     ],
   );
   const temporaryMovementPhaseChoices = useMemo<TemporaryPhaseChoice[]>(() => {
@@ -2835,7 +2873,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         setNotification(result.message, result.tone);
       }
     },
-    [selectMovementPhase],
+    [selectMovementPhase, setNotification],
   );
   const handleTemporaryRemainingSelect = useCallback(
     (phase: FocusPhase, visitId: string) => {
@@ -2844,7 +2882,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         setNotification(result.message, result.tone);
       }
     },
-    [selectRemainingSpace],
+    [selectRemainingSpace, setNotification],
   );
   const handleTemporaryPromotionPhaseSelect = useCallback(
     (phase: FocusPhase) => {
@@ -2854,7 +2892,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         }
       });
     },
-    [confirmPromotionPhase],
+    [confirmPromotionPhase, setNotification],
   );
   const handleTemporaryReturn = useCallback(() => {
     void spaceNavigator?.returnToPrevious();
@@ -2950,7 +2988,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
             onLimitedMissingClick={() =>
               setCompletionSubView("limitedMissingList")
             }
-            prevButtonStyle={completionPrevStyle}
+            prevButtonLeft={`${completionPrevLeftPx}px`}
           />
         )}
         {resumeChoiceDialogJSX}
@@ -3004,12 +3042,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
     ? getMapVisitKey(formalPrevMapItem)
     : null;
   // App.tsx側で scale されるため、高さは逆補正して実表示高さを安定させる
-  const footerOverlapGuardPx = 1;
   const visibleNotification = bulkLimitedMessage
     ? { message: bulkLimitedMessage.message, tone: "info" as const }
     : notification;
   const visibleNotificationColorClass =
-    visibleNotification?.tone === "warning" ? "bg-red-600" : "bg-blue-600";
+    visibleNotification?.tone === "warning"
+      ? "bg-red-600 attention-outline-red"
+      : "bg-blue-600 attention-outline-blue";
   // フェーズ切り替え確認ダイアログ
   const phaseChangeDialogJSX = (
     <PhaseChangeDialogView
@@ -3079,23 +3118,22 @@ const FocusMode: React.FC<FocusModeProps> = ({
     currentMapData &&
     !isCompleted
   ) {
-    const availableHeight = `calc((100dvh - ${measuredFooterHeight + footerOverlapGuardPx}px) / ${safeAppScale})`;
     return (
       <div
-        className="relative flex flex-col"
-        style={{ height: availableHeight }}
+        data-layout-height={smartphoneFocusHeight}
+        className="esp-layout-height relative flex flex-col"
         data-focus-inspecting={isInspecting || undefined}
       >
         {visibleNotification && (
           <div
-            className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse ${visibleNotificationColorClass}`}
+            className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-attention-outline ${visibleNotificationColorClass}`}
           >
             {visibleNotification.message}
           </div>
         )}
         <div
-          style={{ height: `${splitRatio}%` }}
-          className="relative flex flex-col min-h-0"
+          data-layout-height={`${splitRatio}%`}
+          className="esp-layout-height relative flex min-h-0 flex-col"
         >
           <FocusModeMapControls
             compact
@@ -3159,8 +3197,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
           <div className="w-12 h-1 bg-slate-500 dark:bg-slate-400 rounded-full" />
         </div>
         <div
-          style={{ height: `${100 - splitRatio}%` }}
-          className="overflow-y-auto min-h-0"
+          data-layout-height={`${100 - splitRatio}%`}
+          className="esp-layout-height min-h-0 overflow-y-auto"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
@@ -3237,16 +3275,15 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   }
   if (layoutMode === "pc" && isMapVisible && currentMapData && !isCompleted) {
-    const availableHeight = `calc((100dvh - ${HEADER_HEIGHT + measuredFooterHeight + footerOverlapGuardPx}px) / ${safeAppScale})`;
     return (
       <div
-        className="relative flex"
-        style={{ height: availableHeight }}
+        data-layout-height={desktopFocusHeight}
+        className="esp-layout-height relative flex"
         data-focus-inspecting={isInspecting || undefined}
       >
         {visibleNotification && (
           <div
-            className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse ${visibleNotificationColorClass}`}
+            className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-attention-outline ${visibleNotificationColorClass}`}
           >
             {visibleNotification.message}
           </div>
@@ -3353,14 +3390,14 @@ const FocusMode: React.FC<FocusModeProps> = ({
         </button>
         <button
           onClick={handleNext}
-          style={splitMapNextStyle}
-          className={`fixed top-1/2 transform -translate-y-1/2 w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-xl z-40 ${
+          data-nav-right={`${splitMapNextRightPx}px`}
+          className={`esp-layout-nav-right fixed top-1/2 h-12 w-12 -translate-y-1/2 transform rounded-full text-xl shadow-lg transition-[right] duration-200 ease-out flex items-center justify-center z-40 ${
             nextButtonBlockTone === "both" || nextButtonBlockTone === "price"
-              ? "bg-red-500 hover:bg-red-600 text-white"
+              ? "bg-red-700 hover:bg-red-800 text-white"
               : nextButtonBlockTone === "limited"
-                ? "bg-orange-500 hover:bg-orange-600 text-white"
+                ? "bg-orange-700 hover:bg-orange-800 text-white"
                 : isNextButtonBlinking
-                  ? "bg-green-500 hover:bg-green-600 text-white animate-pulse"
+                  ? "bg-green-700 hover:bg-green-800 text-white animate-attention-outline attention-outline-green"
                   : "bg-blue-600 hover:bg-blue-700 text-white"
           }`}
           title="次の訪問先"
@@ -3404,7 +3441,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     >
       {visibleNotification && (
         <div
-          className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse ${visibleNotificationColorClass}`}
+          className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-attention-outline ${visibleNotificationColorClass}`}
         >
           {visibleNotification.message}
         </div>
@@ -3458,22 +3495,22 @@ const FocusMode: React.FC<FocusModeProps> = ({
         <>
           <button
             onClick={handlePrev}
-            style={navPrevStyle}
-            className="fixed top-1/2 transform -translate-y-1/2 w-14 h-14 bg-slate-600 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl z-40"
+            data-nav-left={`${navPrevLeftPx}px`}
+            className="esp-layout-nav-left fixed top-1/2 h-14 w-14 -translate-y-1/2 transform rounded-full bg-slate-600 text-2xl text-white shadow-lg transition-[left] duration-200 ease-out flex items-center justify-center z-40 hover:bg-slate-700"
             title="前の訪問先"
           >
             ◀
           </button>
           <button
             onClick={handleNext}
-            style={navNextStyle}
-            className={`fixed top-1/2 transform -translate-y-1/2 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-2xl z-40 ${
+            data-nav-right={`${navNextRightPx}px`}
+            className={`esp-layout-nav-right fixed top-1/2 h-14 w-14 -translate-y-1/2 transform rounded-full text-2xl shadow-lg transition-[right] duration-200 ease-out flex items-center justify-center z-40 ${
               nextButtonBlockTone === "both" || nextButtonBlockTone === "price"
-                ? "bg-red-500 hover:bg-red-600 text-white"
+                ? "bg-red-700 hover:bg-red-800 text-white"
                 : nextButtonBlockTone === "limited"
-                  ? "bg-orange-500 hover:bg-orange-600 text-white"
+                  ? "bg-orange-700 hover:bg-orange-800 text-white"
                   : isNextButtonBlinking
-                    ? "bg-green-500 hover:bg-green-600 text-white animate-pulse"
+                    ? "bg-green-700 hover:bg-green-800 text-white animate-attention-outline attention-outline-green"
                     : "bg-blue-600 hover:bg-blue-700 text-white"
             }`}
             title="次の訪問先"

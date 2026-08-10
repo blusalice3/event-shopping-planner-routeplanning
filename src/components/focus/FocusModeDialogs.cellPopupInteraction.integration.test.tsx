@@ -1,7 +1,11 @@
 import React from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { CellItemPopup, type CellTemporaryTarget } from "./FocusModeDialogs";
+import {
+  CellItemPopup,
+  PhaseChangeDialogView,
+  type CellTemporaryTarget,
+} from "./FocusModeDialogs";
 
 const temporaryTarget: CellTemporaryTarget = {
   visitId: "visit-a-01",
@@ -71,6 +75,16 @@ const pointerDown = (element: HTMLElement) => {
 };
 
 describe("CellItemPopup opening-click guard", () => {
+  it("uses the AA green action background", () => {
+    const callbacks = renderOpenPopup();
+
+    expect(getAction("add", callbacks).button).toHaveClass(
+      "bg-green-700",
+      "hover:bg-green-800",
+      "text-white",
+    );
+  });
+
   it.each<PopupAction>(["temporary", "add"])(
     "blocks an opening gesture click for the %s action when the popup received no pointerdown",
     async (action) => {
@@ -109,6 +123,67 @@ describe("CellItemPopup opening-click guard", () => {
       expect(callback).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe("focus dialog accessible white-text backgrounds", () => {
+  it("provides a named modal, contained focus, and opener restoration", () => {
+    const onCancel = vi.fn();
+    const renderDialog = (isOpen: boolean) => (
+      <>
+        <button type="button">フェーズ変更を開く</button>
+        <PhaseChangeDialogView
+          dialog={{
+            isOpen,
+            targetPhase: "postponed",
+            hasSavedIndex: false,
+            savedIndex: 0,
+          }}
+          visitsByPhase={{ normal: [], postponed: [], late: [] }}
+          onStart={vi.fn()}
+          onSaved={vi.fn()}
+          onCancel={onCancel}
+        />
+      </>
+    );
+    const { rerender } = render(renderDialog(false));
+    const opener = screen.getByRole("button", { name: "フェーズ変更を開く" });
+    opener.focus();
+    rerender(renderDialog(true));
+
+    const dialog = screen.getByRole("dialog", {
+      name: "フェーズを切り替えますか？",
+    });
+    const heading = screen.getByRole("heading", {
+      level: 2,
+      name: "フェーズを切り替えますか？",
+    });
+    const descriptionId = dialog.getAttribute("aria-describedby");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveAttribute("aria-labelledby", heading.id);
+    expect(descriptionId).not.toBeNull();
+    expect(document.getElementById(descriptionId!)).toHaveTextContent(
+      "後回しフェーズに移動します",
+    );
+    expect(heading.parentElement).toHaveClass(
+      "from-indigo-600",
+      "to-purple-600",
+      "text-white",
+    );
+    expect(screen.getByText("後回しフェーズに移動します")).not.toHaveClass(
+      "opacity-80",
+    );
+    const cancelButton = screen.getByRole("button", { name: "キャンセル" });
+    expect(cancelButton).toHaveFocus();
+    fireEvent.keyDown(cancelButton, { key: "Tab" });
+    expect(cancelButton).toHaveFocus();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    rerender(renderDialog(false));
+    expect(
+      screen.queryByRole("dialog", { name: "フェーズを切り替えますか？" }),
+    ).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+  });
 });
 
 describe("CellItemPopup backdrop dismissal", () => {

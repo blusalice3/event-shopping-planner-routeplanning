@@ -52,6 +52,15 @@ interface EventListScreenProps {
   onRestoreBackup?: () => void;
 }
 
+const importActionColorClassName =
+  "bg-green-700 text-white transition-colors hover:bg-green-800 focus-visible:bg-green-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2 dark:focus-visible:ring-green-400 dark:focus-visible:ring-offset-slate-900";
+
+const exportBackupActionColorClassName =
+  "bg-blue-600 text-white transition-colors hover:bg-blue-700 focus-visible:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 dark:focus-visible:ring-blue-300 dark:focus-visible:ring-offset-slate-900";
+
+const restoreBackupActionColorClassName =
+  "border border-blue-500 text-blue-700 transition-colors hover:bg-blue-50 focus-visible:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2 dark:text-blue-300 dark:hover:bg-blue-950/40 dark:focus-visible:bg-blue-950/40 dark:focus-visible:ring-blue-300 dark:focus-visible:ring-offset-slate-900";
+
 const EventListScreen: React.FC<EventListScreenProps> = ({
   eventNames,
   onSelect,
@@ -109,7 +118,7 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
           {onImportExportFile && (
             <button
               onClick={onImportExportFile}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 ${importActionColorClassName}`}
             >
               <DocumentArrowUpIcon className="w-5 h-5" />
               Excelファイルを取り込み
@@ -118,7 +127,7 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
           {onExportBackup && (
             <button
               onClick={onExportBackup}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700"
+              className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 ${exportBackupActionColorClassName}`}
             >
               <DocumentArrowDownIcon className="h-5 w-5" />
               JSONバックアップ保存
@@ -127,7 +136,7 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
           {onRestoreBackup && (
             <button
               onClick={onRestoreBackup}
-              className="inline-flex items-center gap-2 rounded-lg border border-blue-500 px-4 py-2 text-blue-700 transition-colors hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/40"
+              className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 ${restoreBackupActionColorClassName}`}
             >
               <DocumentArrowUpIcon className="h-5 w-5" />
               JSONバックアップ復元
@@ -148,7 +157,7 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
           {onImportExportFile && (
             <button
               onClick={onImportExportFile}
-              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm ${importActionColorClassName}`}
             >
               <DocumentArrowUpIcon className="w-4 h-4" />
               Excel取り込み
@@ -157,7 +166,7 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
           {onExportBackup && (
             <button
               onClick={onExportBackup}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white transition-colors hover:bg-blue-700"
+              className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm ${exportBackupActionColorClassName}`}
             >
               <DocumentArrowDownIcon className="h-4 w-4" />
               JSONバックアップ保存
@@ -166,7 +175,7 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
           {onRestoreBackup && (
             <button
               onClick={onRestoreBackup}
-              className="inline-flex items-center gap-2 rounded-lg border border-blue-500 px-3 py-1.5 text-sm text-blue-700 transition-colors hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/40"
+              className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm ${restoreBackupActionColorClassName}`}
             >
               <DocumentArrowUpIcon className="h-4 w-4" />
               JSONバックアップ復元

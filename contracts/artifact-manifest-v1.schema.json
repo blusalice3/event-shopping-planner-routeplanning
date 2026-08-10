@@ -1,0 +1,503 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:event-shopping-planner:artifact-manifest:v1",
+  "title": "ArtifactManifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "sourceSha": {
+      "$ref": "#/$defs/sourceSha"
+    },
+    "buildId": {
+      "$ref": "#/$defs/sourceSha"
+    },
+    "variantId": {
+      "$ref": "#/$defs/sha256"
+    },
+    "releaseRole": {
+      "enum": ["standard", "containment"]
+    },
+    "dimensions": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "releaseRole",
+          "pwaLifecycle",
+          "cssDelivery",
+          "cspMode",
+          "xlsxExecution",
+          "listEngine",
+          "listDefault",
+          "persistenceArchitecture"
+        ]
+      },
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minProperties": 8,
+      "maxProperties": 8
+    },
+    "buildAuthority": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/releaseStateEvidenceRef"
+        },
+        {
+          "$ref": "#/$defs/artifactDrillAuthorityRef"
+        }
+      ]
+    },
+    "targetGate": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/releasePhaseGate"
+        },
+        {
+          "$ref": "#/$defs/artifactDrillGate"
+        }
+      ]
+    },
+    "buildPurpose": {
+      "enum": [
+        "production",
+        "non-promotable-policy-activation-qa",
+        "non-promotable-artifact-drill",
+        "legacy-bootstrap"
+      ]
+    },
+    "promotable": {
+      "type": "boolean"
+    },
+    "buildInputClosureHash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "lockfileSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "toolchainPolicyHash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "publicBuildEnvHash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "providerConfigurationHash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "providerPolicyHash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "releasePolicyHash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "requiredDbCompatibility": {
+      "$ref": "#/$defs/dbCompatibilityBinding"
+    },
+    "publicIdentityKind": {
+      "enum": ["release-identity-v1", "legacy-bootstrap-v1"]
+    },
+    "bootstrap": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "inputUri": {
+              "type": "string",
+              "minLength": 1
+            },
+            "inputSha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "rawDistManifestUri": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rawDistManifestSha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "inputUri",
+            "inputSha256",
+            "rawDistManifestUri",
+            "rawDistManifestSha256"
+          ]
+        }
+      ]
+    },
+    "publicResponseHashes": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^/"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/sha256"
+      }
+    },
+    "roleEntryGraph": {
+      "$ref": "#/$defs/roleEntryGraph"
+    },
+    "roleEntryGraphHash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "outputFiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "$ref": "#/$defs/relativePath"
+          },
+          "sha256": {
+            "$ref": "#/$defs/sha256"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": ["path", "sha256", "size"]
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "sourceSha",
+    "buildId",
+    "variantId",
+    "releaseRole",
+    "dimensions",
+    "buildAuthority",
+    "targetGate",
+    "buildPurpose",
+    "promotable",
+    "buildInputClosureHash",
+    "lockfileSha256",
+    "toolchainPolicyHash",
+    "publicBuildEnvHash",
+    "providerConfigurationHash",
+    "providerPolicyHash",
+    "releasePolicyHash",
+    "requiredDbCompatibility",
+    "publicIdentityKind",
+    "bootstrap",
+    "publicResponseHashes",
+    "roleEntryGraph",
+    "roleEntryGraphHash",
+    "outputFiles"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "publicIdentityKind": {
+            "const": "legacy-bootstrap-v1"
+          }
+        },
+        "required": ["publicIdentityKind"]
+      },
+      "then": {
+        "properties": {
+          "buildAuthority": {
+            "type": "null"
+          },
+          "targetGate": {
+            "type": "null"
+          },
+          "buildPurpose": {
+            "const": "legacy-bootstrap"
+          },
+          "promotable": {
+            "const": false
+          }
+        }
+      },
+      "else": {
+        "oneOf": [
+          {
+            "properties": {
+              "buildAuthority": {
+                "$ref": "#/$defs/releaseStateEvidenceRef"
+              },
+              "targetGate": {
+                "$ref": "#/$defs/releasePhaseGate"
+              },
+              "buildPurpose": {
+                "const": "production"
+              },
+              "promotable": {
+                "const": true
+              }
+            }
+          },
+          {
+            "properties": {
+              "buildAuthority": {
+                "$ref": "#/$defs/releaseStateEvidenceRef"
+              },
+              "targetGate": {
+                "$ref": "#/$defs/policyActivationGate"
+              },
+              "buildPurpose": {
+                "const": "non-promotable-policy-activation-qa"
+              },
+              "promotable": {
+                "const": false
+              }
+            }
+          },
+          {
+            "properties": {
+              "buildAuthority": {
+                "$ref": "#/$defs/artifactDrillAuthorityRef"
+              },
+              "targetGate": {
+                "$ref": "#/$defs/artifactDrillGate"
+              },
+              "buildPurpose": {
+                "const": "non-promotable-artifact-drill"
+              },
+              "promotable": {
+                "const": false
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sourceSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "releasePhaseGate": {
+      "enum": [
+        "P0-RELEASE",
+        "P1-PWA",
+        "P2A-LOCAL",
+        "P2B-REPORT",
+        "P3-XLSX",
+        "P4-CSP",
+        "P5-DUAL",
+        "P5-LIST",
+        "P6-APP",
+        "P7-IDB",
+        "P8-CLEAN"
+      ]
+    },
+    "policyActivationGate": {
+      "enum": [
+        "P1-PWA",
+        "P2A-LOCAL",
+        "P2B-REPORT",
+        "P3-XLSX",
+        "P4-CSP",
+        "P5-DUAL",
+        "P5-LIST",
+        "P7-IDB"
+      ]
+    },
+    "artifactDrillGate": {
+      "const": "P0-ARTIFACT"
+    },
+    "releaseStateEvidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "pattern": "^release-state://[a-z0-9][a-z0-9-]{2,62}/evidence/[0-9a-f]{64}$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": ["uri", "sha256"]
+    },
+    "artifactDrillAuthorityRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "pattern": "^artifact://sha256/[0-9a-f]{64}/artifact-drill-build-authority\\.json$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": ["uri", "sha256"]
+    },
+    "relativePath": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[^\\u0000]+$"
+    },
+    "moduleId": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:/)(?!.*\\\\)[^\\u0000]+$"
+    },
+    "publicPath": {
+      "type": "string",
+      "pattern": "^/(?!/)[^\\\\\\u0000]*$"
+    },
+    "roleEntryModule": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/moduleId"
+        },
+        "external": {
+          "type": "boolean"
+        },
+        "staticImports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/moduleId"
+          },
+          "uniqueItems": true
+        },
+        "dynamicImports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/moduleId"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": ["id", "external", "staticImports", "dynamicImports"]
+    },
+    "roleEntryChunk": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "$ref": "#/$defs/publicPath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "staticImports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/publicPath"
+          },
+          "uniqueItems": true
+        },
+        "dynamicImports": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/publicPath"
+          },
+          "uniqueItems": true
+        },
+        "modules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/moduleId"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "file",
+        "sha256",
+        "size",
+        "staticImports",
+        "dynamicImports",
+        "modules"
+      ]
+    },
+    "roleEntryGraph": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "graphKind": {
+          "enum": ["rollup-role-entry-v1", "legacy-static-entry-v1"]
+        },
+        "sourceSha": {
+          "$ref": "#/$defs/sourceSha"
+        },
+        "releaseRole": {
+          "enum": ["standard", "containment"]
+        },
+        "variantId": {
+          "$ref": "#/$defs/sha256"
+        },
+        "entryModule": {
+          "$ref": "#/$defs/moduleId"
+        },
+        "entryFile": {
+          "$ref": "#/$defs/publicPath"
+        },
+        "modules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/roleEntryModule"
+          }
+        },
+        "chunks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/roleEntryChunk"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "graphKind",
+        "sourceSha",
+        "releaseRole",
+        "variantId",
+        "entryModule",
+        "entryFile",
+        "modules",
+        "chunks"
+      ]
+    },
+    "dbCompatibilityBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractUri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": ["contractUri", "fingerprint"]
+    }
+  }
+}

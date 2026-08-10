@@ -1,13 +1,14 @@
 import React from "react";
 import type { NavigatorStatusKind } from "../types";
 
-export const NAVIGATOR_STATUS_COLORS: Record<NavigatorStatusKind, string> = {
-  unvisited: "#94a3b8",
-  postponed: "#8b5cf6",
-  late: "#3b82f6",
-  limited: "#f97316",
-  completed: "#22c55e",
-};
+export const NAVIGATOR_STATUS_CLASS_NAMES: Record<NavigatorStatusKind, string> =
+  {
+    unvisited: "bg-slate-400",
+    postponed: "bg-violet-500",
+    late: "bg-blue-500",
+    limited: "bg-orange-500",
+    completed: "bg-green-500",
+  };
 
 const legendItems: Array<{ kind: NavigatorStatusKind; label: string }> = [
   { kind: "unvisited", label: "未購入" },
@@ -32,20 +33,13 @@ export function SpaceNavigatorLegend({
       {legendItems.map(({ kind, label }) => (
         <span key={kind} className="inline-flex items-center gap-1">
           <span
-            className="inline-block h-2.5 w-2.5 rounded-sm border border-black/10"
-            style={{ backgroundColor: NAVIGATOR_STATUS_COLORS[kind] }}
+            className={`inline-block h-2.5 w-2.5 rounded-sm border border-black/10 ${NAVIGATOR_STATUS_CLASS_NAMES[kind]}`}
           />
           {label}
         </span>
       ))}
       <span className="inline-flex items-center gap-1">
-        <span
-          className="inline-block h-2.5 w-3 rounded-sm border border-amber-600"
-          style={{
-            backgroundImage:
-              "repeating-linear-gradient(135deg, #f59e0b 0 2px, transparent 2px 4px)",
-          }}
-        />
+        <span className="inline-block h-2.5 w-3 rounded-sm border border-amber-600 [background-image:repeating-linear-gradient(135deg,#f59e0b_0_2px,transparent_2px_4px)]" />
         入力警告
       </span>
     </div>

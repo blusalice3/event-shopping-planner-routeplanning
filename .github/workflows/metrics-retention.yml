@@ -1,0 +1,56 @@
+name: Foundation retention verification
+
+on:
+  schedule:
+    - cron: "42 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: foundation-retention-verifier
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    environment: foundation-release-state
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+
+      - name: Pin npm
+        run: npm install --global npm@11.19.0
+
+      - run: npm ci
+
+      - name: Verify scheduled remote retention state
+        if: github.event_name == 'schedule'
+        env:
+          PERSISTENCE_METRICS_VERIFIER_DATABASE_URL: ${{ secrets.PERSISTENCE_METRICS_VERIFIER_DATABASE_URL }}
+          PERSISTENCE_METRICS_VERIFIER_CA: ${{ secrets.PERSISTENCE_METRICS_VERIFIER_CA }}
+        run: npm run verify:metrics-retention -- --live
+
+      - name: Produce protected canonical retention evidence
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          PERSISTENCE_METRICS_VERIFIER_DATABASE_URL: ${{ secrets.PERSISTENCE_METRICS_VERIFIER_DATABASE_URL }}
+          PERSISTENCE_METRICS_VERIFIER_CA: ${{ secrets.PERSISTENCE_METRICS_VERIFIER_CA }}
+        run: npm run verify:metrics-retention -- --live --output "${{ runner.temp }}/retention-evidence.json"
+
+      - name: Upload canonical phase exit retention evidence
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-phase-exit-retention-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/retention-evidence.json
+          if-no-files-found: error
+          compression-level: 9
+          overwrite: false
+          include-hidden-files: false

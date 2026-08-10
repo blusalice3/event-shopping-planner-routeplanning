@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:event-shopping-planner:companion-recovery-drill:v1",
+  "title": "Companion recovery drill authority evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "evidenceKind": { "const": "companion-recovery-drill/v1" },
+    "namespace": { "$ref": "#/$defs/namespace" },
+    "operationId": { "$ref": "#/$defs/identifier" },
+    "sourceSha": { "$ref": "#/$defs/sourceSha" },
+    "buildId": { "$ref": "#/$defs/sourceSha" },
+    "releasePolicy": { "$ref": "#/$defs/evidenceRef" },
+    "releaseAEvidenceSha256": { "$ref": "#/$defs/sha256" },
+    "releaseAEvidenceAuthority": { "$ref": "#/$defs/evidenceRef" },
+    "sourceEvidenceSha256": { "$ref": "#/$defs/sha256" },
+    "sourceWorkflowAuthority": { "$ref": "#/$defs/evidenceRef" },
+    "status": { "const": "PASS" },
+    "command": { "const": "npm run test:release-a-rollback" },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "completedAt": { "type": "string", "format": "date-time" },
+    "drillEvidenceRef": { "$ref": "#/$defs/eventUri" },
+    "companion": { "$ref": "#/$defs/companion" },
+    "steps": {
+      "type": "array",
+      "prefixItems": [
+        { "$ref": "#/$defs/packageStep" },
+        { "$ref": "#/$defs/probeStep" },
+        { "$ref": "#/$defs/returnStep" }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "evidenceKind",
+    "namespace",
+    "operationId",
+    "sourceSha",
+    "buildId",
+    "releasePolicy",
+    "releaseAEvidenceSha256",
+    "releaseAEvidenceAuthority",
+    "sourceEvidenceSha256",
+    "sourceWorkflowAuthority",
+    "status",
+    "command",
+    "startedAt",
+    "completedAt",
+    "drillEvidenceRef",
+    "companion",
+    "steps"
+  ],
+  "$defs": {
+    "namespace": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{2,62}$"
+    },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "sourceSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "pattern": "^release-state://[a-z0-9][a-z0-9-]{2,62}/evidence/[0-9a-f]{64}$"
+        },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      },
+      "required": ["uri", "sha256"]
+    },
+    "eventUri": {
+      "type": "string",
+      "pattern": "^release-state://[a-z0-9][a-z0-9-]{2,62}/events/[1-9][0-9]*/[0-9a-f]{64}$"
+    },
+    "stepEvidenceUri": {
+      "type": "string",
+      "pattern": "^release-state://[a-z0-9][a-z0-9-]{2,62}/(?:events/[1-9][0-9]*/|evidence/)[0-9a-f]{64}$"
+    },
+    "companion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bindingId": { "$ref": "#/$defs/identifier" },
+        "sourceSha": { "$ref": "#/$defs/sourceSha" },
+        "buildId": { "$ref": "#/$defs/sourceSha" },
+        "variantId": { "$ref": "#/$defs/sha256" },
+        "providerProjectId": { "$ref": "#/$defs/identifier" },
+        "providerDeploymentId": { "$ref": "#/$defs/identifier" },
+        "packageIndexSha256": { "$ref": "#/$defs/sha256" },
+        "artifactManifestSha256": { "$ref": "#/$defs/sha256" },
+        "providerEvidenceSha256": { "$ref": "#/$defs/sha256" }
+      },
+      "required": [
+        "bindingId",
+        "sourceSha",
+        "buildId",
+        "variantId",
+        "providerProjectId",
+        "providerDeploymentId",
+        "packageIndexSha256",
+        "artifactManifestSha256",
+        "providerEvidenceSha256"
+      ]
+    },
+    "stepBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "step": {
+          "enum": [
+            "package-redeploy-without-rebuild",
+            "independent-companion-probe",
+            "standard-return"
+          ]
+        },
+        "status": { "const": "PASS" },
+        "evidenceRef": { "$ref": "#/$defs/stepEvidenceUri" }
+      },
+      "required": ["step", "status", "evidenceRef"]
+    },
+    "packageStep": {
+      "allOf": [
+        { "$ref": "#/$defs/stepBase" },
+        {
+          "properties": {
+            "step": { "const": "package-redeploy-without-rebuild" }
+          }
+        }
+      ]
+    },
+    "probeStep": {
+      "allOf": [
+        { "$ref": "#/$defs/stepBase" },
+        {
+          "properties": {
+            "step": { "const": "independent-companion-probe" }
+          }
+        }
+      ]
+    },
+    "returnStep": {
+      "allOf": [
+        { "$ref": "#/$defs/stepBase" },
+        {
+          "properties": {
+            "step": { "const": "standard-return" }
+          }
+        }
+      ]
+    }
+  }
+}

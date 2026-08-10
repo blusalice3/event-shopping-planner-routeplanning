@@ -63,7 +63,8 @@ productionで利用するclient/SW証明provider、通常writerを含むquiescen
 | Support owner     | 利用者への退避案内、payloadを受領しない一次対応、incident escalation |
 | Observer          | privacy-safeなmetrics、alert、release evidenceの保管                 |
 
-同一人物が複数役割を兼ねても構いませんが、Release Bの有効化はRelease ownerとPersistence ownerの二者確認を必須とします。
+全役割を同一人物・同一GitHub accountが兼任できます。Release Bの有効化でもRelease ownerと
+Persistence ownerの二つのrole確認記録は残しますが、同じoperatorが順番に確認して構いません。
 
 ## 4. 用語と制御gate
 
@@ -166,6 +167,9 @@ verdict: NOT_DEPLOYED | DEPLOYED | UNKNOWN
 reviewer:
 evidence_links:
 ```
+
+`auditor`と`reviewer`は同じ実在accountで構いません。audit evidenceを固定した後にreview actionを行い、
+各fieldと時刻を省略しません。
 
 ## 6. legacy `syncQueue`の取扱い
 
@@ -355,7 +359,7 @@ canaryでは次を実施します。
 6. `unknown-source`や別SHAを対象buildの分母へ混ぜず、baselineと同じ定義で率を算出する
 7. raw event行ではなく集計viewのsnapshot/refだけをrelease evidenceへ残す
 
-baselineは`previous-production-build-matched-cohort-complete-24h/v1`に固定します。直前のproduction buildのfull SHA、canaryと一致するcohort/query定義、canary開始前に完了した24時間、選定者とreviewerを記録し、結果を見て別windowへ差し替えてはいけません。各production rateとstartup bucketの分母が20未満なら個別triageは行いますが、gate合格には使わず、同じ定義のまま観測を延長します。
+baselineは`previous-production-build-matched-cohort-complete-24h/v1`に固定します。直前のproduction buildのfull SHA、canaryと一致するcohort/query定義、canary開始前に完了した24時間、選定者とreviewerを記録し、結果を見て別windowへ差し替えてはいけません。選定者とreviewerは同じaccountで構いませんが、選定を記録した後にreviewを別actionとして記録します。各production rateとstartup bucketの分母が20未満なら個別triageは行いますが、gate合格には使わず、同じ定義のまま観測を延長します。
 
 `persistence_release_a_metrics_dashboard_24h`とcleanup viewはrolling 24時間です。一方、`persistence_release_a_metrics_dashboard_hourly_24h`はpartialな現在hourを除外し、直前の完了済みUTC hourを24個返します。別queryを使う場合もpartialな先頭・末尾を含めず、時刻範囲、重複、欠落をevidence validatorで検証します。24時間未満、hour bucket欠落またはsample 0、backend probe不通、対象SHA不一致、旧原本削除1件以上のどれかがあれば不合格です。
 
@@ -468,6 +472,16 @@ cleanなworktreeで、既存previewを停止してから実行します。演習
 npm run test:release-a-rollback
 ```
 
+既定baselineは明示的な保存UIとversion付きcapabilityを持たないhistorical packageであるため、rollbackでは`auto-takeover`、final forwardではprompt操作を伴わない全client解放後のnatural activationを検証します。成果物上でunversioned/versioned capabilityがともに欠落していることを`legacy-absent`として閉じて検証し、active Workerの実ソースhash、index、main assetとの照合は省略しません。`prompt-close-all-v1`を備えたdormant preparation / compatible predecessorとの遷移を検証するときは、そのcommitを明示してprompt-close drillを必須化します。
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/rehearse-release-a-rollback.ps1 `
+  -BaselineCommit <prompt対応predecessorのfull SHA> `
+  -RequirePromptCloseDrill
+```
+
+`-RequirePromptCloseDrill`は`save-required`、実`event-autosave` blocker、user clickによるproduction bridgeのflush、未応答clientでのfail-closed、retry後の`ready-to-close`、全client close後のnatural activationをすべて必須にします。prompt非対応baselineをこのmodeへ渡した場合はtimeoutをPASSへ変換せず失敗します。
+
 このコマンドは次を同一origin・同一Chrome profileで順に実行します。
 
 1. `build:release-a`でcleanなfull SHAとcleanup forced-offを検証する
@@ -478,6 +492,8 @@ npm run test:release-a-rollback
 6. 同じprofileのstandalone app-window相当でもrollback後データを読めることを確認する
 7. 最終Release Aへforward updateし、version付きcapabilityをactive controllerからoffline取得する
 8. 全段階で旧原本hash不変と対象`localStorage.removeItem`呼出し0件を確認する
+
+baseline sourceは一時directoryへ作成したrepository bundleからdetached cloneしてbuildします。これによりprompt対応predecessorでも`.git`由来のfull source SHAとclean stateを保持し、capability搭載artifactではrollback時にも同じversion付きcapabilityをoffline取得します。rollback activation modeはcapability有無ではなく、成果物内のexact `pwaLifecycle`から`auto-takeover`または`natural-after-client-release`へ導出します。
 
 演習用profile、baseline source、junction、preview processは`finally`で検証済み一時pathから削除します。途中失敗はPASS扱いにせずnon-zeroで終了します。app-window相当は実installed PWAの代替ではないため、Windows/Android実機試験は別途必要です。
 
@@ -525,7 +541,7 @@ archiveはbrowser profile内では暗号化されない前提です。exportし�
 
 ```powershell
 npm run build:release-a
-npm run preview -- --host 127.0.0.1 --port 4173 --strictPort
+npm run preview -- -- --host 127.0.0.1 --port 4173 --strictPort
 # 別のPowerShellで
 npm run test:release-a-browser
 ```
@@ -568,7 +584,7 @@ npm run test:release-a-browser
 
 各caseについて、release SHA、SW ID、browser version、profile種別、online状態、期待結果、実結果、実施者、時刻を記録します。screenshotや動画へ利用者payloadを映しません。
 
-app-window相当の自動試験を`installedPwaChecks`へ転記してはいけません。Windows 11 Chrome、Windows 11 Edge、Android Chromeの各caseは実際にinstallしたPWAでonline、offline、更新、旧原本不変を確認し、実施者とは別のreviewerが確認します。
+app-window相当の自動試験を`installedPwaChecks`へ転記してはいけません。Windows 11 Chrome、Windows 11 Edge、Android Chromeの各caseは実際にinstallしたPWAでonline、offline、更新、旧原本不変を確認します。実施者とreviewerは同じ実在accountで構いませんが、実機evidenceを固定した後にreviewし、`reviewedAt`を`executedAt`以後に記録します。
 
 ## 16. 文字コードとrelease evidence
 
@@ -596,7 +612,7 @@ app-window相当の自動試験を`installedPwaChecks`へ転記してはいけ�
 
 ```powershell
 Copy-Item -LiteralPath docs\release-a-evidence.template.json -Destination <release-evidence-path>
-npm run verify:release-a-evidence -- <release-evidence-path>
+npm run verify:release-a-evidence -- -- <release-evidence-path>
 ```
 
 templateは未実施を誤って合格させないため、そのままでは必ず不合格になります。validatorは少なくとも次を検証します。
@@ -607,12 +623,12 @@ templateは未実施を誤って合格させないため、そのままでは必
 - Windows 11 Chrome/EdgeとAndroid Chromeのactual installed PWA証跡
 - 未来時刻、未知field、重複JSON key、payload/raw/storage/revision/digest fieldがない
 - `d2389a0`の事実判定が`UNKNOWN`なら`TREAT_AS_DEPLOYED`で、専用E2EがPASS
-- release owner、data safety reviewer、operations reviewerの承認が全gate完了後である
+- release owner、data safety reviewer、operations reviewerの承認が全gate完了後である。同じaccountで三役を記録できる
 
 `d2389a0`専用E2Eは次でも単独確認できます。
 
 ```powershell
-npm run test:run -- src/utils/indexedDB.recoveryAdoption.integration.test.ts -t "d2389a0 orphan recovery E2E fixture"
+npm run test:run -- -- src/utils/indexedDB.recoveryAdoption.integration.test.ts -t "d2389a0 orphan recovery E2E fixture"
 ```
 
 実測していない24時間canary、installed PWA、provider監査、承認を`PASS`として記入してはいけません。validatorのPASSはproduction配布を自動実行するものではなく、Release ownerのgo判断に必要な入力です。

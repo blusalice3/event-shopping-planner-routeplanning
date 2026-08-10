@@ -210,13 +210,13 @@ export const SimpleHallDefinitionPanel: React.FC<
             <h2 className="text-white font-bold text-base">
               ホール定義（ブロック割当）
             </h2>
-            <p className="text-blue-100 text-xs mt-0.5">
+            <p className="text-white text-xs mt-0.5">
               ブロック名でホールを定義します
             </p>
           </div>
           <button
             onClick={onClose}
-            className="text-white/80 hover:text-white text-2xl leading-none px-2"
+            className="text-white hover:text-white text-2xl leading-none px-2"
             aria-label="閉じる"
           >
             ×
@@ -252,14 +252,21 @@ export const SimpleHallDefinitionPanel: React.FC<
                     <button
                       key={color}
                       onClick={() => setEditing({ ...editing, color })}
-                      className={`w-8 h-8 rounded-lg transition-all ${
+                      className={`relative h-8 w-8 overflow-hidden rounded-lg transition-all ${
                         editing.color === color
                           ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-800"
                           : "hover:ring-2 hover:ring-slate-300"
                       }`}
-                      style={{ backgroundColor: color }}
                       aria-label={`色: ${color}`}
-                    />
+                    >
+                      <svg
+                        className="absolute inset-0 h-full w-full"
+                        viewBox="0 0 32 32"
+                        aria-hidden="true"
+                      >
+                        <rect width="32" height="32" rx="4" fill={color} />
+                      </svg>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -305,10 +312,18 @@ export const SimpleHallDefinitionPanel: React.FC<
                                     className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400"
                                     title={`${h.name}にも割当済み`}
                                   >
-                                    <span
-                                      className="w-2.5 h-2.5 rounded-full"
-                                      style={{ backgroundColor: h.color }}
-                                    />
+                                    <svg
+                                      className="h-2.5 w-2.5 rounded-full"
+                                      viewBox="0 0 10 10"
+                                      aria-hidden="true"
+                                    >
+                                      <circle
+                                        cx="5"
+                                        cy="5"
+                                        r="5"
+                                        fill={h.color}
+                                      />
+                                    </svg>
                                     {h.name}
                                   </span>
                                 ))}
@@ -366,13 +381,22 @@ export const SimpleHallDefinitionPanel: React.FC<
                       className="w-full rounded-lg border border-slate-200 dark:border-slate-700 p-3 hover:border-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-900/20 transition-colors text-left"
                     >
                       <div className="flex items-center gap-3">
-                        <div
-                          className="w-10 h-10 rounded-lg flex items-center justify-center text-xs font-bold text-slate-700 flex-shrink-0"
-                          style={{
-                            backgroundColor: hall.color || HALL_COLORS[0],
-                          }}
-                        >
-                          {hall.name.slice(0, 2)}
+                        <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg text-xs font-bold text-slate-700">
+                          <svg
+                            className="absolute inset-0 h-full w-full"
+                            viewBox="0 0 40 40"
+                            aria-hidden="true"
+                          >
+                            <rect
+                              width="40"
+                              height="40"
+                              rx="6"
+                              fill={hall.color || HALL_COLORS[0]}
+                            />
+                          </svg>
+                          <span className="relative">
+                            {hall.name.slice(0, 2)}
+                          </span>
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">

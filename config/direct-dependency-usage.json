@@ -1,0 +1,516 @@
+{
+  "schemaVersion": 1,
+  "graphs": {
+    "productionRoots": [
+      "src/pwa/recovery/outerAgentEntry.ts",
+      "src/index.tsx",
+      "src/sw.ts"
+    ],
+    "buildConfigRoots": [
+      {
+        "file": "eslint.config.js",
+        "loaderPackage": "eslint",
+        "loaderScript": "lint",
+        "loaderBinary": "eslint"
+      },
+      {
+        "file": "playwright.config.ts",
+        "loaderPackage": "@playwright/test",
+        "loaderScript": "test:browser",
+        "loaderBinary": "playwright"
+      },
+      {
+        "file": "postcss.config.cjs",
+        "loaderPackage": "vite",
+        "loaderScript": "dev",
+        "loaderBinary": "vite"
+      },
+      {
+        "file": "vite.config.ts",
+        "loaderPackage": "vite",
+        "loaderScript": "dev",
+        "loaderBinary": "vite"
+      },
+      {
+        "file": "vitest.config.ts",
+        "loaderPackage": "vitest",
+        "loaderScript": "test:run",
+        "loaderBinary": "vitest"
+      },
+      {
+        "file": "vitest.integration.config.ts",
+        "loaderPackage": "vitest",
+        "loaderScript": "test:integration",
+        "loaderBinary": "vitest"
+      },
+      {
+        "file": "vitest.unit.config.ts",
+        "loaderPackage": "vitest",
+        "loaderScript": "test:unit",
+        "loaderBinary": "vitest"
+      },
+      {
+        "file": "vitest.worker.config.ts",
+        "loaderPackage": "vitest",
+        "loaderScript": "test:worker",
+        "loaderBinary": "vitest"
+      }
+    ],
+    "testSetupRoots": ["src/test/setup.ts"]
+  },
+  "packages": {
+    "@eslint/js": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "build",
+          "file": "eslint.config.js",
+          "specifier": "@eslint/js"
+        }
+      ]
+    },
+    "@playwright/test": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "cli",
+          "script": "test:browser",
+          "binary": "playwright"
+        },
+        {
+          "kind": "module-import",
+          "graph": "release-tool",
+          "file": "scripts/collect-performance-samples.mjs",
+          "specifier": "@playwright/test"
+        }
+      ]
+    },
+    "@tanstack/react-virtual": {
+      "scope": "dependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "production",
+          "file": "src/features/shopping-list/renderers/VirtualListRenderer.tsx",
+          "specifier": "@tanstack/react-virtual"
+        }
+      ]
+    },
+    "@testing-library/jest-dom": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "test",
+          "file": "src/test/setup.ts",
+          "specifier": "@testing-library/jest-dom/vitest"
+        }
+      ]
+    },
+    "@testing-library/react": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "test",
+          "file": "src/test/setup.ts",
+          "specifier": "@testing-library/react"
+        }
+      ]
+    },
+    "@testing-library/user-event": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "test",
+          "file": "src/components/focus/LimitedPurchaseMissingListView.test.tsx",
+          "specifier": "@testing-library/user-event"
+        }
+      ]
+    },
+    "@types/node": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "type-provider",
+          "graph": "release-tool",
+          "consumerFile": "scripts/test-disposable-db.mjs",
+          "specifier": "node:path",
+          "runtimePackage": "node",
+          "compilerConfig": "tsconfig.release-tools.json"
+        }
+      ]
+    },
+    "@types/pg": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "type-provider",
+          "graph": "release-tool",
+          "consumerFile": "scripts/test-disposable-db.mjs",
+          "specifier": "pg",
+          "runtimePackage": "pg",
+          "compilerConfig": "tsconfig.release-tools.json"
+        }
+      ]
+    },
+    "@types/react": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "type-provider",
+          "graph": "production",
+          "consumerFile": "src/index.tsx",
+          "specifier": "react",
+          "runtimePackage": "react",
+          "compilerConfig": "tsconfig.json"
+        }
+      ]
+    },
+    "@types/react-dom": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "type-provider",
+          "graph": "production",
+          "consumerFile": "src/index.tsx",
+          "specifier": "react-dom/client",
+          "runtimePackage": "react-dom",
+          "compilerConfig": "tsconfig.json"
+        }
+      ]
+    },
+    "@vite-pwa/assets-generator": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "cli",
+          "script": "generate-icons",
+          "binary": "pwa-assets-generator"
+        }
+      ]
+    },
+    "@vitejs/plugin-react": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "build",
+          "file": "vite.config.ts",
+          "specifier": "@vitejs/plugin-react"
+        }
+      ]
+    },
+    "@vitest/coverage-v8": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "vitest-provider",
+          "providerType": "coverage",
+          "graph": "build",
+          "configFile": "config/coverage-policy.json",
+          "configValue": "v8",
+          "activationScript": "test:coverage",
+          "activationFile": "scripts/coverage-policy/run-coverage-policy.mjs"
+        }
+      ]
+    },
+    "@zip.js/zip.js": {
+      "scope": "dependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "production",
+          "file": "src/xlsx/security/zipPreflight.ts",
+          "specifier": "@zip.js/zip.js"
+        }
+      ]
+    },
+    "autoprefixer": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "postcss-plugin",
+          "graph": "build",
+          "configFile": "postcss.config.cjs",
+          "configKey": "autoprefixer",
+          "loaderPackage": "postcss"
+        }
+      ]
+    },
+    "axe-core": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "test",
+          "file": "tests/browser/foundation.spec.ts",
+          "specifier": "axe-core"
+        }
+      ]
+    },
+    "canonicalize": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "release-tool",
+          "file": "scripts/lib/canonical-json.mjs",
+          "specifier": "canonicalize"
+        }
+      ]
+    },
+    "eslint": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "cli",
+          "script": "lint",
+          "binary": "eslint"
+        }
+      ]
+    },
+    "eslint-config-prettier": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "build",
+          "file": "eslint.config.js",
+          "specifier": "eslint-config-prettier"
+        }
+      ]
+    },
+    "eslint-plugin-react-hooks": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "build",
+          "file": "eslint.config.js",
+          "specifier": "eslint-plugin-react-hooks"
+        }
+      ]
+    },
+    "exceljs": {
+      "scope": "dependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "production",
+          "file": "src/xlsx/engine/eventWorkbookEngine.ts",
+          "specifier": "exceljs"
+        },
+        {
+          "kind": "module-import",
+          "graph": "release-tool",
+          "file": "scripts/performance/canonicalPublicFixtures.mjs",
+          "specifier": "exceljs"
+        }
+      ]
+    },
+    "fake-indexeddb": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "test",
+          "file": "src/hooks/useIndexedDbPersistence.integration.test.tsx",
+          "specifier": "fake-indexeddb"
+        }
+      ]
+    },
+    "globals": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "build",
+          "file": "eslint.config.js",
+          "specifier": "globals"
+        }
+      ]
+    },
+    "jsdom": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "vitest-provider",
+          "providerType": "environment",
+          "graph": "build",
+          "configFile": "vitest.integration.config.ts",
+          "configValue": "jsdom",
+          "activationScript": "test:integration"
+        }
+      ]
+    },
+    "pg": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "release-tool",
+          "file": "scripts/test-disposable-db.mjs",
+          "specifier": "pg"
+        }
+      ]
+    },
+    "postcss": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "dependency-host",
+          "graph": "build",
+          "configFile": "postcss.config.cjs",
+          "hostPackage": "vite"
+        }
+      ]
+    },
+    "prettier": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "cli",
+          "script": "format:check",
+          "binary": "prettier"
+        }
+      ]
+    },
+    "react": {
+      "scope": "dependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "production",
+          "file": "src/index.tsx",
+          "specifier": "react"
+        }
+      ]
+    },
+    "react-dom": {
+      "scope": "dependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "production",
+          "file": "src/index.tsx",
+          "specifier": "react-dom/client"
+        }
+      ]
+    },
+    "supabase": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "package-bin-path",
+          "graph": "release-tool",
+          "consumerFile": "scripts/test-disposable-db.mjs",
+          "script": "test:db:disposable",
+          "binary": "supabase",
+          "variable": "supabaseEntry",
+          "pathSegments": ["node_modules", "supabase", "dist", "supabase.js"]
+        }
+      ]
+    },
+    "tailwindcss": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "postcss-plugin",
+          "graph": "build",
+          "configFile": "postcss.config.cjs",
+          "configKey": "tailwindcss",
+          "loaderPackage": "postcss"
+        }
+      ]
+    },
+    "typescript": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "cli",
+          "script": "typecheck",
+          "binary": "tsc"
+        }
+      ]
+    },
+    "typescript-eslint": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "build",
+          "file": "eslint.config.js",
+          "specifier": "typescript-eslint"
+        }
+      ]
+    },
+    "vercel": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "release-tool",
+          "file": "scripts/build-release-artifact.mjs",
+          "specifier": "vercel/package.json"
+        }
+      ]
+    },
+    "vite": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "release-tool",
+          "file": "scripts/build-release-vite.mjs",
+          "specifier": "vite"
+        }
+      ]
+    },
+    "vite-plugin-pwa": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "build",
+          "file": "vite.config.ts",
+          "specifier": "vite-plugin-pwa"
+        }
+      ]
+    },
+    "vitest": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "cli",
+          "script": "test:unit",
+          "binary": "vitest"
+        }
+      ]
+    },
+    "yauzl": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "release-tool",
+          "file": "scripts/verify-release-artifact.mjs",
+          "specifier": "yauzl"
+        }
+      ]
+    },
+    "yazl": {
+      "scope": "devDependencies",
+      "evidence": [
+        {
+          "kind": "module-import",
+          "graph": "release-tool",
+          "file": "scripts/deterministic-zip.mjs",
+          "specifier": "yazl"
+        }
+      ]
+    }
+  }
+}

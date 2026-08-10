@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useId, useMemo, useRef } from "react";
 import { ShoppingItem } from "../types/item";
 import {
   getLimitedPurchaseCounts,
@@ -8,6 +8,10 @@ import {
 } from "../utils/purchaseQuantity";
 import { SpaceNavigatorFooterButton } from "../features/space-navigation/components/SpaceNavigatorFooterButton";
 import { useOptionalSpaceNavigator } from "../features/space-navigation/SpaceNavigatorContext";
+import {
+  clearFooterHeightAttribute,
+  setFooterHeightAttribute,
+} from "../styles/runtimeLayoutAttributes";
 
 interface SummaryBarProps {
   items: ShoppingItem[];
@@ -23,6 +27,7 @@ const SummaryBar: React.FC<SummaryBarProps> = ({
   onFilterToggle,
 }) => {
   const barRef = useRef<HTMLDivElement>(null);
+  const footerHeightOwnerId = useId();
   const spaceNavigator = useOptionalSpaceNavigator();
   const spaceNavigatorFooterEnabled = Boolean(
     spaceNavigator?.settings.footerButtonVisible,
@@ -33,11 +38,7 @@ const SummaryBar: React.FC<SummaryBarProps> = ({
     if (!el) return;
 
     const updateHeight = () => {
-      const height = el.offsetHeight;
-      document.documentElement.style.setProperty(
-        "--footer-height",
-        height + "px",
-      );
+      setFooterHeightAttribute(footerHeightOwnerId, el.offsetHeight);
     };
 
     const observer = new ResizeObserver(updateHeight);
@@ -46,9 +47,9 @@ const SummaryBar: React.FC<SummaryBarProps> = ({
 
     return () => {
       observer.disconnect();
-      document.documentElement.style.setProperty("--footer-height", "0px");
+      clearFooterHeightAttribute(footerHeightOwnerId);
     };
-  }, []);
+  }, [footerHeightOwnerId]);
 
   const summary = useMemo(() => {
     const totalItems = items.length;
@@ -102,14 +103,13 @@ const SummaryBar: React.FC<SummaryBarProps> = ({
     filterLabel && onFilterToggle ? (
       <button
         onClick={onFilterToggle}
-        className={`font-medium rounded-md transition-colors duration-200 text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-300 dark:bg-blue-900/50 dark:hover:bg-blue-900 touch-manipulation select-none ${
+        className={`touch-manipulation select-none rounded-md bg-blue-100 font-medium text-blue-600 [-webkit-tap-highlight-color:transparent] transition-colors duration-200 hover:bg-blue-200 dark:bg-blue-900/50 dark:text-blue-300 dark:hover:bg-blue-900 ${
           layoutMode === "smartphone"
             ? "min-h-11 min-w-11 px-2 py-1 text-sm"
             : "px-3 py-1.5 text-sm"
         }`}
         title="購入状態フィルタ切替"
         aria-label={`購入状態フィルタ切替（現在: ${filterLabel}）`}
-        style={{ WebkitTapHighlightColor: "transparent" }}
         type="button"
       >
         {filterLabel}
@@ -150,12 +150,9 @@ const SummaryBar: React.FC<SummaryBarProps> = ({
   return (
     <div
       ref={barRef}
-      className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20"
-      style={{
-        paddingBottom: spaceNavigatorFooterEnabled
-          ? "env(safe-area-inset-bottom)"
-          : undefined,
-      }}
+      className={`fixed bottom-0 left-0 right-0 z-20 border-t border-slate-200 bg-white/80 shadow-t-lg backdrop-blur-sm dark:border-slate-700 dark:bg-slate-800/80 ${
+        spaceNavigatorFooterEnabled ? "pb-[env(safe-area-inset-bottom)]" : ""
+      }`}
     >
       <div
         className={`max-w-4xl mx-auto ${

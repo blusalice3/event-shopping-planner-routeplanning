@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:event-shopping-planner:artifact-drill-build-authority:v1",
+  "title": "ArtifactDrillBuildAuthority v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "authorityKind": {
+      "const": "artifact-drill-build-authority/v1"
+    },
+    "sourceSha": { "$ref": "#/$defs/sourceSha" },
+    "targetGate": { "const": "P0-ARTIFACT" },
+    "buildPurpose": { "const": "non-promotable-artifact-drill" },
+    "promotable": { "const": false },
+    "releasePolicySha256": { "$ref": "#/$defs/sha256" },
+    "toolchainPolicySha256": { "$ref": "#/$defs/sha256" },
+    "providerPolicySha256": { "$ref": "#/$defs/sha256" },
+    "providerObservationSha256": { "$ref": "#/$defs/sha256" },
+    "providerConfigurationHash": { "$ref": "#/$defs/sha256" },
+    "cspPolicySha256": { "$ref": "#/$defs/sha256" },
+    "dbCompatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractUri": { "type": "string", "minLength": 1 },
+        "fingerprint": { "$ref": "#/$defs/sha256" }
+      },
+      "required": ["contractUri", "fingerprint"]
+    },
+    "foundationBaselineSha256": { "$ref": "#/$defs/sha256" },
+    "standardDimensions": { "$ref": "#/$defs/dimensions" },
+    "containmentDimensions": { "$ref": "#/$defs/dimensions" },
+    "bootstrapVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sourceSha": { "$ref": "#/$defs/sourceSha" },
+        "packageIndexSha256": { "$ref": "#/$defs/sha256" },
+        "artifactManifestSha256": { "$ref": "#/$defs/sha256" },
+        "artifactArchiveSha256": { "$ref": "#/$defs/sha256" },
+        "rawDistManifestSha256": { "$ref": "#/$defs/sha256" },
+        "rawDistTreeSha256": { "$ref": "#/$defs/sha256" },
+        "rawDistFileCount": { "type": "integer", "minimum": 1 },
+        "preserved": { "const": true },
+        "releaseIdentityAbsent": { "const": true }
+      },
+      "required": [
+        "sourceSha",
+        "packageIndexSha256",
+        "artifactManifestSha256",
+        "artifactArchiveSha256",
+        "rawDistManifestSha256",
+        "rawDistTreeSha256",
+        "rawDistFileCount",
+        "preserved",
+        "releaseIdentityAbsent"
+      ]
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "authorityKind",
+    "sourceSha",
+    "targetGate",
+    "buildPurpose",
+    "promotable",
+    "releasePolicySha256",
+    "toolchainPolicySha256",
+    "providerPolicySha256",
+    "providerObservationSha256",
+    "providerConfigurationHash",
+    "cspPolicySha256",
+    "dbCompatibility",
+    "foundationBaselineSha256",
+    "standardDimensions",
+    "containmentDimensions",
+    "bootstrapVerification"
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sourceSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "releaseRole": { "enum": ["standard", "containment"] },
+        "pwaLifecycle": { "type": "string", "minLength": 1 },
+        "cssDelivery": { "type": "string", "minLength": 1 },
+        "cspMode": { "type": "string", "minLength": 1 },
+        "xlsxExecution": { "type": "string", "minLength": 1 },
+        "listEngine": { "type": "string", "minLength": 1 },
+        "listDefault": { "type": "string", "minLength": 1 },
+        "persistenceArchitecture": { "type": "string", "minLength": 1 }
+      },
+      "required": [
+        "releaseRole",
+        "pwaLifecycle",
+        "cssDelivery",
+        "cspMode",
+        "xlsxExecution",
+        "listEngine",
+        "listDefault",
+        "persistenceArchitecture"
+      ]
+    }
+  }
+}

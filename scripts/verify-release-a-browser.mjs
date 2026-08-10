@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   access,
@@ -8,11 +7,18 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
-import WebSocket from "ws";
+import { chromium as playwrightChromium } from "playwright";
+import {
+  assertLegacyRollbackCapabilityAbsence,
+  assertPromptCloseAllBrowserDrill,
+  resolvePromptCloseAllDrillMode,
+  resolveRollbackActivationMode,
+  resolveRollbackTargetCapabilityMode,
+} from "./browser/prompt-close-all-drill-authority.mjs";
+import { ServiceWorkerActivationTracker } from "./lib/service-worker-activation-tracker.mjs";
 
 const PREVIEW_URL = process.env.ESP_PREVIEW_URL ?? "http://127.0.0.1:4173/";
 const ROLLBACK_MODE = process.env.ESP_ROLLBACK_MODE === "true";
@@ -23,6 +29,20 @@ const TRANSITION_MODE = ROLLBACK_MODE
       requestedTransitionMode === "forward"
     ? requestedTransitionMode
     : null;
+const PROMPT_CLOSE_DRILL_MODE = resolvePromptCloseAllDrillMode({
+  transitionMode: TRANSITION_MODE,
+  configuredMode: process.env.ESP_PROMPT_CLOSE_DRILL,
+});
+const ROLLBACK_TARGET_CAPABILITY_MODE = resolveRollbackTargetCapabilityMode({
+  transitionMode: TRANSITION_MODE,
+  configuredMode: process.env.ESP_ROLLBACK_TARGET_CAPABILITY,
+});
+const ROLLBACK_ACTIVATION_MODE = resolveRollbackActivationMode({
+  transitionMode: TRANSITION_MODE,
+  configuredMode: process.env.ESP_ROLLBACK_ACTIVATION,
+});
+const STAGE_FORWARD_UPDATE_AFTER_BASELINE =
+  TRANSITION_MODE === "forward" && PROMPT_CLOSE_DRILL_MODE === "disabled";
 const ALLOW_DIRTY_BUILD = process.env.ESP_ALLOW_DIRTY_BUILD === "true";
 const REQUESTED_PROFILE_DIRECTORY =
   process.env.ESP_BROWSER_PROFILE_DIR?.trim() || null;
@@ -38,6 +58,7 @@ const EXPECTED_SERVICE_WORKER_SHA256 =
 const EXPECTED_MAIN_ASSET = process.env.ESP_EXPECTED_MAIN_ASSET?.trim() || null;
 const CHROME_CANDIDATES = [
   process.env.CHROME_PATH,
+  playwrightChromium.executablePath(),
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
@@ -49,7 +70,14 @@ const LEGACY_DELETE_COUNT_KEY =
   "__esp_internal__:browser-test:legacy-delete-count:v1";
 const CONTROLLER_CHANGE_COUNT_KEY =
   "__esp_internal__:browser-test:controller-change-count:v1";
+const PWA_UPDATE_PROBE_STATE_KEY =
+  "__esp_internal__:browser-test:pwa-update-probe-state:v1";
+const PWA_UPDATE_PROBE_TRACE_KEY =
+  "__esp_internal__:browser-test:pwa-update-probe-trace:v1";
 const ROLLBACK_SAVE_EVENT_NAME = "RELEASE_A_ROLLBACK_SAVE";
+const PROMPT_CLOSE_ITEM_TITLE = "Prompt Close Saved Item";
+const PROMPT_CLOSE_AUTOSAVE_ARM_REMARK = "PWA autosave blocker armed";
+const PROMPT_CLOSE_AUTOSAVE_REMARK = "PWA save-flush evidence";
 const SYNTHETIC_METADATA =
   '{"A10_FIXTURE":{"title":"synthetic-event","phase":"release-a-browser"}}';
 const SYNTHETIC_SYNC_QUEUE =
@@ -118,177 +146,115 @@ const findChrome = async () => {
     }
   }
   throw new Error(
-    "Chrome or Edge was not found. Set CHROME_PATH to a Chromium executable.",
+    "A Playwright Chromium, Chrome, or Edge executable was not found. Set CHROME_PATH to a Chromium executable.",
   );
 };
 
-const reservePort = async () =>
-  await new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        server.close();
-        reject(new Error("Failed to reserve a Chromium debugging port."));
-        return;
-      }
-      const { port } = address;
-      server.close((error) => (error ? reject(error) : resolve(port)));
-    });
-  });
-
-class CdpClient {
-  constructor(socket) {
-    this.socket = socket;
-    this.nextId = 1;
-    this.pending = new Map();
-    this.listeners = new Map();
-
-    socket.on("message", (rawMessage) => {
-      const message = JSON.parse(rawMessage.toString());
-      if (typeof message.id === "number") {
-        const pending = this.pending.get(message.id);
-        if (!pending) return;
-        this.pending.delete(message.id);
-        if (message.error) {
-          pending.reject(
-            new Error(
-              `${message.error.message ?? "CDP command failed"} (${message.error.code ?? "unknown"})`,
-            ),
-          );
-        } else {
-          pending.resolve(message.result ?? {});
-        }
-        return;
-      }
-
-      const listeners = this.listeners.get(message.method);
-      if (!listeners) return;
-      listeners.forEach((listener) => listener(message.params ?? {}));
-    });
-  }
-
-  static async connect(webSocketDebuggerUrl) {
-    const socket = new WebSocket(webSocketDebuggerUrl);
-    await withTimeout(
-      new Promise((resolve, reject) => {
-        socket.once("open", resolve);
-        socket.once("error", reject);
-      }),
-      10_000,
-      "Chromium DevTools connection",
-    );
-    return new CdpClient(socket);
+class PlaywrightPageClient {
+  constructor(session) {
+    this.session = session;
   }
 
   send(method, params = {}) {
-    const id = this.nextId;
-    this.nextId += 1;
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`CDP ${method} timed out after 30000ms.`));
-      }, 30_000);
-      const settle = (callback) => (value) => {
-        clearTimeout(timeout);
-        callback(value);
-      };
-      this.pending.set(id, {
-        resolve: settle(resolve),
-        reject: settle(reject),
-      });
-      this.socket.send(JSON.stringify({ id, method, params }), (error) => {
-        if (!error) return;
-        const pending = this.pending.get(id);
-        this.pending.delete(id);
-        pending?.reject(error);
-      });
-    });
-  }
-
-  once(method, timeoutMs = 15_000) {
     return withTimeout(
-      new Promise((resolve) => {
-        const listeners = this.listeners.get(method) ?? new Set();
-        const listener = (params) => {
-          listeners.delete(listener);
-          resolve(params);
-        };
-        listeners.add(listener);
-        this.listeners.set(method, listeners);
-      }),
-      timeoutMs,
-      method,
+      this.session.send(method, params),
+      30_000,
+      `CDP ${method}`,
     );
   }
 
-  on(method, listener) {
-    const listeners = this.listeners.get(method) ?? new Set();
-    listeners.add(listener);
-    this.listeners.set(method, listeners);
-    return () => {
-      listeners.delete(listener);
-      if (listeners.size === 0) this.listeners.delete(method);
-    };
+  once(method, timeoutMs = 15_000) {
+    let listener;
+    const event = new Promise((resolve) => {
+      listener = (params) => resolve(params);
+      this.session.once(method, listener);
+    });
+    return withTimeout(event, timeoutMs, method).finally(() => {
+      if (listener) this.session.off(method, listener);
+    });
   }
 
-  close() {
-    const closeError = new Error("Chromium DevTools connection closed.");
-    this.pending.forEach(({ reject }) => reject(closeError));
-    this.pending.clear();
-    this.socket.terminate();
+  on(method, listener) {
+    this.session.on(method, listener);
+    return () => this.session.off(method, listener);
+  }
+
+  async close() {
+    await this.session.detach().catch(() => undefined);
   }
 }
 
-const fetchJson = async (url, options) => {
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    throw new Error(`${url} returned HTTP ${response.status}.`);
-  }
-  return await response.json();
-};
-
-const waitForDevTools = async (port) => {
-  const endpoint = `http://127.0.0.1:${port}/json/version`;
-  let lastError;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try {
-      return await fetchJson(endpoint);
-    } catch (error) {
-      lastError = error;
-      await delay(100);
-    }
-  }
-  throw lastError ?? new Error("Chromium DevTools endpoint did not start.");
-};
-
-const createTarget = async (port) => {
-  const target = await fetchJson(
-    `http://127.0.0.1:${port}/json/new?${encodeURIComponent("about:blank")}`,
-    { method: "PUT" },
-  );
-  const client = await CdpClient.connect(target.webSocketDebuggerUrl);
+const createTarget = async (context, existingPage = null) => {
+  const page = existingPage ?? (await context.newPage());
+  const client = new PlaywrightPageClient(await context.newCDPSession(page));
   await Promise.all([
     client.send("Page.enable"),
     client.send("Runtime.enable"),
     client.send("Network.enable"),
   ]);
-  return { id: target.id, client };
+  return { page, client };
 };
 
-const closeTarget = async (port, target) => {
-  target.client.close();
-  try {
-    await fetch(`http://127.0.0.1:${port}/json/close/${target.id}`, {
-      method: "PUT",
-    });
-  } catch {
-    // The Chromium process shutdown path will close remaining targets.
+const closeTarget = async (target) => {
+  await target.client.close();
+  await target.page.close({ runBeforeUnload: false }).catch(() => undefined);
+};
+
+const selectUniqueStandaloneStartupPage = async (
+  context,
+  timeoutMs = 15_000,
+) => {
+  const deadline = Date.now() + timeoutMs;
+  let observations = [];
+  while (Date.now() < deadline) {
+    const pages = context.pages();
+    observations = await Promise.all(
+      pages.map(async (page) => {
+        try {
+          return {
+            page,
+            url: page.url(),
+            standalone: await page.evaluate(
+              () => globalThis.matchMedia("(display-mode: standalone)").matches,
+            ),
+          };
+        } catch {
+          return { page, url: page.url(), standalone: false };
+        }
+      }),
+    );
+    const candidates = observations.filter(({ standalone }) => standalone);
+    if (candidates.length > 1) {
+      throw new Error("Chromium exposed multiple standalone startup pages.");
+    }
+    if (candidates.length === 1) {
+      const selected = candidates[0].page;
+      for (const observation of observations) {
+        if (observation.page !== selected) {
+          await observation.page
+            .close({ runBeforeUnload: false })
+            .catch(() => undefined);
+        }
+      }
+      return selected;
+    }
+    await delay(100);
   }
+  throw new Error(
+    `A unique standalone startup page was not observed: ${JSON.stringify(
+      observations.map(({ url, standalone }) => ({ url, standalone })),
+    )}`,
+  );
 };
 
-const installBrowserInstrumentation = async (client) => {
+const installBrowserInstrumentation = async (
+  client,
+  pwaUpdateProbeMode = "none",
+) => {
+  assert(
+    ["none", "save-blocker", "trace-only"].includes(pwaUpdateProbeMode),
+    "PWA update probe mode is invalid.",
+  );
   const source = `(() => {
     const legacyKeys = new Set(${JSON.stringify(
       Object.keys(SYNTHETIC_LEGACY_SOURCES),
@@ -296,6 +262,13 @@ const installBrowserInstrumentation = async (client) => {
     const deleteCountKey = ${JSON.stringify(LEGACY_DELETE_COUNT_KEY)};
     const controllerChangeCountKey = ${JSON.stringify(
       CONTROLLER_CHANGE_COUNT_KEY,
+    )};
+    const pwaUpdateProbeMode = ${JSON.stringify(pwaUpdateProbeMode)};
+    const pwaUpdateProbeStateKey = ${JSON.stringify(
+      PWA_UPDATE_PROBE_STATE_KEY,
+    )};
+    const pwaUpdateProbeTraceKey = ${JSON.stringify(
+      PWA_UPDATE_PROBE_TRACE_KEY,
     )};
     const readCounter = (key) => {
       try {
@@ -324,6 +297,132 @@ const installBrowserInstrumentation = async (client) => {
         controllerChangeCountKey,
         readCounter(controllerChangeCountKey) + 1,
       );
+    });
+    const emptyPwaUpdateTrace = () => ({
+      inspectionCount: 0,
+      flushCount: 0,
+      productionInspectionCount: 0,
+      productionFlushCount: 0,
+      productionFlushResponseCount: 0,
+      productionCleanFlushResponseCount: 0,
+    });
+    const readPwaUpdateTrace = () => {
+      try {
+        const parsed = JSON.parse(
+          sessionStorage.getItem(pwaUpdateProbeTraceKey) ?? "{}",
+        );
+        const trace = emptyPwaUpdateTrace();
+        for (const key of Object.keys(trace)) {
+          if (Number.isSafeInteger(parsed[key]) && parsed[key] >= 0) {
+            trace[key] = parsed[key];
+          }
+        }
+        return trace;
+      } catch {
+        return emptyPwaUpdateTrace();
+      }
+    };
+    const writePwaUpdateTrace = (trace) => {
+      sessionStorage.setItem(pwaUpdateProbeTraceKey, JSON.stringify(trace));
+    };
+    const pendingProductionFlushRequestIds = new Set();
+    globalThis.addEventListener("message", (event) => {
+      if (
+        pwaUpdateProbeMode === "none" ||
+        event.source !== globalThis ||
+        event.origin !== globalThis.location.origin ||
+        sessionStorage.getItem(pwaUpdateProbeStateKey) !== "armed" ||
+        typeof event.data !== "object" ||
+        event.data === null
+      ) {
+        return;
+      }
+      const value = event.data;
+      if (
+        value.type === "ESP_PWA_ROLE_BLOCKER_SNAPSHOT_REQUEST" &&
+        value.protocolVersion === 1 &&
+        typeof value.requestId === "string" &&
+        typeof value.flush === "boolean"
+      ) {
+        const trace = readPwaUpdateTrace();
+        if (value.flush) {
+          trace.productionFlushCount += 1;
+          pendingProductionFlushRequestIds.add(value.requestId);
+        } else {
+          trace.productionInspectionCount += 1;
+        }
+        writePwaUpdateTrace(trace);
+        return;
+      }
+      if (
+        value.type !== "ESP_PWA_ROLE_BLOCKER_SNAPSHOT_RESPONSE" ||
+        value.protocolVersion !== 1 ||
+        typeof value.requestId !== "string" ||
+        !pendingProductionFlushRequestIds.delete(value.requestId)
+      ) {
+        return;
+      }
+      const trace = readPwaUpdateTrace();
+      trace.productionFlushResponseCount += 1;
+      if (
+        typeof value.snapshot === "object" &&
+        value.snapshot !== null &&
+        value.snapshot.responsive === true &&
+        value.snapshot.flushError === false &&
+        Array.isArray(value.snapshot.blockers) &&
+        value.snapshot.blockers.length === 0
+      ) {
+        trace.productionCleanFlushResponseCount += 1;
+      }
+      writePwaUpdateTrace(trace);
+    });
+    navigator.serviceWorker?.addEventListener("message", (event) => {
+      const request = event.data;
+      let probeState = null;
+      try {
+        probeState = sessionStorage.getItem(pwaUpdateProbeStateKey);
+      } catch {
+        return;
+      }
+      if (
+        pwaUpdateProbeMode === "none" ||
+        probeState !== "armed" ||
+        typeof request !== "object" ||
+        request === null ||
+        request.type !== "PWA_BLOCKER_SNAPSHOT_REQUEST" ||
+        request.protocolVersion !== 1 ||
+        typeof request.requestId !== "string" ||
+        typeof request.clientId !== "string" ||
+        typeof request.flush !== "boolean"
+      ) {
+        return;
+      }
+      const trace = readPwaUpdateTrace();
+      if (request.flush) trace.flushCount += 1;
+      else trace.inspectionCount += 1;
+      writePwaUpdateTrace(trace);
+      if (pwaUpdateProbeMode === "trace-only") return;
+      if (request.flush) return;
+      event.stopImmediatePropagation();
+      const response = {
+        type: "PWA_BLOCKER_SNAPSHOT_RESPONSE",
+        protocolVersion: 1,
+        requestId: request.requestId,
+        snapshot: {
+          clientId: request.clientId,
+          capturedAt: new Date().toISOString(),
+          responsive: true,
+          blockers: [
+            {
+              id: "release-a-managed-save",
+              label: "更新前の保存テスト",
+            },
+          ],
+          flushError: false,
+        },
+      };
+      const target = event.source ?? navigator.serviceWorker.controller;
+      target?.postMessage(response);
     });
   })();`;
   await client.send("Page.addScriptToEvaluateOnNewDocument", { source });
@@ -416,25 +515,333 @@ const waitForExpression = async (
   );
 };
 
+const armPwaUpdateProbe = async (client) =>
+  await evaluate(
+    client,
+    `(() => {
+      sessionStorage.setItem(
+        ${JSON.stringify(PWA_UPDATE_PROBE_STATE_KEY)},
+        "armed",
+      );
+      sessionStorage.setItem(
+        ${JSON.stringify(PWA_UPDATE_PROBE_TRACE_KEY)},
+        JSON.stringify({
+          inspectionCount: 0,
+          flushCount: 0,
+          productionInspectionCount: 0,
+          productionFlushCount: 0,
+          productionFlushResponseCount: 0,
+          productionCleanFlushResponseCount: 0,
+        }),
+      );
+      return true;
+    })()`,
+  );
+
+const collectPromptCloseAllUiEvidence = async (client) =>
+  await evaluate(
+    client,
+    `(() => (async () => {
+      const notice = document.querySelector("[data-pwa-update-notice]");
+      const action = notice?.querySelector("[data-pwa-save-and-flush]");
+      const count = (name) => {
+        const value = Number.parseInt(notice?.dataset[name] ?? "-1", 10);
+        return Number.isSafeInteger(value) && value >= 0 ? value : -1;
+      };
+      const trace = (() => {
+        try {
+          const value = JSON.parse(
+            sessionStorage.getItem(
+              ${JSON.stringify(PWA_UPDATE_PROBE_TRACE_KEY)},
+            ) ?? "{}",
+          );
+          const readCount = (key) =>
+            Number.isSafeInteger(value[key]) && value[key] >= 0
+              ? value[key]
+              : -1;
+          return {
+            inspectionCount: readCount("inspectionCount"),
+            flushCount: readCount("flushCount"),
+            productionInspectionCount: readCount(
+              "productionInspectionCount",
+            ),
+            productionFlushCount: readCount("productionFlushCount"),
+            productionFlushResponseCount: readCount(
+              "productionFlushResponseCount",
+            ),
+            productionCleanFlushResponseCount: readCount(
+              "productionCleanFlushResponseCount",
+            ),
+          };
+        } catch {
+          return {
+            inspectionCount: -1,
+            flushCount: -1,
+            productionInspectionCount: -1,
+            productionFlushCount: -1,
+            productionFlushResponseCount: -1,
+            productionCleanFlushResponseCount: -1,
+          };
+        }
+      })();
+      const registration = await navigator.serviceWorker.getRegistration();
+      const controllerChangeCount = Number.parseInt(
+        sessionStorage.getItem(
+          ${JSON.stringify(CONTROLLER_CHANGE_COUNT_KEY)},
+        ) ?? "0",
+        10,
+      );
+      return {
+        phase: notice?.dataset.pwaUpdatePhase ?? null,
+        snapshotCount: count("pwaSnapshotCount"),
+        responsiveCount: count("pwaResponsiveCount"),
+        blockerCount: count("pwaBlockerCount"),
+        unresponsiveCount: count("pwaUnresponsiveCount"),
+        flushFailureCount: count("pwaFlushFailureCount"),
+        saveOperationCount: count("pwaSaveOperationCount"),
+        saveOperation: notice?.dataset.saveOperation ?? null,
+        action: action?.dataset.pwaSaveAction ?? null,
+        actionVisible: Boolean(action),
+        closeGuidanceVisible:
+          notice?.dataset.pwaCloseGuidance === "true",
+        activeState: registration?.active?.state ?? null,
+        waitingState: registration?.waiting?.state ?? null,
+        controllerState: navigator.serviceWorker.controller?.state ?? null,
+        controllerScriptUrl:
+          navigator.serviceWorker.controller?.scriptURL ?? null,
+        controllerChangeCount:
+          Number.isSafeInteger(controllerChangeCount) &&
+          controllerChangeCount >= 0
+            ? controllerChangeCount
+            : -1,
+        snapshotRequests: trace,
+      };
+    })())()`,
+  );
+
+const waitForPromptCloseAllPhase = async (
+  client,
+  phase,
+  label,
+  timeoutMs = 20_000,
+) => {
+  const deadline = Date.now() + timeoutMs;
+  let lastEvidence = null;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      lastEvidence = await collectPromptCloseAllUiEvidence(client);
+      lastError = null;
+      if (lastEvidence.phase === phase) return lastEvidence;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await delay(100);
+  }
+  throw new Error(
+    `${label} was not observed: ${JSON.stringify({
+      expectedPhase: phase,
+      lastEvidence,
+      lastError,
+    })}`,
+  );
+};
+
+const requestProductionEventAutosaveSnapshot = async (client, flush) =>
+  await evaluate(
+    client,
+    `(() => new Promise((resolve, reject) => {
+      const requestId = crypto.randomUUID();
+      const clientId = "release-a-primary-production-bridge";
+      const timeout = setTimeout(() => {
+        globalThis.removeEventListener("message", onMessage);
+        reject(new Error("Production role blocker inspection timed out."));
+      }, 1_500);
+      const onMessage = (event) => {
+        if (
+          event.source !== globalThis ||
+          event.origin !== globalThis.location.origin ||
+          typeof event.data !== "object" ||
+          event.data === null ||
+          event.data.type !== "ESP_PWA_ROLE_BLOCKER_SNAPSHOT_RESPONSE" ||
+          event.data.protocolVersion !== 1 ||
+          event.data.requestId !== requestId
+        ) {
+          return;
+        }
+        clearTimeout(timeout);
+        globalThis.removeEventListener("message", onMessage);
+        const snapshot = event.data.snapshot;
+        const eventAutosave = Array.isArray(snapshot?.blockers)
+          ? snapshot.blockers.find(
+              (blocker) =>
+                blocker?.id === "event-autosave" &&
+                blocker?.label === "イベントを保存中",
+            )
+          : null;
+        resolve({
+          responsive: snapshot?.responsive === true,
+          flushError: snapshot?.flushError === true,
+          blockerCount: Array.isArray(snapshot?.blockers)
+            ? snapshot.blockers.length
+            : -1,
+          eventAutosaveObserved: Boolean(eventAutosave),
+        });
+      };
+      globalThis.addEventListener("message", onMessage);
+      globalThis.postMessage(
+        {
+          type: "ESP_PWA_ROLE_BLOCKER_SNAPSHOT_REQUEST",
+          protocolVersion: 1,
+          requestId,
+          clientId,
+          flush: ${JSON.stringify(flush)},
+        },
+        globalThis.location.origin,
+      );
+    }))()`,
+  );
+
+const inspectProductionEventAutosaveBlocker = async (client) =>
+  requestProductionEventAutosaveSnapshot(client, false);
+
+const flushProductionEventAutosave = async (client) =>
+  requestProductionEventAutosaveSnapshot(client, true);
+
+const waitForProductionEventAutosaveBlocker = async (
+  client,
+  timeoutMs = 5_000,
+) => {
+  const deadline = Date.now() + timeoutMs;
+  let evidence = null;
+  while (Date.now() < deadline) {
+    evidence = await inspectProductionEventAutosaveBlocker(client);
+    if (
+      evidence.responsive === true &&
+      evidence.flushError === false &&
+      evidence.blockerCount >= 1 &&
+      evidence.eventAutosaveObserved === true
+    ) {
+      return evidence;
+    }
+    await delay(100);
+  }
+  throw new Error(
+    `Production event-autosave blocker was not observed: ${JSON.stringify(
+      evidence,
+    )}`,
+  );
+};
+
+class AttachedServiceWorkerClient {
+  constructor(browserSession, sessionId) {
+    this.browserSession = browserSession;
+    this.sessionId = sessionId;
+    this.nextId = 1;
+    this.pending = new Map();
+    this.listeners = new Map();
+    this.handleMessage = (event) => {
+      if (event.sessionId !== this.sessionId) return;
+      const message = JSON.parse(event.message);
+      if (typeof message.id === "number") {
+        const pending = this.pending.get(message.id);
+        if (!pending) return;
+        this.pending.delete(message.id);
+        if (message.error) {
+          pending.reject(
+            new Error(
+              `${message.error.message ?? "Service Worker CDP command failed"} (${message.error.code ?? "unknown"})`,
+            ),
+          );
+        } else {
+          pending.resolve(message.result ?? {});
+        }
+        return;
+      }
+
+      const listeners = this.listeners.get(message.method);
+      listeners?.forEach((listener) => listener(message.params ?? {}));
+    };
+    browserSession.on("Target.receivedMessageFromTarget", this.handleMessage);
+  }
+
+  send(method, params = {}) {
+    const id = this.nextId;
+    this.nextId += 1;
+    return withTimeout(
+      new Promise((resolve, reject) => {
+        this.pending.set(id, { resolve, reject });
+        this.browserSession
+          .send("Target.sendMessageToTarget", {
+            sessionId: this.sessionId,
+            message: JSON.stringify({ id, method, params }),
+          })
+          .catch((error) => {
+            this.pending.delete(id);
+            reject(error);
+          });
+      }),
+      30_000,
+      `Service Worker CDP ${method}`,
+    ).finally(() => {
+      this.pending.delete(id);
+    });
+  }
+
+  on(method, listener) {
+    const listeners = this.listeners.get(method) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(method, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) this.listeners.delete(method);
+    };
+  }
+
+  async close() {
+    this.browserSession.off(
+      "Target.receivedMessageFromTarget",
+      this.handleMessage,
+    );
+    const closeError = new Error("Service Worker CDP session closed.");
+    this.pending.forEach(({ reject }) => reject(closeError));
+    this.pending.clear();
+    await this.browserSession
+      .send("Target.detachFromTarget", { sessionId: this.sessionId })
+      .catch(() => undefined);
+  }
+}
+
+const attachServiceWorkerTarget = async (browserSession, targetId) => {
+  // Playwright has no public API for reading the exact running worker source.
+  // Keep this protocol adapter scoped to that evidence only; all browser/page
+  // lifecycle and ordinary CDP commands remain owned by Playwright.
+  const { sessionId } = await browserSession.send("Target.attachToTarget", {
+    targetId,
+    flatten: false,
+  });
+  return new AttachedServiceWorkerClient(browserSession, sessionId);
+};
+
 const collectActiveServiceWorkerSourceEvidence = async (
-  port,
+  browserSession,
   serviceWorkerUrl,
 ) => {
   let lastError;
+  await browserSession.send("Target.setDiscoverTargets", { discover: true });
   for (let attempt = 0; attempt < 50; attempt += 1) {
     try {
-      const targetList = await fetchJson(`http://127.0.0.1:${port}/json/list`);
-      const workerTargets = targetList
+      const { targetInfos } = await browserSession.send("Target.getTargets");
+      const workerTargets = targetInfos
         .filter(
-          ({ type, url, webSocketDebuggerUrl }) =>
-            type === "service_worker" &&
-            url === serviceWorkerUrl &&
-            typeof webSocketDebuggerUrl === "string",
+          ({ type, url }) =>
+            type === "service_worker" && url === serviceWorkerUrl,
         )
         .reverse();
       for (const workerTarget of workerTargets) {
-        const workerClient = await CdpClient.connect(
-          workerTarget.webSocketDebuggerUrl,
+        const workerClient = await attachServiceWorkerTarget(
+          browserSession,
+          workerTarget.targetId,
         );
         try {
           const parsedScripts = [];
@@ -465,7 +872,7 @@ const collectActiveServiceWorkerSourceEvidence = async (
             sha256: sha256Text(scriptSource),
           };
         } finally {
-          workerClient.close();
+          await workerClient.close();
         }
       }
     } catch (error) {
@@ -480,9 +887,229 @@ const collectActiveServiceWorkerSourceEvidence = async (
   );
 };
 
-const ensureControlledApplication = async (client) => {
+const waitForNaturalServiceWorkerActivation = async (
+  pageClient,
+  serviceWorkerUrl,
+  requestUpdate,
+  prepareClientsForRelease,
+  releaseClients,
+  reopenClients,
+  timeoutMs = 20_000,
+) => {
+  const tracker = new ServiceWorkerActivationTracker(serviceWorkerUrl);
+  const waitForTrackedState = async (predicate, label, deadline) => {
+    while (Date.now() < deadline) {
+      const result = predicate();
+      if (result) return result;
+      await delay(100);
+    }
+    throw new Error(
+      `${label} was not observed. Tracker: ${JSON.stringify(tracker.describe())}`,
+    );
+  };
+
+  const unsubscribe = pageClient.on(
+    "ServiceWorker.workerVersionUpdated",
+    (event) => tracker.observe(event),
+  );
+  try {
+    await pageClient.send("ServiceWorker.enable");
+    await waitForTrackedState(
+      () => tracker.isBaselineReady(),
+      "stable Service Worker baseline",
+      Date.now() + timeoutMs,
+    );
+    const baselineVersionIds = tracker.freezeBaselineVersionIds();
+    const updateEvidence = await requestUpdate();
+    const waitingVersionId = await waitForTrackedState(
+      () => tracker.getNewInstalledVersionId(),
+      "installed waiting Service Worker",
+      Date.now() + timeoutMs,
+    );
+    const promptCloseAllEvidence = prepareClientsForRelease
+      ? await prepareClientsForRelease({
+          waitingVersionId,
+          baselineVersionIds,
+          updateEvidence,
+        })
+      : null;
+    if (promptCloseAllEvidence) {
+      assert(
+        tracker.getNewInstalledVersionId() === waitingVersionId,
+        "Target Service Worker changed before every client was ready to close.",
+      );
+    }
+    tracker.markClientsReleaseStarted(waitingVersionId);
+    const releaseEvidence = await releaseClients();
+    await waitForTrackedState(
+      () => tracker.isNaturalActivationComplete(),
+      "natural Service Worker activation",
+      Date.now() + timeoutMs,
+    );
+    const reopenEvidence = await reopenClients();
+    const reopenedAt = Date.now();
+    await waitForTrackedState(
+      () =>
+        Date.now() - reopenedAt >= 300 && tracker.isNaturalActivationComplete(),
+      "stable Service Worker activation after client reopen",
+      Date.now() + timeoutMs,
+    );
+    const result = {
+      versionId: waitingVersionId,
+      baselineVersionIds,
+      updateEvidence,
+      reopenEvidence,
+      ...releaseEvidence,
+    };
+    if (promptCloseAllEvidence) {
+      result.promptCloseAll = {
+        ...promptCloseAllEvidence,
+        release: {
+          ...releaseEvidence,
+          startedAfterReadyToClose: true,
+        },
+        naturalActivation: {
+          outcome: "natural-after-all-clients-closed",
+          versionId: waitingVersionId,
+          stableAfterReopen: true,
+          reopenedClientCount: Object.keys(reopenEvidence).length,
+        },
+      };
+    }
+    return result;
+  } finally {
+    unsubscribe();
+    await pageClient.send("ServiceWorker.disable").catch(() => undefined);
+  }
+};
+
+const requestTargetServiceWorkerUpdate = async (
+  client,
+  { allowExistingPostBaselineCandidate = false } = {},
+) => {
+  assert(
+    typeof allowExistingPostBaselineCandidate === "boolean",
+    "Existing post-baseline candidate authority must be boolean.",
+  );
+  assert(
+    !allowExistingPostBaselineCandidate || STAGE_FORWARD_UPDATE_AFTER_BASELINE,
+    "Existing candidate adoption is limited to staged historical forward transitions.",
+  );
+  return await evaluate(
+    client,
+    `(() => (async () => {
+      const allowExistingPostBaselineCandidate = ${JSON.stringify(
+        allowExistingPostBaselineCandidate,
+      )};
+      const previousRegistration =
+        await navigator.serviceWorker.getRegistration();
+      if (!previousRegistration) {
+        throw new Error("Existing Service Worker registration is missing.");
+      }
+      const previousInstalling = previousRegistration.installing;
+      const previousWaiting = previousRegistration.waiting;
+      if (
+        allowExistingPostBaselineCandidate &&
+        previousInstalling &&
+        previousWaiting
+      ) {
+        throw new Error(
+          "Existing post-baseline Service Worker candidate is ambiguous.",
+        );
+      }
+      const existingPostBaselineCandidate =
+        allowExistingPostBaselineCandidate
+          ? previousInstalling ?? previousWaiting
+          : null;
+      let updateFoundCount = 0;
+      const onUpdateFound = () => {
+        updateFoundCount += 1;
+      };
+      previousRegistration.addEventListener("updatefound", onUpdateFound);
+      try {
+        const registration = await navigator.serviceWorker.register("/sw.js", {
+          scope: "/",
+          type: "classic",
+          updateViaCache: "none",
+        });
+        const candidate = await new Promise((resolve, reject) => {
+          const deadline = Date.now() + 15_000;
+          const inspect = () => {
+            const installing = registration.installing;
+            const waiting = registration.waiting;
+            if (installing && installing !== previousInstalling) {
+              resolve(installing);
+              return;
+            }
+            if (waiting && waiting !== previousWaiting) {
+              resolve(waiting);
+              return;
+            }
+            if (
+              existingPostBaselineCandidate &&
+              (installing === existingPostBaselineCandidate ||
+                waiting === existingPostBaselineCandidate)
+            ) {
+              resolve(existingPostBaselineCandidate);
+              return;
+            }
+            if (Date.now() >= deadline) {
+              reject(
+                new Error("New target Service Worker candidate was not observed."),
+              );
+              return;
+            }
+            setTimeout(inspect, 50);
+          };
+          inspect();
+        });
+        await new Promise((resolve, reject) => {
+          let timeout;
+          const finish = (error) => {
+            clearTimeout(timeout);
+            candidate.removeEventListener("statechange", inspect);
+            if (error) reject(error);
+            else resolve();
+          };
+          const inspect = () => {
+            if (candidate.state === "installed") {
+              finish();
+            } else if (
+              candidate.state === "activating" ||
+              candidate.state === "activated" ||
+              candidate.state === "redundant"
+            ) {
+              finish(
+                new Error(
+                  "Target Service Worker reached " +
+                    candidate.state +
+                    " before client release.",
+                ),
+              );
+            }
+          };
+          candidate.addEventListener("statechange", inspect);
+          timeout = setTimeout(
+            () => finish(new Error("Target Service Worker install timed out.")),
+            15_000,
+          );
+          inspect();
+        });
+        return {
+          candidateState: candidate.state,
+          candidateScriptUrl: candidate.scriptURL,
+          hadPreviousWaiting: previousWaiting !== null,
+          updateFoundCount,
+        };
+      } finally {
+        previousRegistration.removeEventListener("updatefound", onUpdateFound);
+      }
+    })())`,
+  );
+};
+
+const waitForControlledApplication = async (client) => {
   await evaluate(client, "navigator.serviceWorker.ready.then(() => true)");
-  await reload(client);
   await waitForExpression(
     client,
     "Boolean(navigator.serviceWorker.controller)",
@@ -493,6 +1120,12 @@ const ensureControlledApplication = async (client) => {
     "Boolean(document.querySelector('#root')?.childElementCount)",
     "rendered application root",
   );
+};
+
+const ensureControlledApplication = async (client) => {
+  await evaluate(client, "navigator.serviceWorker.ready.then(() => true)");
+  await reload(client);
+  await waitForControlledApplication(client);
 };
 
 const waitForReleaseAStartupMetric = async (client) => {
@@ -529,7 +1162,9 @@ const collectOnlineProbe = async (client) =>
       }).then((response) => response.text());
       const mainScript = [...document.scripts]
         .map((script) => script.src)
-        .find((source) => /\\/assets\\/index-[^/]+\\.js$/.test(source));
+        .find((source) =>
+          /\\/assets\\/(?:index-[^/]+|release-role)\\.js$/.test(source),
+        );
       const metrics = JSON.parse(
         sessionStorage.getItem(${JSON.stringify(METRICS_STORAGE_KEY)}) ?? "null",
       );
@@ -618,8 +1253,10 @@ const collectFixtureEvidence = async (client) =>
           .join("");
       };
       const legacySourceEvidence = {};
+      const rawValues = {};
       for (const key of legacySourceKeys) {
         const value = localStorage.getItem(key);
+        rawValues[key] = value;
         legacySourceEvidence[key] = {
           present: value !== null,
           length: value?.length ?? 0,
@@ -628,6 +1265,7 @@ const collectFixtureEvidence = async (client) =>
       }
       return {
         legacySources: legacySourceEvidence,
+        rawValues,
         metadataPresent: metadata !== null,
         metadataLength: metadata?.length ?? 0,
         metadataHash: await hash(metadata),
@@ -655,7 +1293,7 @@ const collectRollbackDatabaseEvidence = async (client) =>
       });
       try {
         const transaction = database.transaction(
-          ["syncQueue", "eventMetadata", "eventLists"],
+          [...database.objectStoreNames],
           "readonly",
         );
         const read = (storeName, key) =>
@@ -676,8 +1314,21 @@ const collectRollbackDatabaseEvidence = async (client) =>
           "__esp_internal__:checkpoint:v1:eventMetadata:data",
         );
         const eventLists = await read("eventLists", "data");
+        const syncQueuePayload = await read("syncQueue", "data");
+        const stores = [...database.objectStoreNames]
+          .map((name) => {
+            const store = transaction.objectStore(name);
+            return {
+              name,
+              keyPath: store.keyPath,
+              indexes: [...store.indexNames].sort(),
+            };
+          })
+          .sort((left, right) => left.name.localeCompare(right.name));
         return {
           dbVersion: database.version,
+          databaseName: database.name,
+          stores,
           journalSchemaVersion: journal?.schemaVersion ?? null,
           journalPhase: journal?.phase ?? null,
           journalDataMigrationStatus: journal?.dataMigrationStatus ?? null,
@@ -712,6 +1363,12 @@ const collectRollbackDatabaseEvidence = async (client) =>
             )}])
               ? eventLists[${JSON.stringify(ROLLBACK_SAVE_EVENT_NAME)}].length
               : 0,
+          },
+          raw: {
+            archive,
+            checkpoint: eventMetadataCheckpoint,
+            journal,
+            syncQueuePayload,
           },
         };
       } finally {
@@ -755,6 +1412,203 @@ const waitForRollbackSavedEventCommit = async (client, timeoutMs = 20_000) => {
     `Rollback normal save was not committed to IndexedDB. Last evidence: ${JSON.stringify(
       lastEvidence?.rollbackSavedEvent ?? null,
     )}`,
+  );
+};
+
+const collectPersistedEventEvidence = async (client, eventName) =>
+  await evaluate(
+    client,
+    `(async () => {
+      const database = await new Promise((resolve, reject) => {
+        const request = indexedDB.open("EventShoppingPlannerDB");
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result);
+      });
+      try {
+        const transaction = database.transaction("eventLists", "readonly");
+        const eventLists = await new Promise((resolve, reject) => {
+          const request = transaction.objectStore("eventLists").get("data");
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => resolve(request.result);
+        });
+        const items = eventLists?.[${JSON.stringify(eventName)}];
+        const matchingAtomicCreationCount = Array.isArray(items)
+          ? items.filter(
+              (item) =>
+                item?.title === ${JSON.stringify(PROMPT_CLOSE_ITEM_TITLE)} &&
+                item?.remarks === "",
+            ).length
+          : 0;
+        const matchingAutosaveMutationCount = Array.isArray(items)
+          ? items.filter(
+              (item) =>
+                item?.title === ${JSON.stringify(PROMPT_CLOSE_ITEM_TITLE)} &&
+                item?.remarks === ${JSON.stringify(PROMPT_CLOSE_AUTOSAVE_REMARK)},
+            ).length
+          : 0;
+        return {
+          present: Array.isArray(items),
+          itemCount: Array.isArray(items) ? items.length : 0,
+          atomicCreationClean: matchingAtomicCreationCount === 1,
+          autosaveMutationCommitted: matchingAutosaveMutationCount === 1,
+        };
+      } finally {
+        database.close();
+      }
+    })()`,
+  );
+
+const waitForPersistedEventCreation = async (
+  client,
+  eventName,
+  timeoutMs = 20_000,
+) => {
+  const deadline = Date.now() + timeoutMs;
+  let lastEvidence = null;
+  while (Date.now() < deadline) {
+    lastEvidence = await collectPersistedEventEvidence(client, eventName);
+    if (
+      lastEvidence.present &&
+      lastEvidence.itemCount >= 1 &&
+      lastEvidence.atomicCreationClean
+    ) {
+      return lastEvidence;
+    }
+    await delay(100);
+  }
+  throw new Error(
+    `Prompt-close event creation was not committed atomically. Last evidence: ${JSON.stringify(
+      lastEvidence,
+    )}`,
+  );
+};
+
+const waitForAutosaveMutationCommit = async (
+  client,
+  eventName,
+  timeoutMs = 20_000,
+) => {
+  const deadline = Date.now() + timeoutMs;
+  let lastEvidence = null;
+  while (Date.now() < deadline) {
+    lastEvidence = await collectPersistedEventEvidence(client, eventName);
+    if (
+      lastEvidence.present &&
+      lastEvidence.itemCount >= 1 &&
+      lastEvidence.autosaveMutationCommitted
+    ) {
+      return lastEvidence;
+    }
+    await delay(100);
+  }
+  throw new Error(
+    `Prompt-close save was not committed to IndexedDB. Last evidence: ${JSON.stringify(
+      lastEvidence,
+    )}`,
+  );
+};
+
+const createPromptClosePendingEventThroughUi = async (page, eventName) => {
+  await page
+    .getByRole("button", { name: "新規リスト作成", exact: true })
+    .click();
+  await page.locator("#eventName").waitFor({ state: "visible" });
+  const formValues = [
+    ["#eventName", eventName],
+    ["#circles", "Prompt Close Circle"],
+    ["#event-dates", "1日目"],
+    ["#blocks", "A"],
+    ["#numbers", "01a"],
+    ["#titles", PROMPT_CLOSE_ITEM_TITLE],
+    ["#prices", "100"],
+  ];
+  // These are controlled React inputs. Serialize interactions and verify the
+  // reflected values so concurrent fills cannot submit a partial fixture.
+  for (const [selector, value] of formValues) {
+    await page.locator(selector).fill(value);
+  }
+  for (const [selector, value] of formValues) {
+    assert(
+      (await page.locator(selector).inputValue()) === value,
+      `Prompt-close fixture form value differs for ${selector}.`,
+    );
+  }
+  assert(
+    await page
+      .locator("form:has(#eventName)")
+      .evaluate(
+        (form) =>
+          form instanceof globalThis.HTMLFormElement && form.checkValidity(),
+      ),
+    "Prompt-close fixture form is invalid before submission.",
+  );
+  const acceptDialog = async (dialog) => {
+    await dialog.accept();
+  };
+  page.on("dialog", acceptDialog);
+  try {
+    await page.locator("form:has(#eventName) button[type=submit]").click();
+  } finally {
+    page.off("dialog", acceptDialog);
+  }
+  await page.waitForFunction(
+    (expectedEventName) =>
+      globalThis.document.body.textContent?.includes(expectedEventName) ===
+      true,
+    eventName,
+  );
+};
+
+const applyPromptCloseAutosaveMutationThroughUi = async (
+  page,
+  eventName,
+  expectedPreviousRemarks,
+  remarks,
+) => {
+  const itemRow = page.getByRole("listitem", {
+    name: `A01a Prompt Close Circle ${PROMPT_CLOSE_ITEM_TITLE}`,
+    exact: true,
+  });
+  await itemRow.waitFor({ state: "visible" });
+  assert(
+    (await itemRow.count()) === 1,
+    "Prompt-close fixture item row is not unique.",
+  );
+  const remarksInput = itemRow.getByRole("textbox", {
+    name: "利用者メモ",
+    exact: true,
+  });
+  await remarksInput.waitFor({ state: "visible" });
+  assert(
+    (await remarksInput.count()) === 1,
+    "Prompt-close fixture autosave input is not unique.",
+  );
+  const previousRemarks = await remarksInput.inputValue();
+  assert(
+    previousRemarks === expectedPreviousRemarks,
+    `Prompt-close fixture autosave input differs before mutation for ${eventName}.`,
+  );
+  await remarksInput.fill(remarks);
+  assert(
+    (await remarksInput.inputValue()) === remarks,
+    `Prompt-close fixture autosave mutation was not applied for ${eventName}.`,
+  );
+};
+
+const createPromptClosePendingEventAndArmAutosave = async (
+  page,
+  client,
+  eventName,
+) => {
+  await createPromptClosePendingEventThroughUi(page, eventName);
+  await waitForPersistedEventCreation(client, eventName);
+  // Event creation is atomically persisted and clean. This public UI mutation
+  // exercises the separate debounced autosave path used by the update blocker.
+  await applyPromptCloseAutosaveMutationThroughUi(
+    page,
+    eventName,
+    "",
+    PROMPT_CLOSE_AUTOSAVE_ARM_REMARK,
   );
 };
 
@@ -948,14 +1802,18 @@ const assertFixtureUnchanged = (before, after, label) => {
   assert(after.rendered, `${label}: application did not render.`);
 };
 
-const collectOfflineControllerBuildIdentity = async (client, buildId) => {
+const setNetworkOffline = async (client, offline) => {
   await client.send("Network.emulateNetworkConditions", {
-    offline: true,
+    offline,
     latency: 0,
-    downloadThroughput: 0,
-    uploadThroughput: 0,
-    connectionType: "none",
+    downloadThroughput: offline ? 0 : -1,
+    uploadThroughput: offline ? 0 : -1,
+    connectionType: offline ? "none" : "wifi",
   });
+};
+
+const collectOfflineControllerBuildIdentity = async (client, buildId) => {
+  await setNetworkOffline(client, true);
   try {
     return await evaluate(
       client,
@@ -977,14 +1835,51 @@ const collectOfflineControllerBuildIdentity = async (client, buildId) => {
         }))`,
     );
   } finally {
-    await client.send("Network.emulateNetworkConditions", {
-      offline: false,
-      latency: 0,
-      downloadThroughput: -1,
-      uploadThroughput: -1,
-      connectionType: "wifi",
-    });
+    await setNetworkOffline(client, false);
   }
+};
+
+const collectLegacyCapabilityAbsence = async (client, requestedPath) => {
+  const observation = await evaluate(
+    client,
+    `fetch(${JSON.stringify(requestedPath)}, { cache: "no-store" })
+      .then(async (response) => {
+        const contentType = response.headers.get("content-type") ?? "";
+        const body = await response.text();
+        const normalizedBody = body.trimStart().toLowerCase();
+        let parsed = null;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          // A legacy Vite preview can return its HTML fallback for an absent file.
+        }
+        const releaseCapability =
+          parsed !== null &&
+          typeof parsed === "object" &&
+          !Array.isArray(parsed) &&
+          parsed.kind === "event-shopping-planner-release-capabilities";
+        const htmlFallback =
+          contentType.toLowerCase().includes("text/html") &&
+          (normalizedBody.startsWith("<!doctype html") ||
+            normalizedBody.startsWith("<html"));
+        return {
+          status: response.status,
+          contentType,
+          observation: releaseCapability
+            ? "release-capability"
+            : htmlFallback
+              ? "html-fallback"
+              : "other",
+        };
+      })`,
+  );
+  assertLegacyRollbackCapabilityAbsence(observation);
+  return {
+    requestedPath,
+    status: observation.status,
+    observation:
+      observation.status === 404 ? "not-found" : observation.observation,
+  };
 };
 
 if (TRANSITION_MODE) {
@@ -1011,6 +1906,14 @@ if (TRANSITION_MODE) {
       "Forward verification requires ESP_EXPECTED_TARGET_BUILD_ID.",
     );
   }
+  if (TRANSITION_MODE === "rollback") {
+    assert(
+      ROLLBACK_TARGET_CAPABILITY_MODE === "required"
+        ? EXPECTED_TARGET_BUILD_ID === TARGET_ARTIFACT_ID
+        : EXPECTED_TARGET_BUILD_ID === null,
+      "Rollback target build ID must match its capability mode.",
+    );
+  }
 }
 
 const ownsProfileDirectory = REQUESTED_PROFILE_DIRECTORY === null;
@@ -1020,35 +1923,15 @@ const profileDirectory = REQUESTED_PROFILE_DIRECTORY
 if (REQUESTED_PROFILE_DIRECTORY) {
   await mkdir(profileDirectory, { recursive: true });
 }
-const debugPort = await reservePort();
-const chromePath = await findChrome();
+const browserExecutablePath = await findChrome();
 const standaloneBootstrapUrl = new URL("/manifest.webmanifest", PREVIEW_URL);
 standaloneBootstrapUrl.hostname =
   standaloneBootstrapUrl.hostname === "127.0.0.1" ? "localhost" : "127.0.0.1";
-const chromium = spawn(
-  chromePath,
-  [
-    "--headless=new",
-    "--disable-background-mode",
-    "--disable-component-update",
-    "--disable-default-apps",
-    "--disable-gpu",
-    "--no-default-browser-check",
-    "--no-first-run",
-    `--remote-debugging-port=${debugPort}`,
-    "--remote-allow-origins=*",
-    `--user-data-dir=${profileDirectory}`,
-    `--app=${standaloneBootstrapUrl.href}`,
-  ],
-  {
-    stdio: "ignore",
-    windowsHide: true,
-  },
-);
 const targets = [];
-let standaloneDebugPort = null;
 let standaloneTarget = null;
 let browserClient = null;
+let browserContext = null;
+let browserVersion = null;
 
 try {
   const previewResponse = await fetch(PREVIEW_URL);
@@ -1087,45 +1970,118 @@ try {
       "Served transition Service Worker does not match the expected artifact.",
     );
   }
-  const devToolsVersion = await waitForDevTools(debugPort);
+  browserContext = await playwrightChromium.launchPersistentContext(
+    profileDirectory,
+    {
+      executablePath: browserExecutablePath,
+      headless: true,
+      serviceWorkers: "allow",
+      viewport: null,
+      args: [
+        "--disable-background-mode",
+        "--disable-component-update",
+        "--disable-default-apps",
+        "--disable-gpu",
+        "--no-default-browser-check",
+        "--no-first-run",
+        `--app=${standaloneBootstrapUrl.href}`,
+      ],
+    },
+  );
+  const browser = browserContext.browser();
+  assert(browser, "Playwright persistent Chromium browser is missing.");
+  browserClient = await browser.newBrowserCDPSession();
+  const devToolsVersion = await browserClient.send("Browser.getVersion");
+  browserVersion = devToolsVersion.product ?? browser.version();
+  const browserProcesses = await browserClient.send(
+    "SystemInfo.getProcessInfo",
+  );
+  const browserProcessIds = browserProcesses.processInfo
+    .filter(({ type }) => type === "browser")
+    .map(({ id }) => id);
   assert(
-    typeof devToolsVersion.webSocketDebuggerUrl === "string",
-    "Chromium browser DevTools target is missing.",
+    browserProcessIds.length === 1 &&
+      Number.isSafeInteger(browserProcessIds[0]) &&
+      browserProcessIds[0] > 0,
+    "Chromium browser process identity is ambiguous.",
   );
-  browserClient = await CdpClient.connect(devToolsVersion.webSocketDebuggerUrl);
-  const startupTargets = await fetchJson(
-    `http://127.0.0.1:${debugPort}/json/list`,
+  const browserProcessId = browserProcessIds[0];
+  const startupAppPage =
+    await selectUniqueStandaloneStartupPage(browserContext);
+  standaloneTarget = await createTarget(browserContext, startupAppPage);
+  await installBrowserInstrumentation(
+    standaloneTarget.client,
+    PROMPT_CLOSE_DRILL_MODE === "required" ? "trace-only" : "none",
   );
-  const startupAppTarget = startupTargets.find(({ type }) => type === "page");
-  assert(startupAppTarget, "Initial standalone app-window target is missing.");
-  standaloneDebugPort = debugPort;
-  standaloneTarget = {
-    id: startupAppTarget.id,
-    client: await CdpClient.connect(startupAppTarget.webSocketDebuggerUrl),
-  };
-  await Promise.all([
-    standaloneTarget.client.send("Page.enable"),
-    standaloneTarget.client.send("Runtime.enable"),
-    standaloneTarget.client.send("Network.enable"),
-  ]);
-  await installBrowserInstrumentation(standaloneTarget.client);
 
-  const primary = await createTarget(debugPort);
+  const primary = await createTarget(browserContext);
   targets.push(primary);
-  await installBrowserInstrumentation(primary.client);
-  await navigate(primary.client, PREVIEW_URL);
-  await ensureControlledApplication(primary.client);
+  await installBrowserInstrumentation(
+    primary.client,
+    PROMPT_CLOSE_DRILL_MODE === "required" ? "save-blocker" : "none",
+  );
+  if (!STAGE_FORWARD_UPDATE_AFTER_BASELINE) {
+    await navigate(primary.client, PREVIEW_URL);
+    await ensureControlledApplication(primary.client);
+  }
   if (TRANSITION_MODE === "rollback") {
     assert(
       (await readArtifactMarker()) === EXPECTED_FROM_ARTIFACT_ID,
       "Rollback profile does not contain the expected source artifact marker.",
     );
-    await evaluate(
-      primary.client,
-      "navigator.serviceWorker.getRegistration().then((registration) => registration.update()).then(() => true)",
-    );
-    await delay(1_500);
-    await reload(primary.client);
+    let rollbackNaturalActivation = null;
+    if (ROLLBACK_ACTIVATION_MODE === "natural-after-client-release") {
+      const previewOrigin = new URL(PREVIEW_URL).origin;
+      const hasPreviewOrigin = (page) => {
+        try {
+          return new URL(page.url()).origin === previewOrigin;
+        } catch {
+          return false;
+        }
+      };
+      rollbackNaturalActivation = await waitForNaturalServiceWorkerActivation(
+        primary.client,
+        new URL("/sw.js", PREVIEW_URL).href,
+        () => requestTargetServiceWorkerUpdate(primary.client),
+        null,
+        async () => {
+          const originPages = browserContext.pages().filter(hasPreviewOrigin);
+          assert(
+            originPages.length > 0,
+            "Rollback transition has no controlled origin client to release.",
+          );
+          await Promise.all(
+            originPages.map((page) =>
+              page.goto("about:blank", { waitUntil: "load" }),
+            ),
+          );
+          const remainingOriginClientCount = browserContext
+            .pages()
+            .filter(hasPreviewOrigin).length;
+          assert(
+            remainingOriginClientCount === 0,
+            "Rollback transition did not release every controlled origin client.",
+          );
+          return {
+            releasedClientCount: originPages.length,
+            releasedTargetCount: originPages.length,
+            remainingOriginClientCount,
+          };
+        },
+        async () => {
+          await navigate(primary.client, PREVIEW_URL);
+          await waitForControlledApplication(primary.client);
+          return { primary: true };
+        },
+      );
+    } else {
+      await evaluate(
+        primary.client,
+        "navigator.serviceWorker.getRegistration().then((registration) => registration.update()).then(() => true)",
+      );
+      await delay(1_500);
+      await reload(primary.client);
+    }
     await ensureControlledApplication(primary.client);
     await waitForExpression(
       primary.client,
@@ -1155,24 +2111,62 @@ try {
       ))`,
       "rollback legacy source protection status",
     );
-    await waitForExpression(
-      primary.client,
-      `Number.parseInt(
-        sessionStorage.getItem(${JSON.stringify(
-          CONTROLLER_CHANGE_COUNT_KEY,
-        )}) ?? "0",
-        10,
-      ) >= 1`,
-      "rollback Service Worker controller change",
-    );
+    if (!rollbackNaturalActivation) {
+      await waitForExpression(
+        primary.client,
+        `Number.parseInt(
+          sessionStorage.getItem(${JSON.stringify(
+            CONTROLLER_CHANGE_COUNT_KEY,
+          )}) ?? "0",
+          10,
+        ) >= 1`,
+        "rollback Service Worker controller change",
+      );
+    }
     const activeRollbackWorker = await collectActiveServiceWorkerSourceEvidence(
-      debugPort,
+      browserClient,
       new URL("/sw.js", PREVIEW_URL).href,
     );
     assert(
       activeRollbackWorker.sha256 === EXPECTED_SERVICE_WORKER_SHA256,
       "Active rollback Service Worker does not match the expected artifact.",
     );
+    const rollbackOfflineControllerIdentity =
+      ROLLBACK_TARGET_CAPABILITY_MODE === "required"
+        ? await collectOfflineControllerBuildIdentity(
+            primary.client,
+            TARGET_ARTIFACT_ID,
+          )
+        : null;
+    if (rollbackOfflineControllerIdentity) {
+      assert(
+        rollbackOfflineControllerIdentity.buildId === TARGET_ARTIFACT_ID &&
+          rollbackOfflineControllerIdentity.sourceSha === TARGET_ARTIFACT_ID &&
+          rollbackOfflineControllerIdentity.sourceState === "clean" &&
+          rollbackOfflineControllerIdentity.releaseChannel === "release-a" &&
+          rollbackOfflineControllerIdentity.cleanupCapability === "forced-off",
+        "Rollback target versioned capability identity differs.",
+      );
+    }
+    const rollbackVersionedCapabilityEvidence =
+      rollbackOfflineControllerIdentity
+        ? {
+            expectation: "required",
+            requestedPath: `/release-capabilities.${TARGET_ARTIFACT_ID}.json`,
+            status: 200,
+            observation: "offline-cached",
+          }
+        : {
+            expectation: "legacy-absent",
+            stable: await collectLegacyCapabilityAbsence(
+              primary.client,
+              "/release-capabilities.json",
+            ),
+            versioned: await collectLegacyCapabilityAbsence(
+              primary.client,
+              `/release-capabilities.${TARGET_ARTIFACT_ID}.json`,
+            ),
+          };
     const expectedFixture = createExpectedLegacyFixtureEvidence();
     const rollbackFixture = await collectFixtureEvidence(primary.client);
     assertFixtureUnchanged(
@@ -1212,7 +2206,35 @@ try {
       "Rollback reader could not read the Release A checkpoint.",
     );
 
-    await createRollbackSavedEventThroughUi(primary.client);
+    if (ROLLBACK_ACTIVATION_MODE === "natural-after-client-release") {
+      await createPromptClosePendingEventAndArmAutosave(
+        primary.page,
+        primary.client,
+        ROLLBACK_SAVE_EVENT_NAME,
+      );
+      await waitForProductionEventAutosaveBlocker(primary.client);
+      await applyPromptCloseAutosaveMutationThroughUi(
+        primary.page,
+        ROLLBACK_SAVE_EVENT_NAME,
+        PROMPT_CLOSE_AUTOSAVE_ARM_REMARK,
+        PROMPT_CLOSE_AUTOSAVE_REMARK,
+      );
+      const rollbackFlush = await flushProductionEventAutosave(primary.client);
+      assert(
+        rollbackFlush.responsive === true &&
+          rollbackFlush.flushError === false &&
+          rollbackFlush.blockerCount === 0,
+        `Rollback production autosave flush did not finish cleanly: ${JSON.stringify(
+          rollbackFlush,
+        )}`,
+      );
+      await waitForAutosaveMutationCommit(
+        primary.client,
+        ROLLBACK_SAVE_EVENT_NAME,
+      );
+    } else {
+      await createRollbackSavedEventThroughUi(primary.client);
+    }
     let rollbackDatabase = await collectRollbackDatabaseEvidence(
       primary.client,
     );
@@ -1287,10 +2309,19 @@ try {
       rollbackInstrumentation.legacyDeleteCount === 0,
       "Rollback attempted to delete a protected legacy source.",
     );
-    assert(
-      rollbackInstrumentation.controllerChangeCount >= 1,
-      "Rollback did not observe a Service Worker controller change.",
-    );
+    if (rollbackNaturalActivation) {
+      assert(
+        typeof rollbackNaturalActivation.versionId === "string" &&
+          rollbackNaturalActivation.versionId.length > 0 &&
+          rollbackNaturalActivation.remainingOriginClientCount === 0,
+        "Rollback did not complete natural Service Worker activation.",
+      );
+    } else {
+      assert(
+        rollbackInstrumentation.controllerChangeCount >= 1,
+        "Rollback did not observe a Service Worker controller change.",
+      );
+    }
     assert(
       await writeArtifactMarker(TARGET_ARTIFACT_ID),
       "Rollback artifact marker could not be persisted.",
@@ -1301,13 +2332,18 @@ try {
         {
           result: "PASS",
           mode: "rollback",
-          browser: path.basename(chromePath),
+          browser: path.basename(browserExecutablePath),
+          browserProcessId,
           previewOrigin: new URL(PREVIEW_URL).origin,
           fromArtifactId: EXPECTED_FROM_ARTIFACT_ID,
           targetArtifactId: TARGET_ARTIFACT_ID,
           rollbackArtifactLoaded: true,
           indexSha256: previewIndexSha256,
           activeServiceWorker: activeRollbackWorker,
+          versionedCapability: rollbackVersionedCapabilityEvidence,
+          offlineControllerIdentity: rollbackOfflineControllerIdentity,
+          naturalActivation: rollbackNaturalActivation,
+          activationMode: ROLLBACK_ACTIVATION_MODE,
           serviceWorkerResponseCacheControl: serviceWorkerCacheControl,
           legacySources: {
             metadataPresent: finalRollbackFixture.metadataPresent,
@@ -1319,6 +2355,7 @@ try {
             protectedLegacySourceCount: Object.keys(
               finalRollbackFixture.legacySources,
             ).length,
+            rawValues: finalRollbackFixture.rawValues,
             unchanged: true,
             physicalDeleteCount: rollbackInstrumentation.legacyDeleteCount,
           },
@@ -1341,13 +2378,389 @@ try {
       (await readArtifactMarker()) === EXPECTED_FROM_ARTIFACT_ID,
       "Forward profile does not contain the expected rollback artifact marker.",
     );
-    await evaluate(
+    const previewOrigin = new URL(PREVIEW_URL).origin;
+    const hasPreviewOrigin = (page) => {
+      try {
+        return new URL(page.url()).origin === previewOrigin;
+      } catch {
+        return false;
+      }
+    };
+
+    let promptCloseSecondary = null;
+    let promptCloseClients = null;
+    let baselineControllerChangeCounts = null;
+    let promptCloseEventName = null;
+    if (PROMPT_CLOSE_DRILL_MODE === "required") {
+      await navigate(standaloneTarget.client, PREVIEW_URL);
+      await ensureControlledApplication(standaloneTarget.client);
+
+      promptCloseSecondary = await createTarget(browserContext);
+      targets.push(promptCloseSecondary);
+      await installBrowserInstrumentation(
+        promptCloseSecondary.client,
+        "trace-only",
+      );
+      await navigate(promptCloseSecondary.client, PREVIEW_URL);
+      await ensureControlledApplication(promptCloseSecondary.client);
+
+      promptCloseClients = [
+        { role: "primary", target: primary },
+        { role: "secondary", target: promptCloseSecondary },
+        { role: "standalone-equivalent", target: standaloneTarget },
+      ];
+      assert(
+        browserContext.pages().filter(hasPreviewOrigin).length ===
+          promptCloseClients.length,
+        "Prompt-close drill requires exactly three same-origin clients.",
+      );
+      baselineControllerChangeCounts = Object.fromEntries(
+        await Promise.all(
+          promptCloseClients.map(async ({ role, target }) => [
+            role,
+            (await collectBrowserInstrumentationEvidence(target.client))
+              .controllerChangeCount,
+          ]),
+        ),
+      );
+      await Promise.all(
+        promptCloseClients.map(({ target }) =>
+          armPwaUpdateProbe(target.client),
+        ),
+      );
+      promptCloseEventName = `RELEASE_A_PROMPT_CLOSE_SAVE_${Date.now()}`;
+      const eventBeforeSave = await collectPersistedEventEvidence(
+        primary.client,
+        promptCloseEventName,
+      );
+      assert(
+        !eventBeforeSave.present,
+        "Prompt-close save fixture already exists before user action.",
+      );
+    }
+
+    const naturalActivation = await waitForNaturalServiceWorkerActivation(
       primary.client,
-      "navigator.serviceWorker.getRegistration().then((registration) => registration.update()).then(() => true)",
+      new URL("/sw.js", PREVIEW_URL).href,
+      async () => {
+        if (STAGE_FORWARD_UPDATE_AFTER_BASELINE) {
+          assert(
+            primary.page.url() === "about:blank",
+            "Historical forward primary navigated before baseline freeze.",
+          );
+          await navigate(primary.client, PREVIEW_URL);
+          await ensureControlledApplication(primary.client);
+          return await requestTargetServiceWorkerUpdate(primary.client, {
+            allowExistingPostBaselineCandidate: true,
+          });
+        }
+        return await requestTargetServiceWorkerUpdate(primary.client);
+      },
+      PROMPT_CLOSE_DRILL_MODE === "required"
+        ? async ({ waitingVersionId }) => {
+            const preflush = await waitForPromptCloseAllPhase(
+              primary.client,
+              "save-required",
+              "prompt-close save-required phase",
+            );
+            assert(
+              preflush.snapshotCount === 3 &&
+                preflush.responsiveCount === 3 &&
+                preflush.blockerCount >= 1 &&
+                preflush.unresponsiveCount === 0 &&
+                preflush.flushFailureCount === 0 &&
+                preflush.saveOperationCount === 0 &&
+                preflush.action === "save-and-flush" &&
+                preflush.actionVisible &&
+                !preflush.closeGuidanceVisible,
+              `Prompt-close preflush evidence differs: ${JSON.stringify(preflush)}`,
+            );
+            assert(
+              preflush.activeState === "activated" &&
+                preflush.waitingState === "installed" &&
+                preflush.controllerState === "activated",
+              "Prompt-close preflush did not preserve the active/waiting roles.",
+            );
+
+            await createPromptClosePendingEventAndArmAutosave(
+              primary.page,
+              primary.client,
+              promptCloseEventName,
+            );
+            const eventAutosaveInspection =
+              await waitForProductionEventAutosaveBlocker(primary.client);
+            assert(
+              eventAutosaveInspection.responsive === true &&
+                eventAutosaveInspection.flushError === false &&
+                eventAutosaveInspection.blockerCount >= 1 &&
+                eventAutosaveInspection.eventAutosaveObserved === true,
+              `Production event-autosave blocker was not observed before the initial action: ${JSON.stringify(
+                eventAutosaveInspection,
+              )}`,
+            );
+
+            await promptCloseSecondary.client.send(
+              "Emulation.setScriptExecutionDisabled",
+              { value: true },
+            );
+            let failedClosed;
+            try {
+              // Re-arm the debounce immediately before the trusted action. The
+              // final marker is what the production flush must persist.
+              await applyPromptCloseAutosaveMutationThroughUi(
+                primary.page,
+                promptCloseEventName,
+                PROMPT_CLOSE_AUTOSAVE_ARM_REMARK,
+                PROMPT_CLOSE_AUTOSAVE_REMARK,
+              );
+              await primary.page
+                .locator(
+                  '[data-pwa-save-and-flush][data-pwa-save-action="save-and-flush"]',
+                )
+                .click();
+              failedClosed = await waitForPromptCloseAllPhase(
+                primary.client,
+                "save-incomplete",
+                "prompt-close fail-closed phase",
+              );
+              assert(
+                failedClosed.snapshotCount === 3 &&
+                  failedClosed.responsiveCount === 2 &&
+                  failedClosed.blockerCount === 0 &&
+                  failedClosed.unresponsiveCount === 1 &&
+                  failedClosed.flushFailureCount === 0 &&
+                  failedClosed.saveOperationCount === 1 &&
+                  failedClosed.action === "retry" &&
+                  failedClosed.actionVisible &&
+                  !failedClosed.closeGuidanceVisible,
+                `Prompt-close fail-closed evidence differs: ${JSON.stringify(
+                  failedClosed,
+                )}`,
+              );
+            } finally {
+              await promptCloseSecondary.client.send(
+                "Emulation.setScriptExecutionDisabled",
+                { value: false },
+              );
+            }
+
+            const resumedSecondary =
+              await requestProductionEventAutosaveSnapshot(
+                promptCloseSecondary.client,
+                false,
+              );
+            assert(
+              resumedSecondary.responsive === true &&
+                resumedSecondary.flushError === false &&
+                resumedSecondary.blockerCount === 0,
+              `Prompt-close secondary did not recover its production blocker bridge: ${JSON.stringify(
+                resumedSecondary,
+              )}`,
+            );
+
+            const eventAfterInitialAction = await waitForAutosaveMutationCommit(
+              primary.client,
+              promptCloseEventName,
+            );
+            await primary.page
+              .locator(
+                '[data-pwa-save-and-flush][data-pwa-save-action="retry"]',
+              )
+              .click();
+            const postflush = await waitForPromptCloseAllPhase(
+              primary.client,
+              "ready-to-close",
+              "prompt-close ready-to-close phase",
+            );
+            assert(
+              postflush.snapshotCount === 3 &&
+                postflush.responsiveCount === 3 &&
+                postflush.blockerCount === 0 &&
+                postflush.unresponsiveCount === 0 &&
+                postflush.flushFailureCount === 0 &&
+                postflush.saveOperationCount === 2 &&
+                postflush.action === null &&
+                !postflush.actionVisible &&
+                postflush.closeGuidanceVisible,
+              `Prompt-close postflush evidence differs: ${JSON.stringify(
+                postflush,
+              )}`,
+            );
+            assert(
+              postflush.activeState === "activated" &&
+                postflush.waitingState === "installed" &&
+                postflush.controllerState === "activated",
+              "Prompt-close user action activated the waiting worker prematurely.",
+            );
+
+            const clientEvidence = await Promise.all(
+              promptCloseClients.map(async ({ role, target }) => ({
+                role,
+                evidence: await collectPromptCloseAllUiEvidence(target.client),
+              })),
+            );
+            clientEvidence.forEach(({ role, evidence }) => {
+              assert(
+                evidence.snapshotRequests.inspectionCount >= 1 &&
+                  evidence.snapshotRequests.flushCount >= 1 &&
+                  evidence.snapshotRequests.productionFlushCount >= 1 &&
+                  evidence.snapshotRequests.productionFlushResponseCount >= 1 &&
+                  evidence.snapshotRequests.productionCleanFlushResponseCount >=
+                    1,
+                `Prompt-close ${role} did not observe production inspect/flush requests and clean responses.`,
+              );
+              assert(
+                evidence.activeState === "activated" &&
+                  evidence.waitingState === "installed" &&
+                  evidence.controllerState === "activated" &&
+                  evidence.controllerChangeCount ===
+                    baselineControllerChangeCounts[role],
+                `Prompt-close ${role} changed controller before client release.`,
+              );
+            });
+
+            const projectPhase = (evidence) => ({
+              phase: evidence.phase,
+              snapshotCount: evidence.snapshotCount,
+              responsiveCount: evidence.responsiveCount,
+              blockerCount: evidence.blockerCount,
+              unresponsiveCount: evidence.unresponsiveCount,
+              flushFailureCount: evidence.flushFailureCount,
+              saveOperationCount: evidence.saveOperationCount,
+              action: evidence.action,
+              actionVisible: evidence.actionVisible,
+              closeGuidanceVisible: evidence.closeGuidanceVisible,
+            });
+            return {
+              schemaVersion: 1,
+              kind: "prompt-close-all-browser-drill/v1",
+              clientRoles: promptCloseClients.map(({ role }) => role),
+              blockerFixture:
+                "synthetic-protocol-blocker-with-real-event-autosave-persistence",
+              interaction: {
+                initialAction: "playwright-click",
+                retryAction: "playwright-click",
+                operationCount: postflush.saveOperationCount,
+                eventAutosaveBlockerObserved:
+                  eventAutosaveInspection.eventAutosaveObserved,
+                eventAutosaveMutationPersistedAfterInitialAction:
+                  eventAfterInitialAction.autosaveMutationCommitted,
+                persistedItemCount: eventAfterInitialAction.itemCount,
+              },
+              preflush: projectPhase(preflush),
+              failedClosed: {
+                cause: "script-execution-disabled-unresponsive-client",
+                ...projectPhase(failedClosed),
+              },
+              postflush: projectPhase(postflush),
+              snapshotRequests: clientEvidence.map(({ role, evidence }) => ({
+                role,
+                inspectionCount: evidence.snapshotRequests.inspectionCount,
+                flushCount: evidence.snapshotRequests.flushCount,
+                productionFlushCount:
+                  evidence.snapshotRequests.productionFlushCount,
+                productionFlushResponseCount:
+                  evidence.snapshotRequests.productionFlushResponseCount,
+                productionCleanFlushResponseCount:
+                  evidence.snapshotRequests.productionCleanFlushResponseCount,
+              })),
+              controllerBeforeClose: {
+                fromArtifactId: EXPECTED_FROM_ARTIFACT_ID,
+                targetArtifactId: TARGET_ARTIFACT_ID,
+                waitingVersionId,
+                clients: clientEvidence.map(({ role, evidence }) => ({
+                  role,
+                  activeState: evidence.activeState,
+                  waitingState: evidence.waitingState,
+                  controllerState: evidence.controllerState,
+                  controllerScriptUrl: evidence.controllerScriptUrl,
+                  controllerChangeCountDelta:
+                    evidence.controllerChangeCount -
+                    baselineControllerChangeCounts[role],
+                })),
+              },
+            };
+          }
+        : null,
+      async () => {
+        const originPages = browserContext.pages().filter(hasPreviewOrigin);
+        assert(
+          originPages.length > 0,
+          "Forward transition has no controlled origin client to release.",
+        );
+        const releasePages = new Set([
+          primary.page,
+          standaloneTarget.page,
+          ...originPages,
+        ]);
+        await Promise.all(
+          [...releasePages].map((page) =>
+            page.goto("about:blank", { waitUntil: "load" }),
+          ),
+        );
+        assert(
+          browserContext.pages().filter(hasPreviewOrigin).length === 0,
+          "Forward transition did not release every controlled origin client.",
+        );
+        return {
+          releasedClientCount: originPages.length,
+          releasedTargetCount: releasePages.size,
+          remainingOriginClientCount: browserContext
+            .pages()
+            .filter(hasPreviewOrigin).length,
+        };
+      },
+      async () => {
+        const collectRegistrationState = (client) =>
+          evaluate(
+            client,
+            `navigator.serviceWorker.getRegistration().then((registration) => ({
+              activeScriptUrl: registration?.active?.scriptURL ?? null,
+              activeState: registration?.active?.state ?? null,
+              installing: Boolean(registration?.installing),
+              waiting: Boolean(registration?.waiting),
+            }))`,
+          );
+        const assertStableRegistration = (state, label) => {
+          assert(
+            state.activeScriptUrl === new URL("/sw.js", PREVIEW_URL).href &&
+              state.activeState === "activated" &&
+              !state.installing &&
+              !state.waiting,
+            `${label} observed an unstable Service Worker registration.`,
+          );
+        };
+
+        await navigate(primary.client, PREVIEW_URL);
+        await waitForControlledApplication(primary.client);
+        await waitForReleaseAStartupMetric(primary.client);
+        const primaryRegistration = await collectRegistrationState(
+          primary.client,
+        );
+        assertStableRegistration(primaryRegistration, "Primary reopen");
+
+        await navigate(standaloneTarget.client, PREVIEW_URL);
+        await waitForControlledApplication(standaloneTarget.client);
+        await waitForReleaseAStartupMetric(standaloneTarget.client);
+        const standaloneRegistration = await collectRegistrationState(
+          standaloneTarget.client,
+        );
+        assertStableRegistration(standaloneRegistration, "Standalone reopen");
+        return { primaryRegistration, standaloneRegistration };
+      },
     );
-    await delay(1_500);
-    await reload(primary.client);
-    await ensureControlledApplication(primary.client);
+    if (PROMPT_CLOSE_DRILL_MODE === "required") {
+      assertPromptCloseAllBrowserDrill(naturalActivation.promptCloseAll, {
+        expectedFromArtifactId: EXPECTED_FROM_ARTIFACT_ID,
+        expectedServiceWorkerUrl: new URL("/sw.js", PREVIEW_URL).href,
+        expectedTargetArtifactId: TARGET_ARTIFACT_ID,
+      });
+    } else {
+      assert(
+        !Object.hasOwn(naturalActivation, "promptCloseAll"),
+        "Disabled prompt-close drill emitted prompt evidence.",
+      );
+    }
     await waitForExpression(
       primary.client,
       `document.querySelector(
@@ -1365,16 +2778,6 @@ try {
       )`,
       "forward Release A main asset",
     );
-    await waitForExpression(
-      primary.client,
-      `Number.parseInt(
-        sessionStorage.getItem(${JSON.stringify(
-          CONTROLLER_CHANGE_COUNT_KEY,
-        )}) ?? "0",
-        10,
-      ) >= 1`,
-      "forward Service Worker controller change",
-    );
     await waitForReleaseAStartupMetric(primary.client);
     const forwardProbe = await collectOnlineProbe(primary.client);
     assertOnlineProbe(forwardProbe);
@@ -1384,7 +2787,7 @@ try {
       "Forward app identity does not match the target artifact.",
     );
     const activeForwardWorker = await collectActiveServiceWorkerSourceEvidence(
-      debugPort,
+      browserClient,
       new URL("/sw.js", PREVIEW_URL).href,
     );
     assert(
@@ -1417,8 +2820,6 @@ try {
         forwardDatabase.rollbackSavedEvent.itemCount >= 1,
       "Rollback-saved event was not retained after the forward update.",
     );
-    await navigate(standaloneTarget.client, PREVIEW_URL);
-    await ensureControlledApplication(standaloneTarget.client);
     await waitForExpression(
       standaloneTarget.client,
       `document.body.textContent?.includes(${JSON.stringify(
@@ -1455,10 +2856,6 @@ try {
       "Forward update attempted to delete a protected legacy source.",
     );
     assert(
-      forwardInstrumentation.controllerChangeCount >= 1,
-      "Forward update did not observe a Service Worker controller change.",
-    );
-    assert(
       await writeArtifactMarker(TARGET_ARTIFACT_ID),
       "Forward artifact marker could not be persisted.",
     );
@@ -1468,12 +2865,14 @@ try {
         {
           result: "PASS",
           mode: "forward",
-          browser: path.basename(chromePath),
+          browser: path.basename(browserExecutablePath),
+          browserProcessId,
           previewOrigin: new URL(PREVIEW_URL).origin,
           fromArtifactId: EXPECTED_FROM_ARTIFACT_ID,
           targetArtifactId: TARGET_ARTIFACT_ID,
           indexSha256: previewIndexSha256,
           activeServiceWorker: activeForwardWorker,
+          naturalActivation,
           offlineControllerIdentity,
           controllerChangeCount: forwardInstrumentation.controllerChangeCount,
           legacySources: {
@@ -1486,10 +2885,12 @@ try {
             protectedLegacySourceCount: Object.keys(
               forwardFixture.legacySources,
             ).length,
+            rawValues: forwardFixture.rawValues,
             unchanged: true,
             physicalDeleteCount: forwardInstrumentation.legacyDeleteCount,
           },
           rollbackSavedEvent: forwardDatabase.rollbackSavedEvent,
+          database: forwardDatabase,
           surfaces: {
             normalTab: true,
             standaloneAppWindowEquivalent: forwardStandaloneMedia,
@@ -1537,7 +2938,7 @@ try {
     const primaryFixture = await collectFixtureEvidence(primary.client);
     assertFixtureUnchanged(fixture, primaryFixture, "primary tab");
 
-    const secondary = await createTarget(debugPort);
+    const secondary = await createTarget(browserContext);
     targets.push(secondary);
     await installBrowserInstrumentation(secondary.client);
     await navigate(secondary.client, PREVIEW_URL);
@@ -1627,7 +3028,7 @@ try {
       "Release A attempted to delete a protected legacy source.",
     );
     const activeServiceWorker = await collectActiveServiceWorkerSourceEvidence(
-      debugPort,
+      browserClient,
       finalProbe.serviceWorkerScriptUrl,
     );
     assert(
@@ -1646,14 +3047,18 @@ try {
         offlineControllerIdentity.cleanupCapability === "forced-off",
       "Active controller cannot serve the Release A build identity offline.",
     );
+    const preflightDatabase = await collectRollbackDatabaseEvidence(
+      primary.client,
+    );
 
     process.stdout.write(
       `${JSON.stringify(
         {
           result: "PREFLIGHT_PASS",
           observedAt: new Date().toISOString(),
-          browser: path.basename(chromePath),
-          browserVersion: devToolsVersion.Browser ?? null,
+          browser: path.basename(browserExecutablePath),
+          browserProcessId,
+          browserVersion,
           previewOrigin: new URL(PREVIEW_URL).origin,
           buildId: finalProbe.buildId,
           sourceState: finalProbe.sourceState,
@@ -1689,9 +3094,11 @@ try {
             syncQueueHash: finalFixture.syncQueueHash,
             protectedLegacySourceCount: Object.keys(finalFixture.legacySources)
               .length,
+            rawValues: finalFixture.rawValues,
             unchanged: true,
             physicalDeleteCount: finalInstrumentation.legacyDeleteCount,
           },
+          database: preflightDatabase,
           recoveryScreenVisible: finalProbe.recoveryVisible,
           startupMetricRecorded: finalProbe.startupReadyCount >= 1,
         },
@@ -1701,40 +3108,26 @@ try {
     );
   }
 } finally {
-  if (standaloneTarget && standaloneDebugPort !== null) {
-    await closeTarget(standaloneDebugPort, standaloneTarget).catch(
-      () => undefined,
-    );
+  if (standaloneTarget) {
+    await closeTarget(standaloneTarget).catch(() => undefined);
   }
-  await Promise.all(
-    targets.map((target) => closeTarget(debugPort, target)),
-  ).catch(() => undefined);
+  await Promise.all(targets.map((target) => closeTarget(target))).catch(
+    () => undefined,
+  );
   if (browserClient) {
-    await withTimeout(
-      browserClient.send("Browser.close"),
-      2_000,
-      "Graceful Chromium shutdown request",
-    ).catch(() => undefined);
-    browserClient.close();
+    await browserClient.detach().catch(() => undefined);
   }
-  const waitForChromiumExit = async (timeoutMs) =>
+  if (browserContext) {
     await withTimeout(
-      new Promise((resolve) => {
-        if (chromium.exitCode !== null || chromium.signalCode !== null) {
-          resolve();
-          return;
-        }
-        chromium.once("exit", resolve);
-      }),
-      timeoutMs,
-      "Chromium shutdown",
-    ).then(
-      () => true,
-      () => false,
-    );
-  if (!(await waitForChromiumExit(5_000))) {
-    chromium.kill();
-    await waitForChromiumExit(5_000);
+      browserContext.close(),
+      10_000,
+      "Playwright persistent context shutdown",
+    ).catch(async () => {
+      await browserContext
+        .browser()
+        ?.close()
+        .catch(() => undefined);
+    });
   }
 
   const expectedPrefix = path.join(tmpdir(), "esp-release-a-browser-");

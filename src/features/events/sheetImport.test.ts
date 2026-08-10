@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { parseEventItemsFromCsv } from "./sheetImport";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fetchGoogleSheetCsv, parseEventItemsFromCsv } from "./sheetImport";
 
 function csvRow(
   quantity: string,
@@ -57,5 +57,35 @@ describe("parseEventItemsFromCsv quantity", () => {
     expect(parsed[0].url).toBe("https://example.com/item");
     expect(parsed[1].url).toBeUndefined();
     expect(parsed[2].url).toBeUndefined();
+  });
+});
+
+describe("fetchGoogleSheetCsv", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("uses only the purpose-fixed same-origin CSV gateway", async () => {
+    const fetchMock = vi.fn(async () => new Response("csv-body"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchGoogleSheetCsv(
+        "https://docs.google.com/spreadsheets/d/abcdefghij123456/edit",
+        "品目表",
+      ),
+    ).resolves.toBe("csv-body");
+    expect(fetchMock).toHaveBeenCalledWith("/api/google-sheets-csv", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        Accept: "text/csv",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        spreadsheetId: "abcdefghij123456",
+        sheetName: "品目表",
+      }),
+    });
   });
 });

@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:event-shopping-planner:bootstrap-input:v1",
+  "title": "BootstrapInput v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "sourceSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "nodeVersion": {
+      "type": "string",
+      "pattern": "^v?[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "npmVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "lockfileSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "rawDistManifest": {
+      "$ref": "#/$defs/immutableRef"
+    },
+    "metricsDisabledTemplateSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "apiNotFoundTemplateSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "stagingVerifierSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "generatedPackageSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "generatedLockfileSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "generatedVercelConfigSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "providerProjectId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "providerConfigurationHash": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "sourceSha",
+    "nodeVersion",
+    "npmVersion",
+    "lockfileSha256",
+    "rawDistManifest",
+    "metricsDisabledTemplateSha256",
+    "apiNotFoundTemplateSha256",
+    "stagingVerifierSha256",
+    "generatedPackageSha256",
+    "generatedLockfileSha256",
+    "generatedVercelConfigSha256",
+    "providerProjectId",
+    "providerConfigurationHash"
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "immutableRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": ["uri", "sha256"]
+    }
+  }
+}

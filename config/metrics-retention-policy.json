@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "primaryRawRetentionDays": 30,
+  "cspSanitizedRetentionDays": 7,
+  "cron": {
+    "timezone": "UTC",
+    "minute": 17,
+    "schedule": "17 * * * *"
+  },
+  "batchSize": 5000,
+  "maximumBatchesPerRun": 12,
+  "lockTimeoutMilliseconds": 1000,
+  "statementTimeoutMilliseconds": 15000,
+  "lastSuccessBlockingAfterSeconds": 7200,
+  "verificationWorkflowMinute": 42,
+  "requiredTargets": ["csp-reports", "persistence-release-a-metrics"],
+  "deleteOwner": "pg_cron",
+  "verificationOwner": "protected-workflow",
+  "backupRetentionOwner": null,
+  "activationStatus": "unconfigured",
+  "blockerCodes": [
+    "backup-retention-owner-unconfigured",
+    "cron-not-remotely-observed",
+    "last-success-not-remotely-observed"
+  ]
+}

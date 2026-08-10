@@ -622,9 +622,10 @@ export function useExecutionSpaceNavigator(
   }, [navigator?.temporaryMode]);
 
   useLayoutEffect(() => {
+    const expansionInFlight = expansionInFlightRef.current;
     registrationGenerationRef.current += 1;
     cancelProgrammaticNavigation();
-    expansionInFlightRef.current.clear();
+    expansionInFlight.clear();
     emptyRecoveryInFlightRef.current = false;
     emptyRecoveryNotifiedRef.current = false;
     temporaryModeRef.current = null;
@@ -640,7 +641,7 @@ export function useExecutionSpaceNavigator(
     return () => {
       registrationGenerationRef.current += 1;
       cancelProgrammaticNavigation();
-      expansionInFlightRef.current.clear();
+      expansionInFlight.clear();
     };
   }, [cancelProgrammaticNavigation, registrationId]);
 

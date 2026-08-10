@@ -11,6 +11,7 @@ import { getSpaceKey } from "../utils/spaceGrouping";
 import { parseGroupId, groupItemsByHallOrder } from "../utils/hallGrouping";
 import { findRouteLookupNumberCell } from "../utils/mapRoutingSignature";
 import { acquireBodyScrollLock } from "../utils/bodyScrollLock";
+import { useModalDialogBehavior } from "../hooks/useModalDialogBehavior";
 import GripVerticalIcon from "./icons/GripVerticalIcon";
 
 // 優先度レベルの型
@@ -76,6 +77,17 @@ const getGroupHeaderStyle = (
   }
   return { bgClass: "bg-slate-100 dark:bg-slate-800", borderColor: baseColor };
 };
+
+const GroupHeaderAccent = ({ color }: { color: string }) => (
+  <svg
+    aria-hidden="true"
+    className="absolute inset-y-0 left-0 h-full w-1"
+    preserveAspectRatio="none"
+    viewBox="0 0 4 100"
+  >
+    <rect fill={color} height="100" width="4" />
+  </svg>
+);
 
 // ホールごとにアイテムをグループ化するヘルパー（優先度対応版）
 // 4段階ロジックは hallGrouping ユーティリティに集約済み。ここでは表示用に
@@ -194,6 +206,24 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
   const isDraggingSheet = useRef(false);
   const startY = useRef(0);
   const startHeight = useRef(0);
+  const floatingDragLeft = `${(touchDragPosition?.x ?? 100) - 100}px`;
+  const floatingDragTop = `${(touchDragPosition?.y ?? 30) - 30}px`;
+  const viewportWidth =
+    typeof window === "undefined"
+      ? Number.POSITIVE_INFINITY
+      : window.innerWidth;
+  const viewportHeight =
+    typeof window === "undefined"
+      ? Number.POSITIVE_INFINITY
+      : window.innerHeight;
+  const priorityMenuLeft = `${Math.min(
+    menuPosition?.x ?? 0,
+    viewportWidth - 180,
+  )}px`;
+  const priorityMenuTop = `${Math.min(
+    menuPosition?.y ?? 0,
+    viewportHeight - 150,
+  )}px`;
 
   // 履歴に追加
   const pushHistory = useCallback(
@@ -259,6 +289,11 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     clearHistory();
     onCancel();
   }, [history, onUpdateOrder, clearHistory, onCancel]);
+  const { dialogRef: mobileDialogRef, onDialogKeyDown: onMobileDialogKeyDown } =
+    useModalDialogBehavior({
+      isOpen: isOpen && layoutMode === "smartphone",
+      onEscape: onClose,
+    });
 
   // グループ化されたアイテム（ホール順序に従う）
   const groupedItems = useMemo(
@@ -952,8 +987,12 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
   if (layoutMode === "smartphone") {
     return (
       <div
+        ref={mobileDialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="visit-list-title-mobile"
+        onKeyDown={onMobileDialogKeyDown}
         className="fixed inset-0 z-50 pointer-events-none"
-        style={{ top: 0 }}
       >
         {/* 背景オーバーレイ */}
         <div
@@ -964,8 +1003,8 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
         {/* ボトムシート */}
         <div
           ref={bottomSheetRef}
-          className="absolute bottom-0 left-0 right-0 bg-white dark:bg-slate-900 rounded-t-2xl shadow-2xl pointer-events-auto flex flex-col"
-          style={{ height: `${bottomSheetHeight}%` }}
+          data-layout-height={`${bottomSheetHeight}%`}
+          className="esp-layout-height absolute bottom-0 left-0 right-0 flex flex-col rounded-t-2xl bg-white shadow-2xl pointer-events-auto dark:bg-slate-900"
         >
           {/* ドラッグハンドル */}
           <div
@@ -980,9 +1019,12 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
 
           {/* ヘッダー */}
           <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-slate-700">
-            <h3 className="font-bold text-lg text-slate-900 dark:text-slate-100">
+            <h2
+              id="visit-list-title-mobile"
+              className="font-bold text-lg text-slate-900 dark:text-slate-100"
+            >
               訪問先リスト
-            </h3>
+            </h2>
             <div className="flex items-center gap-2">
               <button
                 onClick={handleUndo}
@@ -1070,7 +1112,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                       rangeEndIndex,
                     )
                   }
-                  className="px-3 py-1.5 text-sm rounded-md bg-orange-500 text-white"
+                  className="px-3 py-1.5 text-sm rounded-md bg-orange-700 text-white"
                 >
                   区間反転
                 </button>
@@ -1103,8 +1145,9 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
           {/* アイテムリスト */}
           <div
             ref={listContainerRef}
-            className={`flex-1 overflow-y-auto ${touchDragItem ? "touch-none" : ""}`}
-            style={{ touchAction: touchDragItem ? "none" : "auto" }}
+            className={`flex-1 overflow-y-auto ${
+              touchDragItem ? "touch-none" : "touch-auto"
+            }`}
           >
             {filteredGroupedItems.map((group, groupIndex) => {
               const headerStyle = getGroupHeaderStyle(
@@ -1119,18 +1162,15 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                 <div key={group.groupId ?? `no-hall-${groupIndex}`}>
                   {/* グループヘッダー */}
                   <div
-                    className={`sticky top-0 flex items-center justify-between px-4 py-2 cursor-pointer z-10 ${headerStyle.bgClass}`}
-                    style={{
-                      borderLeftColor: headerStyle.borderColor,
-                      borderLeftWidth: "4px",
-                    }}
+                    className={`sticky top-0 z-10 flex cursor-pointer items-center justify-between overflow-hidden px-4 py-2 ${headerStyle.bgClass}`}
                     onClick={() => toggleHallCollapse(group.groupId)}
                   >
-                    <span className="font-semibold text-sm text-slate-700 dark:text-slate-300">
+                    <GroupHeaderAccent color={headerStyle.borderColor} />
+                    <span className="font-semibold text-sm text-slate-900 dark:text-slate-100">
                       {displayName}
                     </span>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                      <span className="text-xs text-slate-800 dark:text-slate-100">
                         {group.items.length}件
                       </span>
                       <svg
@@ -1220,7 +1260,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                             group.priority === "highest"
                               ? "bg-red-600"
                               : group.priority === "priority"
-                                ? "bg-orange-500"
+                                ? "bg-orange-700"
                                 : "bg-blue-600"
                           }`}
                         >
@@ -1255,12 +1295,12 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                             {item.circle}
                           </p>
                           {item.title && (
-                            <p className="text-xs text-slate-500 dark:text-slate-500 truncate">
+                            <p className="text-xs text-slate-700 dark:text-slate-300 truncate">
                               {item.title}
                             </p>
                           )}
                           {item.remarks && (
-                            <p className="text-xs text-orange-600 dark:text-orange-400 truncate">
+                            <p className="text-xs text-orange-800 dark:text-orange-300 truncate">
                               {item.remarks}
                             </p>
                           )}
@@ -1315,12 +1355,9 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
         {/* フローティングドラッグアイテム */}
         {touchDragItem && touchDragPosition && (
           <div
-            className="fixed z-[100] pointer-events-none bg-white dark:bg-slate-800 shadow-2xl rounded-lg px-4 py-2 border-2 border-blue-500"
-            style={{
-              left: touchDragPosition.x - 100,
-              top: touchDragPosition.y - 30,
-              width: "200px",
-            }}
+            data-layout-left={floatingDragLeft}
+            data-layout-top={floatingDragTop}
+            className="esp-layout-left esp-layout-top fixed z-[100] w-[200px] rounded-lg border-2 border-blue-500 bg-white px-4 py-2 shadow-2xl pointer-events-none dark:bg-slate-800"
           >
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 flex items-center justify-center text-white rounded-full text-xs font-bold bg-blue-600">
@@ -1343,14 +1380,18 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
 
   // PCモード: サイドパネル
   return (
-    <div
+    <aside
+      aria-labelledby="visit-list-title-desktop"
       className={`fixed top-0 bottom-0 ${panelPosition === "left" ? "left-0" : "right-0"} w-[30%] min-w-[300px] max-w-[400px] bg-white dark:bg-slate-900 shadow-2xl z-40 flex flex-col`}
     >
       {/* ヘッダー */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
-        <h3 className="font-bold text-lg text-slate-900 dark:text-slate-100">
+        <h2
+          id="visit-list-title-desktop"
+          className="font-bold text-lg text-slate-900 dark:text-slate-100"
+        >
           訪問先リスト
-        </h3>
+        </h2>
         <div className="flex items-center gap-2">
           {/* 位置切り替え */}
           <button
@@ -1494,7 +1535,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                   rangeEndIndex,
                 )
               }
-              className="px-3 py-1.5 text-sm rounded-md bg-orange-500 text-white hover:bg-orange-600 transition-colors"
+              className="px-3 py-1.5 text-sm rounded-md bg-orange-700 text-white hover:bg-orange-800 transition-colors"
             >
               区間反転
             </button>
@@ -1530,8 +1571,9 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
       {/* アイテムリスト */}
       <div
         ref={listContainerRef}
-        className={`flex-1 overflow-y-auto ${touchDragItem ? "touch-none" : ""}`}
-        style={{ touchAction: touchDragItem ? "none" : "auto" }}
+        className={`flex-1 overflow-y-auto ${
+          touchDragItem ? "touch-none" : "touch-auto"
+        }`}
       >
         {filteredGroupedItems.map((group, groupIndex) => {
           const headerStyle = getGroupHeaderStyle(
@@ -1546,18 +1588,15 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
             <div key={group.groupId ?? `no-hall-${groupIndex}`}>
               {/* グループヘッダー */}
               <div
-                className={`sticky top-0 flex items-center justify-between px-4 py-2 cursor-pointer z-10 ${headerStyle.bgClass}`}
-                style={{
-                  borderLeftColor: headerStyle.borderColor,
-                  borderLeftWidth: "4px",
-                }}
+                className={`sticky top-0 z-10 flex cursor-pointer items-center justify-between overflow-hidden px-4 py-2 ${headerStyle.bgClass}`}
                 onClick={() => toggleHallCollapse(group.groupId)}
               >
-                <span className="font-semibold text-sm text-slate-700 dark:text-slate-300">
+                <GroupHeaderAccent color={headerStyle.borderColor} />
+                <span className="font-semibold text-sm text-slate-900 dark:text-slate-100">
                   {displayName}
                 </span>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                  <span className="text-xs text-slate-800 dark:text-slate-100">
                     {group.items.length}件
                   </span>
                   <svg
@@ -1647,7 +1686,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                         group.priority === "highest"
                           ? "bg-red-600"
                           : group.priority === "priority"
-                            ? "bg-orange-500"
+                            ? "bg-orange-700"
                             : "bg-blue-600"
                       }`}
                     >
@@ -1682,12 +1721,12 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                         {item.circle}
                       </p>
                       {item.title && (
-                        <p className="text-xs text-slate-500 dark:text-slate-500 truncate">
+                        <p className="text-xs text-slate-700 dark:text-slate-300 truncate">
                           {item.title}
                         </p>
                       )}
                       {item.remarks && (
-                        <p className="text-xs text-orange-600 dark:text-orange-400 truncate">
+                        <p className="text-xs text-orange-800 dark:text-orange-300 truncate">
                           {item.remarks}
                         </p>
                       )}
@@ -1725,11 +1764,9 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
       {/* 優先度メニュー */}
       {menuItem && menuPosition && (
         <div
-          className="fixed z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 py-2 min-w-[160px]"
-          style={{
-            left: Math.min(menuPosition.x, window.innerWidth - 180),
-            top: Math.min(menuPosition.y, window.innerHeight - 150),
-          }}
+          data-layout-left={priorityMenuLeft}
+          data-layout-top={priorityMenuTop}
+          className="esp-layout-left esp-layout-top fixed z-50 min-w-[160px] rounded-lg border border-slate-200 bg-white py-2 shadow-xl dark:border-slate-700 dark:bg-slate-800"
         >
           <div className="px-3 py-1 text-xs text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 mb-1">
             優先度設定
@@ -1801,12 +1838,9 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
       {/* フローティングドラッグアイテム */}
       {touchDragItem && touchDragPosition && (
         <div
-          className="fixed z-[100] pointer-events-none bg-white dark:bg-slate-800 shadow-2xl rounded-lg px-4 py-2 border-2 border-blue-500"
-          style={{
-            left: touchDragPosition.x - 100,
-            top: touchDragPosition.y - 30,
-            width: "200px",
-          }}
+          data-layout-left={floatingDragLeft}
+          data-layout-top={floatingDragTop}
+          className="esp-layout-left esp-layout-top fixed z-[100] w-[200px] rounded-lg border-2 border-blue-500 bg-white px-4 py-2 shadow-2xl pointer-events-none dark:bg-slate-800"
         >
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 flex items-center justify-center text-white rounded-full text-xs font-bold bg-blue-600">
@@ -1823,7 +1857,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
           </div>
         </div>
       )}
-    </div>
+    </aside>
   );
 };
 

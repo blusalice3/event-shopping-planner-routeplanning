@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "bindingStatus": "unconfigured",
+  "databaseCaEnvironmentName": "ARTIFACT_DRILL_DATABASE_CA_PEM",
+  "drillAdministratorDatabaseUrlEnvironmentName": "ARTIFACT_DRILL_ADMIN_DATABASE_URL",
+  "drillExecutorDatabaseUrlEnvironmentName": "ARTIFACT_DRILL_EXECUTOR_DATABASE_URL",
+  "productionReaderDatabaseUrlEnvironmentName": "ARTIFACT_DRILL_PRODUCTION_READER_DATABASE_URL",
+  "allowedDrillHosts": [],
+  "allowedDrillDatabases": [],
+  "allowedDrillAdministratorRoles": [],
+  "allowedDrillExecutorRoles": [],
+  "allowedProductionReaderRoles": [],
+  "databaseCaSha256": null,
+  "connectTimeoutMilliseconds": 5000,
+  "statementTimeoutMilliseconds": 15000,
+  "schemaResetMode": "dedicated-database-foundation-release-schema",
+  "providerPreviewAliasSuffix": null,
+  "implementation": {
+    "liveProviderBuildAdapterImplemented": true,
+    "operationReceiptSemanticValidatorsImplemented": true,
+    "collectorIdentityBindingImplemented": true,
+    "roleMembershipClosedSetImplemented": true
+  },
+  "blockerCodes": [
+    "artifact-drill-database-host-unconfigured",
+    "artifact-drill-database-name-unconfigured",
+    "artifact-drill-administrator-role-unconfigured",
+    "artifact-drill-executor-role-unconfigured",
+    "artifact-drill-production-reader-role-unconfigured",
+    "artifact-drill-ca-unobserved",
+    "artifact-drill-preview-alias-suffix-unconfigured"
+  ]
+}

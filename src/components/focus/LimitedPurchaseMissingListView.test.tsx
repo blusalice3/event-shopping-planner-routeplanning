@@ -54,6 +54,16 @@ afterEach(() => {
 });
 
 describe("LimitedPurchaseMissingListView", () => {
+  it("uses AA normal and hover colors for save actions", () => {
+    renderView();
+
+    expect(getFirstRowControls().saveButton).toHaveClass(
+      "bg-orange-700",
+      "hover:bg-orange-800",
+      "text-white",
+    );
+  });
+
   it("saves price and planned quantity while actual stays blank", async () => {
     const user = userEvent.setup();
     const { onUpdateItem } = renderView([makeItem({ price: null })]);

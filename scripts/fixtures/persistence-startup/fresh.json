@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "profileId": "fresh",
+  "localStorage": {},
+  "indexedDb": {
+    "databaseName": "EventShoppingPlannerDB",
+    "version": 5,
+    "stores": {}
+  }
+}

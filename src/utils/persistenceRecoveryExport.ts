@@ -1,4 +1,4 @@
-import { downloadBlob } from "./exportImport";
+import { downloadBlob } from "./downloadBlob";
 import {
   serializeStartupRecoveryBundle,
   type StartupRecoveryBundle,

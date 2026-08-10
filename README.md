@@ -548,12 +548,14 @@ Excel内の品目は、1～16列目を固定位置で読み取ります。バー
 PWA構成により、キャッシュ済みの画面、主要な閲覧・編集、ローカルファイル処理をオフラインで使える設計です。インストールまたはService Workerの有効化後、オンラインのまま再読み込みし、必要な画面を開いてから、実際の端末でオフライン動作を事前確認してください。次の操作には通信が必要です。
 
 - Googleスプレッドシートからの新規取込と更新
-- 初回アクセスと、まだキャッシュされていない外部アセットの取得
+- 初回アクセスと、まだキャッシュされていないアセットの取得
 - アプリの更新確認と新バージョンの取得
 
-ローカルXLSXとCSVの解析はブラウザ内で行われます。Googleスプレッドシート取込時は、GoogleのGViz CSVエンドポイントへアクセスします。また、画面スタイルの初回取得にTailwind CDNを使用します。
+ローカルXLSXは、ZIP/XMLのサイズ・件数・圧縮率を事前検査した後、専用Worker内で解析・生成します。CSVはブラウザ内で処理します。Googleスプレッドシート取込だけは、固定用途の同一オリジンAPIからGoogleのCSVエンドポイントへ接続します。画面スタイルとフォントはアプリ自身から配信し、Tailwind CDNや外部フォントへ接続しません。
 
-`src/lib/supabase.ts`、共有用データ型、`syncQueue` は将来連携向けの雛形で、現在の画面からは接続されていません。Supabaseの認証、共有、Realtime同期、QR共有は現行機能ではなく、環境変数の設定も通常の利用・開発には不要です。
+更新を取得しても、開いているタブやインストール済みPWAを強制再読み込みしません。保存中の操作を終えて同一サイトの画面をすべて閉じると、Service Workerが自然に切り替わり、次回起動時に新しい版を使います。
+
+Supabaseの認証、共有、Realtime同期、QR共有は現行機能ではありません。`syncQueue`は将来の共有機能ではなく、既存データとの互換性を保つために永続化・復旧対象として維持しています。
 
 PWAとして使う場合は、HTTPSまたはlocalhostで開き、ブラウザの「アプリをインストール」または「ホーム画面に追加」を利用してください。
 
@@ -580,8 +582,8 @@ PWAとして使う場合は、HTTPSまたはlocalhostで開き、ブラウザの
 
 ### 必要環境
 
-- Node.js 20以上。開発には現在サポート中のNode.js LTSを推奨
-- npm
+- Node.js 24.19.0
+- npm 11.19.0
 - ES modules、IndexedDB、localStorage、File API、Blob、Web Crypto、ResizeObserverに対応したモダンブラウザ
 
 動作確認の第一候補は、最新のChromeまたはEdgeです。
@@ -595,32 +597,41 @@ npm run dev
 
 開発サーバーは既定で `http://localhost:3000` を開きます。
 
-現在のアプリ機能に必須の環境変数やバックエンドはありません。Vite開発サーバーではService Workerを有効にしていないため、Release AのPWAを確認する場合は `npm run build:release-a` の後に `npm run preview` を実行してください。
+ローカルファイルとブラウザ内保存だけを使う機能にバックエンドは不要です。Googleスプレッドシート取込、CSP report、Release A metricsのproduction運用には、runbookで定めた同一オリジンAPI、server-only環境変数、DB権限が必要です。Vite開発サーバーではService Workerを有効にしていないため、Release AのPWAを確認する場合は `npm run build:release-a` の後に `npm run preview` を実行してください。
 
 ### 主なコマンド
 
-| コマンド                          | 内容                                             |
-| --------------------------------- | ------------------------------------------------ |
-| `npm run dev`                     | Vite開発サーバーを起動                           |
-| `npm run typecheck`               | TypeScriptの型チェック                           |
-| `npm test`                        | Vitestを監視モードで起動                         |
-| `npm run test:run`                | Vitestを1回実行                                  |
-| `npm run build`                   | cleanup強制OFFのRelease A build                  |
-| `npm run build:release-a`         | build後にsource SHA・capability・PWA生成物を検証 |
-| `npm run preview`                 | ビルド結果をローカル確認                         |
-| `npm run test:release-a-browser`  | 隔離Chromeで複数tab・SW・offlineをpreflight      |
-| `npm run test:release-a-rollback` | 同一origin/profileで旧版rollbackと復帰を演習     |
-| `npm run lint`                    | ESLintでTypeScript/Reactソースを検査             |
-| `npm run lint:fix`                | ESLintで安全に自動修正できる違反を修正           |
-| `npm run format`                  | Prettierで対象ファイルを整形                     |
-| `npm run format:check`            | Prettierの整形状態を確認                         |
-| `npm run generate-icons`          | PWA用アイコンを生成                              |
+| コマンド                                           | 内容                                             |
+| -------------------------------------------------- | ------------------------------------------------ |
+| `npm run dev`                                      | Vite開発サーバーを起動                           |
+| `npm run typecheck`                                | TypeScriptの型チェック                           |
+| `npm test`                                         | Vitestを監視モードで起動                         |
+| `npm run test:run`                                 | Vitestを1回実行                                  |
+| `npm run quality`                                  | protected CIと同じ静的検査・テスト群を実行       |
+| `npm run build`                                    | cleanup強制OFFのRelease A build                  |
+| `npm run build:release-a`                          | build後にsource SHA・capability・PWA生成物を検証 |
+| `npm run build:containment`                        | recovery-only containmentを独立build             |
+| `npm run test:artifact`                            | deterministic packageと改ざんfixtureを検証       |
+| `npm run verify:foundation`                        | foundation policyと外部blockerを検証             |
+| `npm run verify:external-prerequisites`            | backup/deviceの外部bindingを検証                 |
+| `npm run verify:phase-readiness`                   | formal 16-gate readinessを機械判定               |
+| `npm run test:phase-exit-attestation`              | pre-init seedとphase attestationを検証           |
+| `npm run test:artifact-control-store-drill-policy` | P0C分離drill policyを検証                        |
+| `npm run test:backup-restore-rehearsal`            | backup/restore authorityを検証                   |
+| `npm run preview`                                  | ビルド結果をローカル確認                         |
+| `npm run test:release-a-browser`                   | 隔離Chromeで複数tab・SW・offlineをpreflight      |
+| `npm run test:release-a-rollback`                  | 同一origin/profileで旧版rollbackと復帰を演習     |
+| `npm run lint`                                     | ESLintでTypeScript/Reactソースを検査             |
+| `npm run lint:fix`                                 | ESLintで安全に自動修正できる違反を修正           |
+| `npm run format`                                   | Prettierで対象ファイルを整形                     |
+| `npm run format:check`                             | Prettierの整形状態を確認                         |
+| `npm run generate-icons`                           | PWA用アイコンを生成                              |
 
-依存関係を`npm ci`で導入した後、`npm run lint`を実行してください。既存コードへ段階的に導入できるよう、未使用コードなどの既存違反はwarning、React Hooksの呼び出し規則違反などはerrorとして扱います。`npm run lint:fix`は自動修正できる違反だけを変更するため、実行後に差分を確認し、残った違反は手動で修正してください。
+依存関係を`npm ci`で導入した後、`npm run quality`を実行してください。ESLintはerrorとwarningのどちらも0件を必須にします。`npm run lint:fix`は自動修正できる違反だけを変更するため、実行後に差分を確認し、残った違反は手動で修正してください。
 
 本番ビルドは `dist` に出力されます。PWAを有効にするにはHTTPSで配信し、アプリはドメインのルートへ配置してください。`vercel.json` にはSPA用フォールバック、セキュリティヘッダー、および生成物 `/sw.js` 向けの再検証ヘッダーがあります。配布時は実レスポンスでも `Cache-Control: public, max-age=0, must-revalidate` が適用されることを確認してください。
 
-`npm run test:release-a-browser`を実行する前に、`npm run build:release-a`と`npm run preview -- --host 127.0.0.1 --port 4173 --strictPort`を実行してください。この試験は一時Chrome profileだけを使用し、通常tab、second tab、同一profileのstandalone app-window相当、install可能性、active Service Workerの実ソースhashとoffline build identity、offline reload、online復帰、およびsyntheticな旧原本への物理削除呼出しが0件であることを確認します。結果名は`PREFLIGHT_PASS`であり、desktop/Androidの実installed PWA試験やHTTPS canary観測の代替ではありません。
+`npm run test:release-a-browser`を実行する前に、`npm run build:release-a`と`npm run preview -- -- --host 127.0.0.1 --port 4173 --strictPort`を実行してください。この試験は一時Chrome profileだけを使用し、通常tab、second tab、同一profileのstandalone app-window相当、install可能性、active Service Workerの実ソースhashとoffline build identity、offline reload、online復帰、およびsyntheticな旧原本への物理削除呼出しが0件であることを確認します。結果名は`PREFLIGHT_PASS`であり、desktop/Androidの実installed PWA試験やHTTPS canary観測の代替ではありません。
 
 cleanなworktreeでpreviewを停止した後、`npm run test:release-a-rollback`を実行すると、検証済みRelease A成果物から既知の互換baselineへ戻し、同じorigin・同じChrome profileのまま再びRelease Aへ進める往復演習を自動実行します。実際のService Worker `controllerchange`とソースhash、checkpoint/journal/archive読取、rollback版UIからの通常autosaveとreload保持、旧原本hash不変・削除呼出し0件を確認し、一時source・profile・processを終了時に削除します。
 
@@ -628,32 +639,34 @@ cleanなworktreeでpreviewを停止した後、`npm run test:release-a-rollback`
 
 ### 技術構成
 
-| 領域           | 実装                                                            |
-| -------------- | --------------------------------------------------------------- |
-| UI             | React 18、React DOM、TypeScript                                 |
-| 開発・ビルド   | Vite 5、`@vitejs/plugin-react`                                  |
-| XLSX処理       | ExcelJS。会場マップ解析とイベント単位の入出力をブラウザ内で実行 |
-| ブラウザ内保存 | IndexedDB。端末設定と一部の保存失敗時退避にlocalStorageを使用   |
-| PWA            | `vite-plugin-pwa` とWorkbox                                     |
-| スタイル       | `index.html` から読み込むTailwind CDNとインラインCSS            |
-| テスト         | Vitest、Testing Library、jsdom、fake-indexeddb                  |
+| 領域           | 実装                                                                  |
+| -------------- | --------------------------------------------------------------------- |
+| UI             | React 18、React DOM、TypeScript                                       |
+| 開発・ビルド   | Vite 8、`@vitejs/plugin-react`                                        |
+| XLSX処理       | ExcelJSを専用Worker内だけで実行するtyped execution port               |
+| ブラウザ内保存 | split-facade構成のIndexedDB。保存失敗時の限定退避にlocalStorageを使用 |
+| PWA            | custom prompt-close-all Service Worker、Workbox、outer recovery agent |
+| スタイル       | local Tailwind 3/PostCSS、外部theme prepaint                          |
+| テスト         | Vitest projects、Playwright、Testing Library、fake-indexeddb          |
 
 ### 主な実装場所
 
-| パス                                   | 役割                                             |
-| -------------------------------------- | ------------------------------------------------ |
-| `src/App.tsx`                          | アプリ全体の状態と画面フロー                     |
-| `src/components/ImportScreen.tsx`      | 新規イベント、URL、CSV、貼り付け取込             |
-| `src/features/app-shell/`              | ヘッダー、メイン画面、ダイアログ層               |
-| `src/features/events/`                 | スプレッドシート取込、更新差分、XLSXバックアップ |
-| `src/utils/xlsxMapParser.ts`           | XLSX会場マップの解析                             |
-| `src/components/map/`                  | マップ表示、ブロック、ホール、経路UI             |
-| `src/features/map/`                    | マップ用フック、ドメイン処理、キャンバス補助     |
-| `src/components/FocusMode.tsx`         | 集中モード全体                                   |
-| `src/components/focus/`                | 集中モードのダイアログと表示部品                 |
-| `src/features/space-navigation/`       | 実行・集中モード共通のスペースナビ               |
-| `src/hooks/useIndexedDbPersistence.ts` | 自動保存                                         |
-| `src/utils/indexedDB.ts`               | ブラウザ内データベース                           |
-| `src/utils/appBackup.ts`               | 全データJSONバックアップの検証と生成             |
-| `src/utils/pathfinding.ts`             | マップ上の経路探索                               |
-| `vite.config.ts`                       | Vite、PWA、開発サーバー設定                      |
+| パス                                   | 役割                                                |
+| -------------------------------------- | --------------------------------------------------- |
+| `src/App.tsx`                          | composition rootと画面フロー                        |
+| `src/app/`                             | typed navigation、command port、runtime composition |
+| `src/components/ImportScreen.tsx`      | 新規イベント、URL、CSV、貼り付け取込                |
+| `src/features/app-shell/`              | ヘッダー、メイン画面、ダイアログ層                  |
+| `src/features/events/`                 | スプレッドシート取込、更新差分、XLSXバックアップ    |
+| `src/xlsx/`                            | XLSX domain、実行port、Worker、resource preflight   |
+| `src/components/map/`                  | マップ表示、ブロック、ホール、経路UI                |
+| `src/features/map/`                    | マップ用フック、ドメイン処理、キャンバス補助        |
+| `src/components/FocusMode.tsx`         | 集中モード全体                                      |
+| `src/components/focus/`                | 集中モードのダイアログと表示部品                    |
+| `src/features/space-navigation/`       | 実行・集中モード共通のスペースナビ                  |
+| `src/hooks/useIndexedDbPersistence.ts` | 自動保存                                            |
+| `src/utils/indexedDB.ts`               | 互換public facade                                   |
+| `src/persistence/`                     | DB、repository、migration、recovery、adapter        |
+| `src/utils/appBackup.ts`               | 全データJSONバックアップの検証と生成                |
+| `src/utils/pathfinding.ts`             | マップ上の経路探索                                  |
+| `vite.config.ts`                       | Vite、PWA、開発サーバー設定                         |

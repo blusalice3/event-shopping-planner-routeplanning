@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type MockedFunction } from "vitest";
 import type { ShoppingItem } from "../../../types/item";
 import {
   DEFAULT_BLOCK_DETECTION_SETTINGS,
@@ -85,8 +85,11 @@ const prepareImport = (
 });
 
 const createCommitEffects = (): MapImportCommitEffects & {
-  [K in keyof MapImportCommitEffects]: ReturnType<typeof vi.fn>;
+  [K in keyof MapImportCommitEffects]: MockedFunction<
+    MapImportCommitEffects[K]
+  >;
 } => ({
+  commitApplicationSnapshotPatch: vi.fn(async () => undefined),
   setEventLists: vi.fn(),
   setMapData: vi.fn(),
   setMapRotationSettings: vi.fn(),
@@ -94,19 +97,18 @@ const createCommitEffects = (): MapImportCommitEffects & {
   setHallDefinitions: vi.fn(),
   setHallRouteSettings: vi.fn(),
   setMapViewportSettings: vi.fn(),
-  saveBlockDetectionSettings: vi.fn(),
   activateTarget: vi.fn(),
   finishImport: vi.fn(),
   notify: vi.fn(),
 });
 
 describe("map import flow", () => {
-  it("commits a first import immediately and preserves mapless halls", () => {
+  it("commits a first import immediately and preserves mapless halls", async () => {
     const preparedImport = prepareImport(createState());
     const requestConfirmation = vi.fn();
-    const commit = vi.fn();
+    const commit = vi.fn(async () => undefined);
 
-    const result = dispatchPreparedMapImport(preparedImport, {
+    const result = await dispatchPreparedMapImport(preparedImport, {
       requestConfirmation,
       commit,
     });
@@ -119,7 +121,7 @@ describe("map import flow", () => {
     });
   });
 
-  it("defers the whole file when one of multiple target days has existing state", () => {
+  it("defers the whole file when one of multiple target days has existing state", async () => {
     const state = createState(["1日目", "2日目"]);
     state.mapData = {
       対象イベント: {
@@ -129,9 +131,9 @@ describe("map import flow", () => {
     const before = structuredClone(state);
     const preparedImport = prepareImport(state, ["1日目", "2日目"]);
     const requestConfirmation = vi.fn();
-    const commit = vi.fn();
+    const commit = vi.fn(async () => undefined);
 
-    const result = dispatchPreparedMapImport(preparedImport, {
+    const result = await dispatchPreparedMapImport(preparedImport, {
       requestConfirmation,
       commit,
     });
@@ -148,12 +150,12 @@ describe("map import flow", () => {
     expect(state).toEqual(before);
   });
 
-  it("applies state and saves settings exactly once after commit", () => {
+  it("applies state and saves settings exactly once after commit", async () => {
     const state = createState();
     const preparedImport = prepareImport(state, ["1日目"], ["3日目"]);
     const effects = createCommitEffects();
 
-    commitPreparedMapImport({
+    await commitPreparedMapImport({
       state,
       preparedImport,
       options: { preserveMaplessHalls: true },
@@ -168,7 +170,7 @@ describe("map import flow", () => {
       effects.setHallDefinitions,
       effects.setHallRouteSettings,
       effects.setMapViewportSettings,
-      effects.saveBlockDetectionSettings,
+      effects.commitApplicationSnapshotPatch,
       effects.activateTarget,
       effects.finishImport,
       effects.notify,
@@ -182,7 +184,8 @@ describe("map import flow", () => {
         },
       },
     });
-    expect(effects.saveBlockDetectionSettings).toHaveBeenCalledWith(
+    expect(effects.commitApplicationSnapshotPatch).toHaveBeenCalledWith(
+      expect.any(Object),
       "対象イベント",
       preparedImport.settings,
     );
@@ -195,7 +198,7 @@ describe("map import flow", () => {
     );
   });
 
-  it("keeps mapless halls, routes, and their manual assignments on a first import", () => {
+  it("keeps mapless halls, routes, and their manual assignments on a first import", async () => {
     const state = createState();
     state.eventLists.対象イベント[0] = item("item-1", "1日目", "mapless-hall");
     state.hallDefinitions = {
@@ -228,7 +231,7 @@ describe("map import flow", () => {
 
     expect(preparedImport.plan.requiresConfirmation).toBe(false);
 
-    commitPreparedMapImport({
+    await commitPreparedMapImport({
       state,
       preparedImport,
       options: { preserveMaplessHalls: true },
@@ -255,7 +258,7 @@ describe("map import flow", () => {
     expect(state.eventLists.対象イベント[0].manualHallId).toBe("mapless-hall");
   });
 
-  it("clears a removable manual assignment only when a confirmed commit runs", () => {
+  it("clears a removable manual assignment only when a confirmed commit runs", async () => {
     const state = createState();
     state.eventLists.対象イベント[0] = item("item-1", "1日目", "orphan-hall");
     const preparedImport = prepareImport(state);
@@ -269,16 +272,16 @@ describe("map import flow", () => {
       }),
     );
 
-    dispatchPreparedMapImport(preparedImport, {
+    await dispatchPreparedMapImport(preparedImport, {
       requestConfirmation: vi.fn(),
       commit,
     });
 
     expect(commit).not.toHaveBeenCalled();
     expect(effects.setEventLists).not.toHaveBeenCalled();
-    expect(effects.saveBlockDetectionSettings).not.toHaveBeenCalled();
+    expect(effects.commitApplicationSnapshotPatch).not.toHaveBeenCalled();
 
-    commitPreparedMapImport({
+    await commitPreparedMapImport({
       state,
       preparedImport,
       options: { preserveMaplessHalls: true },
@@ -289,7 +292,7 @@ describe("map import flow", () => {
     expect(
       effects.setEventLists.mock.calls[0][0].対象イベント[0],
     ).not.toHaveProperty("manualHallId");
-    expect(effects.saveBlockDetectionSettings).toHaveBeenCalledTimes(1);
+    expect(effects.commitApplicationSnapshotPatch).toHaveBeenCalledTimes(1);
   });
 
   it("cancel only clears pending import UI state", () => {

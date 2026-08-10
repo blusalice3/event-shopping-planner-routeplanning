@@ -1,5 +1,12 @@
 const MAX_REQUEST_BYTES = 1_024;
 const METRICS_TABLE = "persistence_release_a_metric_events";
+const UPSTREAM_TIMEOUT_MS = 5_000;
+const FULL_SOURCE_SHA_PATTERN = /^[0-9a-f]{40}$/;
+const FORBIDDEN_ENVIRONMENT_NAMES = [
+  "SUPABASE_URL",
+  "SUPABASE_SERVICE_ROLE_KEY",
+  "PERSISTENCE_METRICS_ALLOW_GENERIC_FALLBACK",
+];
 
 const CHECKPOINT_OUTCOMES = new Set([
   "adopted",
@@ -252,6 +259,9 @@ const parseJsonText = (text) => {
   return JSON.parse(text);
 };
 
+const decodeJsonBytes = (bytes) =>
+  new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+
 const readJsonBody = async (request) => {
   const declaredLength = parseContentLength(request);
   if (
@@ -263,7 +273,7 @@ const readJsonBody = async (request) => {
 
   if (request.body !== undefined && request.body !== null) {
     if (Buffer.isBuffer(request.body)) {
-      return parseJsonText(request.body.toString("utf8"));
+      return parseJsonText(decodeJsonBytes(request.body));
     }
     if (typeof request.body === "string") {
       return parseJsonText(request.body);
@@ -289,7 +299,7 @@ const readJsonBody = async (request) => {
     }
     chunks.push(buffer);
   }
-  return parseJsonText(Buffer.concat(chunks).toString("utf8"));
+  return parseJsonText(decodeJsonBytes(Buffer.concat(chunks)));
 };
 
 const sendJson = (response, statusCode, body) => {
@@ -320,27 +330,96 @@ const getAllowedOrigin = () => {
   }
 };
 
-const getSupabaseConfiguration = () => {
-  const url =
-    process.env.PERSISTENCE_METRICS_SUPABASE_URL ?? process.env.SUPABASE_URL;
+const normalizeVercelHostname = (value) => {
+  if (!value || typeof value !== "string") return null;
+  try {
+    const parsed = value.includes("://")
+      ? new URL(value)
+      : new URL(`https://${value}`);
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.pathname !== "/" ||
+      parsed.search !== "" ||
+      parsed.hash !== ""
+    ) {
+      return null;
+    }
+    return parsed.hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+};
+
+const getSourceHardenedConfiguration = () => {
+  if (
+    FORBIDDEN_ENVIRONMENT_NAMES.some(
+      (name) =>
+        typeof process.env[name] === "string" && process.env[name] !== "",
+    )
+  ) {
+    return null;
+  }
+
+  const url = process.env.PERSISTENCE_METRICS_SUPABASE_URL;
   const serviceRoleKey =
-    process.env.PERSISTENCE_METRICS_SUPABASE_SERVICE_ROLE_KEY ??
-    process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceRoleKey) return null;
+    process.env.PERSISTENCE_METRICS_SUPABASE_SERVICE_ROLE_KEY;
+  const expectedProjectRef =
+    process.env.PERSISTENCE_METRICS_EXPECTED_PROJECT_REF;
+  const expectedProviderProjectId =
+    process.env.PERSISTENCE_METRICS_EXPECTED_PROVIDER_PROJECT_ID;
+  const providerProjectId = process.env.VERCEL_PROJECT_ID;
+  const deploymentId = process.env.VERCEL_DEPLOYMENT_ID;
+  const productionHostname = normalizeVercelHostname(
+    process.env.VERCEL_PROJECT_PRODUCTION_URL,
+  );
+  const deploymentHostname = normalizeVercelHostname(process.env.VERCEL_URL);
+  const allowedOrigin = getAllowedOrigin();
+  if (
+    !url ||
+    !serviceRoleKey ||
+    !expectedProjectRef ||
+    !expectedProviderProjectId ||
+    !providerProjectId ||
+    !deploymentId ||
+    !productionHostname ||
+    !deploymentHostname ||
+    !allowedOrigin ||
+    expectedProviderProjectId !== providerProjectId
+  ) {
+    return null;
+  }
 
   try {
     const parsed = new URL(url);
-    if (!isSecureServiceUrl(parsed)) return null;
+    if (
+      !isSecureServiceUrl(parsed) ||
+      parsed.username !== "" ||
+      parsed.password !== ""
+    ) {
+      return null;
+    }
+    const expectedSupabaseHostname =
+      `${expectedProjectRef}.supabase.co`.toLowerCase();
+    if (parsed.hostname.toLowerCase() !== expectedSupabaseHostname) {
+      return null;
+    }
+    if (new URL(allowedOrigin).hostname.toLowerCase() !== productionHostname) {
+      return null;
+    }
     return {
       url: parsed,
       serviceRoleKey,
+      allowedOrigin,
+      deploymentId,
+      deploymentHostname,
+      providerProjectId,
     };
   } catch {
     return null;
   }
 };
 
-const toDatabaseRow = (request) => ({
+export const toDatabaseRow = (request) => ({
   schema_version: request.schemaVersion,
   event_version: request.event.version,
   event_name: request.event.name,
@@ -364,12 +443,12 @@ export default async function handler(request, response) {
     sendJson(response, 405, { error: "method-not-allowed" });
     return;
   }
-  const allowedOrigin = getAllowedOrigin();
-  if (allowedOrigin === null) {
+  const configuration = getSourceHardenedConfiguration();
+  if (configuration === null || typeof fetch !== "function") {
     sendJson(response, 503, { error: "metrics-backend-unavailable" });
     return;
   }
-  if (!isSameOriginRequest(request, allowedOrigin)) {
+  if (!isSameOriginRequest(request, configuration.allowedOrigin)) {
     sendJson(response, 403, { error: "forbidden" });
     return;
   }
@@ -398,10 +477,8 @@ export default async function handler(request, response) {
     sendJson(response, 400, { error: "invalid-schema" });
     return;
   }
-
-  const configuration = getSupabaseConfiguration();
-  if (configuration === null || typeof fetch !== "function") {
-    sendJson(response, 503, { error: "metrics-backend-unavailable" });
+  if (!FULL_SOURCE_SHA_PATTERN.test(body.buildId)) {
+    sendJson(response, 400, { error: "invalid-schema" });
     return;
   }
 
@@ -417,6 +494,8 @@ export default async function handler(request, response) {
         prefer: "return=minimal",
       },
       body: JSON.stringify(toDatabaseRow(body)),
+      redirect: "error",
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
   } catch {
     sendJson(response, 502, { error: "metrics-insert-failed" });

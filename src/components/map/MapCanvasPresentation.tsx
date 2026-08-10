@@ -10,7 +10,7 @@ type MapCanvasPresentationProps = {
   onPointerUp: (e: React.PointerEvent<HTMLCanvasElement>) => void;
   onPointerLeave: (e: React.PointerEvent<HTMLCanvasElement>) => void;
   onPointerCancel: (e: React.PointerEvent<HTMLCanvasElement>) => void;
-  cursor?: React.CSSProperties["cursor"];
+  cursor?: "grab" | "grabbing" | "crosshair";
 };
 
 const MapCanvasPresentation: React.FC<MapCanvasPresentationProps> = ({
@@ -25,14 +25,18 @@ const MapCanvasPresentation: React.FC<MapCanvasPresentationProps> = ({
   onPointerCancel,
   cursor,
 }) => {
+  const resolvedCursor = cursor || (isDragging ? "grabbing" : "grab");
+  const cursorClassName =
+    resolvedCursor === "crosshair"
+      ? "cursor-crosshair"
+      : resolvedCursor === "grabbing"
+        ? "cursor-grabbing"
+        : "cursor-grab";
+
   return (
     <div
       ref={containerRef}
-      className="relative bg-white dark:bg-slate-800 overflow-hidden"
-      style={{
-        width: "100%",
-        height: "100%",
-      }}
+      className="relative h-full w-full overflow-hidden bg-white dark:bg-slate-800"
     >
       <canvas
         ref={canvasRef}
@@ -42,10 +46,7 @@ const MapCanvasPresentation: React.FC<MapCanvasPresentationProps> = ({
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerLeave}
         onPointerCancel={onPointerCancel}
-        style={{
-          cursor: cursor || (isDragging ? "grabbing" : "grab"),
-          touchAction: "none",
-        }}
+        className={`block h-full w-full touch-none ${cursorClassName}`}
       />
     </div>
   );

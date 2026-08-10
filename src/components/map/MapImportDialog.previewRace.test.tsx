@@ -13,15 +13,23 @@ import {
   type BlockDetectionSettings,
   type DayMapData,
 } from "../../types/map";
-import type { ParseMapFileResult } from "../../utils/xlsxMapParser";
-import { parseMapFile } from "../../utils/xlsxMapParser";
+import type { ParseMapFileResult } from "../../xlsx/domain/mapWorkbook";
+import type { XlsxImportKind, XlsxImportResult } from "../../xlsx/domain/types";
+import type { XlsxExecutionPort } from "../../xlsx/port/XlsxExecutionPort";
 import MapImportDialog from "./MapImportDialog";
 
-vi.mock("../../utils/xlsxMapParser", () => ({
-  parseMapFile: vi.fn(),
-}));
+const importWorkbookMock = vi.fn<XlsxExecutionPort["importWorkbook"]>();
+const xlsxExecutionPort: XlsxExecutionPort = {
+  importWorkbook: importWorkbookMock,
+  exportWorkbook: vi.fn(),
+};
 
-const parseMapFileMock = vi.mocked(parseMapFile);
+function mapWorkerResult(
+  kind: Extract<XlsxImportKind, "map-preview" | "map-import">,
+  value: ParseMapFileResult,
+): XlsxImportResult {
+  return { kind, value };
+}
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
@@ -86,6 +94,7 @@ function renderDialog(
       savedSettings={savedSettings}
       onImport={onImport}
       onClose={vi.fn()}
+      xlsxExecutionPort={xlsxExecutionPort}
     />,
   );
   return { ...rendered, onImport };
@@ -93,7 +102,7 @@ function renderDialog(
 
 describe("MapImportDialog preview input race", () => {
   beforeEach(() => {
-    parseMapFileMock.mockReset();
+    importWorkbookMock.mockReset();
     vi.stubGlobal("alert", vi.fn());
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
   });
@@ -107,9 +116,15 @@ describe("MapImportDialog preview input race", () => {
     const stalePreview = createDeferred<ParseMapFileResult>();
     const staleData = createMapData("旧設定ブロック");
     const currentData = createMapData("新設定ブロック");
-    parseMapFileMock
-      .mockReturnValueOnce(stalePreview.promise)
-      .mockResolvedValueOnce(successfulResult(currentData));
+    importWorkbookMock
+      .mockReturnValueOnce(
+        stalePreview.promise.then((value) =>
+          mapWorkerResult("map-preview", value),
+        ),
+      )
+      .mockResolvedValueOnce(
+        mapWorkerResult("map-import", successfulResult(currentData)),
+      );
 
     const file = new File(["map"], "map.xlsx", {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -123,7 +138,7 @@ describe("MapImportDialog preview input race", () => {
     fireEvent.click(
       screen.getByRole("button", { name: /プレビュー（ブロック検出）/ }),
     );
-    expect(parseMapFileMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(importWorkbookMock).toHaveBeenCalledTimes(1));
 
     const maxNameLength = container.querySelector<HTMLInputElement>(
       'input[type="range"][min="1"][max="10"]',
@@ -142,11 +157,12 @@ describe("MapImportDialog preview input race", () => {
     fireEvent.click(screen.getByRole("button", { name: "取り込む" }));
 
     await waitFor(() => expect(onImport).toHaveBeenCalledTimes(1));
-    expect(parseMapFileMock).toHaveBeenCalledTimes(2);
-    expect(parseMapFileMock).toHaveBeenNthCalledWith(
-      2,
-      file,
-      expect.objectContaining({ maxBlockNameLength: 5 }),
+    expect(importWorkbookMock).toHaveBeenCalledTimes(2);
+    expect(importWorkbookMock.mock.calls[1][0]).toEqual(
+      expect.objectContaining({
+        kind: "map-import",
+        settings: expect.objectContaining({ maxBlockNameLength: 5 }),
+      }),
     );
     expect(onImport).toHaveBeenCalledWith(
       currentData,
@@ -158,9 +174,15 @@ describe("MapImportDialog preview input race", () => {
   it("discards a deferred preview when the File object changes", async () => {
     const stalePreview = createDeferred<ParseMapFileResult>();
     const currentData = createMapData("差し替え後ブロック");
-    parseMapFileMock
-      .mockReturnValueOnce(stalePreview.promise)
-      .mockResolvedValueOnce(successfulResult(currentData));
+    importWorkbookMock
+      .mockReturnValueOnce(
+        stalePreview.promise.then((value) =>
+          mapWorkerResult("map-preview", value),
+        ),
+      )
+      .mockResolvedValueOnce(
+        mapWorkerResult("map-import", successfulResult(currentData)),
+      );
 
     const fileOptions = {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -183,7 +205,7 @@ describe("MapImportDialog preview input race", () => {
     fireEvent.click(
       screen.getByRole("button", { name: /プレビュー（ブロック検出）/ }),
     );
-    expect(parseMapFileMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(importWorkbookMock).toHaveBeenCalledTimes(1));
 
     rerender(
       <MapImportDialog
@@ -193,6 +215,7 @@ describe("MapImportDialog preview input race", () => {
         savedSettings={null}
         onImport={onImport}
         onClose={vi.fn()}
+        xlsxExecutionPort={xlsxExecutionPort}
       />,
     );
 
@@ -214,11 +237,12 @@ describe("MapImportDialog preview input race", () => {
     fireEvent.click(screen.getByRole("button", { name: "取り込む" }));
 
     await waitFor(() => expect(onImport).toHaveBeenCalledTimes(1));
-    expect(parseMapFileMock).toHaveBeenCalledTimes(2);
-    expect(parseMapFileMock).toHaveBeenNthCalledWith(
-      2,
-      replacementFile,
-      expect.objectContaining({ maxBlockNameLength: 5 }),
+    expect(importWorkbookMock).toHaveBeenCalledTimes(2);
+    expect(importWorkbookMock.mock.calls[1][0]).toEqual(
+      expect.objectContaining({
+        kind: "map-import",
+        settings: expect.objectContaining({ maxBlockNameLength: 5 }),
+      }),
     );
     expect(onImport.mock.calls[0][0]).toBe(currentData);
   });
@@ -252,6 +276,7 @@ describe("MapImportDialog preview input race", () => {
         }}
         onImport={onImport}
         onClose={vi.fn()}
+        xlsxExecutionPort={xlsxExecutionPort}
       />,
     );
 
@@ -264,7 +289,9 @@ describe("MapImportDialog preview input race", () => {
 
   it("reuses a preview only while its file and settings signature still matches", async () => {
     const previewData = createMapData("再利用ブロック");
-    parseMapFileMock.mockResolvedValueOnce(successfulResult(previewData));
+    importWorkbookMock.mockResolvedValueOnce(
+      mapWorkerResult("map-preview", successfulResult(previewData)),
+    );
 
     const file = new File(["map"], "map.xlsx", {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -280,7 +307,7 @@ describe("MapImportDialog preview input race", () => {
     fireEvent.click(screen.getByRole("button", { name: "取り込む" }));
 
     await waitFor(() => expect(onImport).toHaveBeenCalledTimes(1));
-    expect(parseMapFileMock).toHaveBeenCalledTimes(1);
+    expect(importWorkbookMock).toHaveBeenCalledTimes(1);
     expect(onImport.mock.calls[0][0]).toBe(previewData);
   });
 });

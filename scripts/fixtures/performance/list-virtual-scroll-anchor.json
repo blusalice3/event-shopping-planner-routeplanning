@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "list-virtual-scroll-anchor",
+  "domain": "shopping-list",
+  "dataset": {
+    "generator": "shopping-list-seeded-v1",
+    "seed": 1967,
+    "rowCount": 10000,
+    "grouped": false
+  },
+  "viewport": {
+    "columnCount": 1,
+    "zoomPercent": 100
+  },
+  "operation": {
+    "rendererPreference": "auto",
+    "interaction": "scroll-anchor-restore",
+    "targetRowIndex": 7500,
+    "mutateRowsAboveAnchor": 25
+  },
+  "requiredAssertions": [
+    "selected-renderer-virtual",
+    "stable-row-key-anchor",
+    "anchor-restored",
+    "bounded-dom-window"
+  ],
+  "requiredTelemetry": [
+    "durationMs",
+    "maxMainThreadTaskMs",
+    "scrollAnchorDriftPx"
+  ]
+}

@@ -1,0 +1,142 @@
+:root {
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f1f5f9;
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --border-color: #e2e8f0;
+}
+
+[data-theme="dark"] {
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-tertiary: #334155;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --border-color: #334155;
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-theme="system"] {
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --bg-tertiary: #334155;
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --border-color: #334155;
+  }
+}
+
+* {
+  -webkit-tap-highlight-color: rgb(0 0 0 / 10%);
+  -webkit-touch-callout: none;
+}
+
+body {
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+  overscroll-behavior-y: contain;
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease;
+  -webkit-overflow-scrolling: touch;
+}
+
+input,
+select,
+textarea {
+  font-size: 16px !important;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-tertiary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--text-secondary);
+  border-radius: 4px;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+@keyframes attention-outline {
+  0%,
+  100% {
+    outline-offset: 0;
+  }
+
+  50% {
+    outline-offset: 0.35rem;
+  }
+}
+
+.animate-attention-outline {
+  outline: 0.1875rem solid var(--attention-outline-color, currentColor);
+  animation: attention-outline 1.2s ease-in-out infinite;
+}
+
+.attention-outline-red {
+  --attention-outline-color: #dc2626;
+}
+
+.attention-outline-orange {
+  --attention-outline-color: #c2410c;
+}
+
+.attention-outline-green {
+  --attention-outline-color: #15803d;
+}
+
+.attention-outline-blue {
+  --attention-outline-color: #2563eb;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-attention-outline {
+    animation: none;
+    outline-offset: 0.125rem;
+  }
+}
+
+#loading-screen {
+  position: fixed;
+  z-index: 9999;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  transition:
+    opacity 0.3s,
+    background-color 0.3s;
+}
+
+#loading-screen.hidden {
+  display: none;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+}
+
+#loading-text {
+  color: var(--text-primary);
+}

@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "formalExitSequence": [
+    "P0-BASELINE",
+    "P0-TOOLCHAIN",
+    "P0-ARTIFACT",
+    "P0-DATA",
+    "P0-PROMOTE",
+    "P0-RELEASE",
+    "P1-PWA",
+    "P2A-LOCAL",
+    "P2B-REPORT",
+    "P3-XLSX",
+    "P4-CSP",
+    "P5-DUAL",
+    "P5-LIST",
+    "P6-APP",
+    "P7-IDB",
+    "P8-CLEAN"
+  ],
+  "authorities": {
+    "P0-BASELINE": [
+      "foundation-baseline",
+      "external-bindings",
+      "bootstrap-recovery-drill"
+    ],
+    "P0-TOOLCHAIN": ["strict-toolchain", "quality-run"],
+    "P0-ARTIFACT": ["artifact-provider-control-store-drill"],
+    "P0-DATA": [
+      "remote-db",
+      "retention",
+      "backup-restore-rehearsal",
+      "startup-waf-observation",
+      "state-initialized"
+    ],
+    "P0-PROMOTE": ["assignment-validated"],
+    "P0-RELEASE": ["accepted-gate", "physical-performance"],
+    "P1-PWA": ["accepted-gate", "pwa-multiclient-drill"],
+    "P2A-LOCAL": ["accepted-gate", "production-request-graph"],
+    "P2B-REPORT": ["accepted-gate", "csp-report-observation"],
+    "P3-XLSX": ["accepted-gate"],
+    "P4-CSP": ["accepted-gate", "deployed-csp-flow"],
+    "P5-DUAL": ["accepted-gate"],
+    "P5-LIST": ["accepted-gate"],
+    "P6-APP": ["accepted-gate"],
+    "P7-IDB": ["accepted-gate", "idb-device-compatibility"],
+    "P8-CLEAN": ["accepted-gate", "minimum-safety-floor-activated"]
+  }
+}

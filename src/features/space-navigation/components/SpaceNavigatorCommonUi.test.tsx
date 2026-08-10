@@ -116,6 +116,12 @@ const dispatchPointer = (
   fireEvent(element, event);
 };
 
+const localSettingsPersistence = {
+  loadPreference: (key: string) => localStorage.getItem(key),
+  savePreference: (key: string, value: string) =>
+    localStorage.setItem(key, value),
+};
+
 describe("SpaceNavigatorPicker", () => {
   const originalInnerHeight = window.innerHeight;
   const originalInnerWidth = window.innerWidth;
@@ -163,11 +169,10 @@ describe("SpaceNavigatorPicker", () => {
     expect(windowElement.querySelectorAll("button")).toHaveLength(
       entries.length,
     );
-    expect(windowElement.style.gridTemplateRows).toBe("");
-    expect(windowElement.style.touchAction).toBe("pan-y");
-    expect(windowElement.style.maxHeight).toBe("");
+    expect(windowElement).not.toHaveAttribute("style");
     expect(windowElement).toHaveClass(
       "flex-1",
+      "touch-pan-y",
       "overflow-y-auto",
       "overscroll-contain",
     );
@@ -182,9 +187,12 @@ describe("SpaceNavigatorPicker", () => {
     expect(
       screen.queryByTestId("space-navigator-selection"),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "スペース一覧" })).toHaveStyle({
-      bottom: "var(--footer-height, 0px)",
-    });
+    expect(screen.getByRole("dialog", { name: "スペース一覧" })).toHaveClass(
+      "bottom-[var(--footer-height,0px)]",
+    );
+    expect(
+      screen.getByRole("dialog", { name: "スペース一覧" }),
+    ).not.toHaveAttribute("style");
     expect(
       screen.getByText(
         "一覧を上下にスクロールして、移動先のスペースをタップしてください。",
@@ -196,13 +204,16 @@ describe("SpaceNavigatorPicker", () => {
     let resizeCallback: ResizeObserverCallback | null = null;
     const observe = vi.fn();
     const disconnect = vi.fn();
-    vi.stubGlobal(
-      "ResizeObserver",
-      vi.fn().mockImplementation((callback: ResizeObserverCallback) => {
+    class ResizeObserverMock {
+      readonly disconnect = disconnect;
+      readonly observe = observe;
+      readonly unobserve = vi.fn();
+
+      constructor(callback: ResizeObserverCallback) {
         resizeCallback = callback;
-        return { disconnect, observe, unobserve: vi.fn() };
-      }),
-    );
+      }
+    }
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
     render(
       <SpaceNavigatorPicker
         entries={entries}
@@ -242,9 +253,13 @@ describe("SpaceNavigatorPicker", () => {
     expect(windowElement.querySelector('[aria-current="true"]')).toBe(
       windowElement.querySelectorAll("button")[4],
     );
-    expect(screen.getByTestId("space-navigator-selection")).toHaveStyle({
-      top: "50%",
-    });
+    expect(screen.getByTestId("space-navigator-selection")).toBe(
+      windowElement.querySelector('[aria-current="true"]'),
+    );
+    expect(screen.getByTestId("space-navigator-selection")).toHaveClass(
+      "border-y-2",
+      "border-indigo-500",
+    );
   });
 
   it("shifts the window at the end and leaves no blank rows", () => {
@@ -266,9 +281,9 @@ describe("SpaceNavigatorPicker", () => {
     expect(visibleButtons).toHaveLength(5);
     expect(visibleButtons[0]).toHaveTextContent(entries[4].label);
     expect(visibleButtons[4]).toHaveTextContent(entries[8].label);
-    expect(screen.getByTestId("space-navigator-selection")).toHaveStyle({
-      top: "90%",
-    });
+    expect(screen.getByTestId("space-navigator-selection")).toBe(
+      visibleButtons[4],
+    );
   });
 
   it("uses only real rows when fewer entries exist than the available window", () => {
@@ -640,8 +655,12 @@ describe("SpaceNavigatorRail", () => {
     expect(slider).toHaveAttribute("aria-valuenow", "2");
     expect(slider).toHaveAttribute("aria-valuetext", entries[1].label);
     expect(slider.parentElement).toHaveClass("z-[45]");
-    expect(slider).toHaveStyle({ width: "16px" });
-    expect(slider.parentElement).toHaveStyle({ width: "16px" });
+    expect(slider).toHaveClass("w-4");
+    expect(slider.parentElement).toHaveClass("w-4");
+    expect(
+      screen.getByRole("navigation", { name: "スペースナビゲーション" }),
+    ).toBe(slider.parentElement);
+    expect(slider).not.toHaveAttribute("style");
 
     fireEvent.keyDown(slider, { key: "ArrowDown" });
     expect(onCandidateChange).toHaveBeenLastCalledWith(2);
@@ -727,32 +746,35 @@ describe("SpaceNavigatorHost and footer visibility", () => {
   });
 
   afterEach(() => {
+    document.body.className = "";
     document.body.style.overflow = "";
     document.body.style.overscrollBehavior = "";
     vi.restoreAllMocks();
   });
 
-  it("renders neither entry point when rail and footer button are both disabled", () => {
+  it("renders neither entry point when rail and footer button are both disabled", async () => {
     localStorage.setItem(
       "spaceNavigatorSettings",
       JSON.stringify({ railVisible: false, footerButtonVisible: false }),
     );
     render(
-      <SpaceNavigatorProvider>
+      <SpaceNavigatorProvider settingsPersistence={localSettingsPersistence}>
         <StaticRegistration />
         <SpaceNavigatorHost />
       </SpaceNavigatorProvider>,
     );
 
-    expect(
-      screen.queryByRole("slider", { name: "スペースナビ" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "スペース一覧を開く" }),
-    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("slider", { name: "スペースナビ" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "スペース一覧を開く" }),
+      ).not.toBeInTheDocument();
+    });
   });
 
-  it("keeps the traditional footer padding when only the rail is enabled", () => {
+  it("keeps the traditional footer padding when only the rail is enabled", async () => {
     localStorage.setItem(
       "spaceNavigatorSettings",
       JSON.stringify({ railVisible: true, footerButtonVisible: false }),
@@ -761,7 +783,7 @@ describe("SpaceNavigatorHost and footer visibility", () => {
       .spyOn(HTMLElement.prototype, "offsetHeight", "get")
       .mockReturnValue(123);
     render(
-      <SpaceNavigatorProvider>
+      <SpaceNavigatorProvider settingsPersistence={localSettingsPersistence}>
         <StaticRegistration />
         <SummaryBar items={[]} />
         <FocusModeFooterPortal
@@ -783,12 +805,14 @@ describe("SpaceNavigatorHost and footer visibility", () => {
       </SpaceNavigatorProvider>,
     );
 
-    expect(
-      screen.getByRole("slider", { name: "スペースナビ" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "スペース一覧を開く" }),
-    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("slider", { name: "スペースナビ" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "スペース一覧を開く" }),
+      ).not.toBeInTheDocument();
+    });
     const summaryFooter = screen.getByText("残りの合計").closest(".fixed");
     expect((summaryFooter as HTMLElement).style.paddingBottom).toBe("");
     expect(
@@ -796,26 +820,35 @@ describe("SpaceNavigatorHost and footer visibility", () => {
         .paddingBottom,
     ).toBe("");
     expect(
+      screen.getByRole("contentinfo", { name: "集中モード操作" }),
+    ).toHaveAttribute("id", "focus-mode-footer");
+    expect(document.documentElement).toHaveAttribute(
+      "data-footer-height",
+      "123px",
+    );
+    expect(
       document.documentElement.style.getPropertyValue("--footer-height"),
-    ).toBe("123px");
+    ).toBe("");
     offsetHeight.mockRestore();
   });
 
-  it("opens the picker from the footer button when the rail is disabled", () => {
+  it("opens the picker from the footer button when the rail is disabled", async () => {
     localStorage.setItem(
       "spaceNavigatorSettings",
       JSON.stringify({ railVisible: false, footerButtonVisible: true }),
     );
     render(
-      <SpaceNavigatorProvider>
+      <SpaceNavigatorProvider settingsPersistence={localSettingsPersistence}>
         <StaticRegistration />
         <SpaceNavigatorHost />
       </SpaceNavigatorProvider>,
     );
 
-    expect(
-      screen.queryByRole("slider", { name: "スペースナビ" }),
-    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("slider", { name: "スペースナビ" }),
+      ).not.toBeInTheDocument();
+    });
     fireEvent.click(screen.getByRole("button", { name: "スペース一覧を開く" }));
     expect(
       screen.getByRole("dialog", { name: "スペース一覧" }),
@@ -826,7 +859,7 @@ describe("SpaceNavigatorHost and footer visibility", () => {
     "opens a non-central clicked space action dialog directly in %s layout",
     (layoutMode) => {
       render(
-        <SpaceNavigatorProvider>
+        <SpaceNavigatorProvider settingsPersistence={localSettingsPersistence}>
           <StaticRegistration layoutMode={layoutMode} />
           <SpaceNavigatorHost />
         </SpaceNavigatorProvider>,
@@ -847,7 +880,7 @@ describe("SpaceNavigatorHost and footer visibility", () => {
 
   it("positions host notifications above the measured footer without adding safe-area twice", () => {
     render(
-      <SpaceNavigatorProvider>
+      <SpaceNavigatorProvider settingsPersistence={localSettingsPersistence}>
         <StaticRegistration />
         <NotificationTrigger />
         <SpaceNavigatorHost />
@@ -855,14 +888,15 @@ describe("SpaceNavigatorHost and footer visibility", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "通知" }));
-    expect(screen.getByRole("status")).toHaveStyle({
-      bottom: "calc(var(--footer-height, 0px) + .75rem)",
-    });
+    expect(screen.getByRole("status")).toHaveClass(
+      "bottom-[calc(var(--footer-height,0px)+0.75rem)]",
+    );
+    expect(screen.getByRole("status")).not.toHaveAttribute("style");
   });
 
   it("keeps information notifications slate and renders warnings in red", () => {
     render(
-      <SpaceNavigatorProvider>
+      <SpaceNavigatorProvider settingsPersistence={localSettingsPersistence}>
         <StaticRegistration />
         <NotificationTrigger />
         <SpaceNavigatorHost />
@@ -891,7 +925,7 @@ describe("SpaceNavigatorHost and footer visibility", () => {
     "closes action dialogs and releases the body scroll lock when %s",
     async (_caseName, invalidateRegistrationLabel) => {
       render(
-        <SpaceNavigatorProvider>
+        <SpaceNavigatorProvider settingsPersistence={localSettingsPersistence}>
           <MutableRegistration />
           <SpaceNavigatorHost />
         </SpaceNavigatorProvider>,
@@ -907,8 +941,10 @@ describe("SpaceNavigatorHost and footer visibility", () => {
       expect(
         screen.getByRole("dialog", { name: entries[0].label }),
       ).toBeInTheDocument();
-      expect(document.body.style.overflow).toBe("hidden");
-      expect(document.body.style.overscrollBehavior).toBe("none");
+      expect(document.body).toHaveClass(
+        "esp-body-scroll-lock",
+        "esp-body-overscroll-lock",
+      );
 
       fireEvent.click(
         screen.getByRole("button", { name: invalidateRegistrationLabel }),
@@ -916,6 +952,10 @@ describe("SpaceNavigatorHost and footer visibility", () => {
 
       await waitFor(() => {
         expect(screen.queryAllByRole("dialog")).toHaveLength(0);
+        expect(document.body).not.toHaveClass(
+          "esp-body-scroll-lock",
+          "esp-body-overscroll-lock",
+        );
         expect(document.body.style.overflow).toBe("auto");
         expect(document.body.style.overscrollBehavior).toBe("contain");
       });

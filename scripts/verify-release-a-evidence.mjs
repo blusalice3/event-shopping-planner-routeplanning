@@ -1176,15 +1176,6 @@ function validateBaseline(baseline, releaseSha, canaryStart, errors) {
     `${path}.metrics`,
     errors,
   );
-  if (
-    typeof baseline.selectedBy === "string" &&
-    typeof baseline.reviewedBy === "string" &&
-    baseline.selectedBy.trim().toLowerCase() ===
-      baseline.reviewedBy.trim().toLowerCase()
-  ) {
-    addError(errors, `${path}.reviewedBy`, "must be different from selectedBy");
-  }
-
   if (start !== undefined && end !== undefined) {
     const durationHours = (end - start) / 3_600_000;
     if (durationHours !== 24) {
@@ -1646,18 +1637,6 @@ function validateInstalledPwaChecks(checks, releaseSha, errors) {
     validateEvidenceRef(check.evidenceRef, `${path}.evidenceRef`, errors);
 
     if (
-      typeof check.executedBy === "string" &&
-      typeof check.reviewedBy === "string" &&
-      check.executedBy.trim().toLowerCase() ===
-        check.reviewedBy.trim().toLowerCase()
-    ) {
-      addError(
-        errors,
-        `${path}.reviewedBy`,
-        "must be different from executedBy",
-      );
-    }
-    if (
       executedAt !== undefined &&
       reviewedAt !== undefined &&
       reviewedAt < executedAt
@@ -1848,14 +1827,6 @@ function validateHistoricalDeploymentAudit(audit, releaseSha, errors) {
   );
 
   if (
-    typeof audit.auditedBy === "string" &&
-    typeof audit.reviewedBy === "string" &&
-    audit.auditedBy.trim().toLowerCase() ===
-      audit.reviewedBy.trim().toLowerCase()
-  ) {
-    addError(errors, `${path}.reviewedBy`, "must be different from auditedBy");
-  }
-  if (
     auditedAt !== undefined &&
     sourceCheckTimes.some((checkedAt) => checkedAt > auditedAt)
   ) {
@@ -1917,7 +1888,6 @@ function validateApprovals(
     return;
   }
 
-  const approvers = new Set();
   const latestPrerequisite =
     prerequisiteCompletionTimes.length === 0
       ? undefined
@@ -1931,24 +1901,12 @@ function validateApprovals(
     }
 
     validateEnum(approval.decision, `${path}.decision`, ["APPROVED"], errors);
-    if (
-      validateMeaningfulString(
-        approval.approver,
-        `${path}.approver`,
-        errors,
-        120,
-      )
-    ) {
-      const identity = approval.approver.trim().toLowerCase();
-      if (approvers.has(identity)) {
-        addError(
-          errors,
-          `${path}.approver`,
-          "must be distinct across required approval roles",
-        );
-      }
-      approvers.add(identity);
-    }
+    validateMeaningfulString(
+      approval.approver,
+      `${path}.approver`,
+      errors,
+      120,
+    );
     const approvedAt = validateTimestamp(
       approval.approvedAt,
       `${path}.approvedAt`,

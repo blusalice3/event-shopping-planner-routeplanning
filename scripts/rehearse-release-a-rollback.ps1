@@ -1,7 +1,8 @@
 param(
   [string]$BaselineCommit = "e5f26b76b1318d70b5d2373c8808cda20c7bb5c3",
   [ValidateRange(0, 65535)]
-  [int]$Port = 0
+  [int]$Port = 0,
+  [switch]$RequirePromptCloseDrill
 )
 
 [Console]::InputEncoding  = [Text.UTF8Encoding]::new($false)
@@ -13,7 +14,33 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$NodeExecutable = (Get-Command node).Source
+$nodeCommand = Get-Command `
+  node `
+  -CommandType Application `
+  -ErrorAction Stop | Select-Object -First 1
+$nodeExecutableOutput = @(
+  & $nodeCommand.Source -p "process.execPath"
+)
+if (
+  $LASTEXITCODE -ne 0 -or
+  $nodeExecutableOutput.Count -ne 1 -or
+  -not $nodeExecutableOutput[0]
+) {
+  throw "Could not resolve the active Node executable."
+}
+$NodeExecutable = [IO.Path]::GetFullPath(
+  ([string]$nodeExecutableOutput[0]).Trim()
+)
+if (
+  -not [string]::Equals(
+    [IO.Path]::GetExtension($NodeExecutable),
+    ".exe",
+    [StringComparison]::OrdinalIgnoreCase
+  ) -or
+  -not (Test-Path -LiteralPath $NodeExecutable -PathType Leaf)
+) {
+  throw "The active Node runtime did not resolve to a Windows executable."
+}
 $ViteCli = Join-Path $ProjectRoot "node_modules\vite\bin\vite.js"
 if ($Port -eq 0) {
   $portReservation = [Net.Sockets.TcpListener]::new(
@@ -32,10 +59,9 @@ $TempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $TempRoot = Join-Path $TempBase (
   "esp-release-a-rollback-" + [Guid]::NewGuid().ToString("N")
 )
-$BaselineArchive = Join-Path $TempRoot "baseline.zip"
+$BaselineBundle = Join-Path $TempRoot "baseline.bundle"
 $BaselineRoot = Join-Path $TempRoot "baseline"
 $ProfileDirectory = Join-Path $TempRoot "browser-profile"
-$BaselineNodeModules = Join-Path $BaselineRoot "node_modules"
 $PreviewProcess = $null
 
 function Invoke-CheckedCommand {
@@ -52,26 +78,78 @@ function Invoke-CheckedCommand {
   }
 }
 
+function Get-PreviewDiagnostics {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Paths
+  )
+
+  $parts = @(
+    foreach ($path in $Paths) {
+      if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        continue
+      }
+      try {
+        $content = [string](
+          Get-Content -LiteralPath $path -Raw -Encoding utf8
+        )
+        $content = $content.Trim()
+        if ($content.Length -gt 2000) {
+          $content = $content.Substring($content.Length - 2000)
+        }
+        if ($content) {
+          "$(Split-Path $path -Leaf): $content"
+        }
+      } catch {
+        "$(Split-Path $path -Leaf): <unavailable>"
+      }
+    }
+  )
+  if ($parts.Count -eq 0) {
+    return "preview emitted no diagnostics"
+  }
+  return $parts -join [Environment]::NewLine
+}
+
 function Wait-PreviewReady {
   param(
     [Parameter(Mandatory = $true)]
-    [Diagnostics.Process]$Process
+    [Diagnostics.Process]$Process,
+    [Parameter(Mandatory = $true)]
+    [string[]]$DiagnosticPaths
   )
 
-  for ($attempt = 0; $attempt -lt 100; $attempt += 1) {
+  $deadline = [DateTime]::UtcNow.AddSeconds(60)
+  while ([DateTime]::UtcNow -lt $deadline) {
     if ($Process.HasExited) {
-      throw "Preview process exited before becoming ready."
+      $diagnostics = Get-PreviewDiagnostics -Paths $DiagnosticPaths
+      throw (
+        "Preview process exited with code {0} before becoming ready.{1}{2}" -f `
+          $Process.ExitCode,
+          [Environment]::NewLine,
+          $diagnostics
+      )
     }
     try {
-      $response = Invoke-WebRequest -Uri $PreviewUrl -UseBasicParsing
+      $response = Invoke-WebRequest `
+        -Uri $PreviewUrl `
+        -UseBasicParsing `
+        -TimeoutSec 2
       if ($response.StatusCode -eq 200) {
         return
       }
     } catch {
-      Start-Sleep -Milliseconds 100
+      # The process can be healthy while the listener is still starting.
     }
+    Start-Sleep -Milliseconds 100
   }
-  throw "Preview did not become ready at $PreviewUrl."
+  $diagnostics = Get-PreviewDiagnostics -Paths $DiagnosticPaths
+  throw (
+    "Preview did not become ready at {0} within 60 seconds.{1}{2}" -f `
+      $PreviewUrl,
+      [Environment]::NewLine,
+      $diagnostics
+  )
 }
 
 function Start-ArtifactPreview {
@@ -80,6 +158,9 @@ function Start-ArtifactPreview {
     [string]$WorkingDirectory
   )
 
+  $logId = [Guid]::NewGuid().ToString("N")
+  $standardOutputPath = Join-Path $TempRoot "preview-$logId.stdout.log"
+  $standardErrorPath = Join-Path $TempRoot "preview-$logId.stderr.log"
   $process = Start-Process `
     -FilePath $NodeExecutable `
     -ArgumentList @(
@@ -93,8 +174,17 @@ function Start-ArtifactPreview {
     ) `
     -WorkingDirectory $WorkingDirectory `
     -WindowStyle Hidden `
+    -RedirectStandardOutput $standardOutputPath `
+    -RedirectStandardError $standardErrorPath `
     -PassThru
-  Wait-PreviewReady -Process $process
+  try {
+    Wait-PreviewReady `
+      -Process $process `
+      -DiagnosticPaths @($standardOutputPath, $standardErrorPath)
+  } catch {
+    Stop-ArtifactPreview -Process $process
+    throw
+  }
   return $process
 }
 
@@ -132,23 +222,153 @@ function Get-Sha256File {
 function Get-ArtifactEvidence {
   param(
     [Parameter(Mandatory = $true)]
-    [string]$DistDirectory
+    [string]$DistDirectory,
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^[0-9a-f]{40}$')]
+    [string]$ArtifactId
   )
 
   $indexPath = Join-Path $DistDirectory "index.html"
   $serviceWorkerPath = Join-Path $DistDirectory "sw.js"
   $indexSource = Get-Content -LiteralPath $indexPath -Raw -Encoding utf8
-  $assetMatch = [regex]::Match(
-    $indexSource,
-    'src="(?<asset>/assets/index-[^"]+\.js)"'
+  $moduleAssets = @(
+    foreach ($scriptMatch in [regex]::Matches(
+      $indexSource,
+      '<script\b[^>]*>',
+      [Text.RegularExpressions.RegexOptions]::IgnoreCase
+    )) {
+      if (-not [regex]::IsMatch(
+        $scriptMatch.Value,
+        '\btype\s*=\s*["'']module["'']',
+        [Text.RegularExpressions.RegexOptions]::IgnoreCase
+      )) {
+        continue
+      }
+      $sourceMatch = [regex]::Match(
+        $scriptMatch.Value,
+        '\bsrc\s*=\s*["''](?<asset>/assets/[A-Za-z0-9._-]+\.js)["'']',
+        [Text.RegularExpressions.RegexOptions]::IgnoreCase
+      )
+      if ($sourceMatch.Success) {
+        $sourceMatch.Groups["asset"].Value
+      }
+    }
   )
-  if (-not $assetMatch.Success) {
-    throw "Main application asset was not found in $indexPath."
+  if ($moduleAssets.Count -ne 1) {
+    throw (
+      "Expected exactly one module application asset in {0}; found {1}." -f `
+        $indexPath,
+        $moduleAssets.Count
+    )
+  }
+  $mainAsset = $moduleAssets[0]
+  $assetPath = Join-Path `
+    $DistDirectory `
+    $mainAsset.Substring(1).Replace(
+      "/",
+      [IO.Path]::DirectorySeparatorChar
+    )
+  if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) {
+    throw "Module application asset is missing: $mainAsset."
+  }
+  $capabilityPath = Join-Path $DistDirectory "release-capabilities.json"
+  $versionedCapabilityPath = Join-Path $DistDirectory (
+    "release-capabilities.$ArtifactId.json"
+  )
+  $hasCapability = Test-Path -LiteralPath $capabilityPath -PathType Leaf
+  $hasVersionedCapability = Test-Path `
+    -LiteralPath $versionedCapabilityPath `
+    -PathType Leaf
+  $capabilityFiles = @(
+    Get-ChildItem `
+      -LiteralPath $DistDirectory `
+      -Filter "release-capabilities*.json" `
+      -File
+  )
+  if ($hasCapability -ne $hasVersionedCapability) {
+    throw (
+      "Artifact {0} has an incomplete versioned capability pair." -f `
+      $ArtifactId
+    )
+  }
+  if (
+    ($hasCapability -and $capabilityFiles.Count -ne 2) -or
+    (-not $hasCapability -and $capabilityFiles.Count -ne 0)
+  ) {
+    throw (
+      "Artifact {0} has an unexpected capability file set: {1}." -f `
+        $ArtifactId,
+        (($capabilityFiles | ForEach-Object { $_.Name }) -join ", ")
+    )
+  }
+  $targetBuildId = $null
+  $versionedCapabilityMode = "legacy-absent"
+  $pwaLifecycle = "legacy-auto-update-v1"
+  if ($hasCapability) {
+    if (
+      (Get-Sha256File -Path $capabilityPath) -ne
+      (Get-Sha256File -Path $versionedCapabilityPath)
+    ) {
+      throw "Artifact $ArtifactId capability files are not byte-identical."
+    }
+    $capability = Get-Content `
+      -LiteralPath $capabilityPath `
+      -Raw `
+      -Encoding utf8 | ConvertFrom-Json
+    if (
+      $capability.kind -ne "event-shopping-planner-release-capabilities" -or
+      $capability.version -ne 1 -or
+      $capability.buildMode -ne "release-a" -or
+      $capability.buildId -ne $ArtifactId -or
+      $capability.sourceSha -ne $ArtifactId -or
+      $capability.sourceState -ne "clean" -or
+      $capability.releaseChannel -ne "release-a" -or
+      $capability.legacyLocalStorageCleanup -ne "forced-off"
+    ) {
+      throw "Artifact $ArtifactId capability identity differs."
+    }
+    $targetBuildId = $ArtifactId
+    $versionedCapabilityMode = "required"
+    $releaseIdentityPath = Join-Path $DistDirectory "release-identity.json"
+    if (-not (Test-Path -LiteralPath $releaseIdentityPath -PathType Leaf)) {
+      throw "Artifact $ArtifactId release identity is missing."
+    }
+    $releaseIdentity = Get-Content `
+      -LiteralPath $releaseIdentityPath `
+      -Raw `
+      -Encoding utf8 | ConvertFrom-Json
+    if (
+      $releaseIdentity.schemaVersion -ne 1 -or
+      $releaseIdentity.buildId -ne $ArtifactId -or
+      $releaseIdentity.sourceSha -ne $ArtifactId -or
+      $releaseIdentity.pwaLifecycle -notin @(
+        "legacy-auto-update-v1",
+        "prompt-close-all-v1"
+      )
+    ) {
+      throw "Artifact $ArtifactId PWA lifecycle identity differs."
+    }
+    $pwaLifecycle = [string]$releaseIdentity.pwaLifecycle
+  } elseif (
+    Test-Path `
+      -LiteralPath (Join-Path $DistDirectory "release-identity.json") `
+      -PathType Leaf
+  ) {
+    throw "Legacy artifact $ArtifactId unexpectedly has a release identity."
+  }
+  $rollbackActivationMode = if ($pwaLifecycle -eq "prompt-close-all-v1") {
+    "natural-after-client-release"
+  } else {
+    "auto-takeover"
   }
   return @{
     IndexSha256 = Get-Sha256File -Path $indexPath
     ServiceWorkerSha256 = Get-Sha256File -Path $serviceWorkerPath
-    MainAsset = $assetMatch.Groups["asset"].Value
+    MainAsset = $mainAsset
+    TargetBuildId = $targetBuildId
+    VersionedCapabilityMode = $versionedCapabilityMode
+    PwaLifecycle = $pwaLifecycle
+    RollbackActivationMode = $rollbackActivationMode
   }
 }
 
@@ -161,6 +381,9 @@ function Clear-TransitionEnvironment {
   Remove-Item Env:ESP_EXPECTED_INDEX_SHA256 -ErrorAction SilentlyContinue
   Remove-Item Env:ESP_EXPECTED_SW_SHA256 -ErrorAction SilentlyContinue
   Remove-Item Env:ESP_EXPECTED_MAIN_ASSET -ErrorAction SilentlyContinue
+  Remove-Item Env:ESP_PROMPT_CLOSE_DRILL -ErrorAction SilentlyContinue
+  Remove-Item Env:ESP_ROLLBACK_TARGET_CAPABILITY -ErrorAction SilentlyContinue
+  Remove-Item Env:ESP_ROLLBACK_ACTIVATION -ErrorAction SilentlyContinue
   Remove-Item Env:ESP_ALLOW_DIRTY_BUILD -ErrorAction SilentlyContinue
 }
 
@@ -186,6 +409,44 @@ function Invoke-BrowserVerifier {
     $env:ESP_EXPECTED_MAIN_ASSET = $Evidence.MainAsset
     if ($TargetBuildId) {
       $env:ESP_EXPECTED_TARGET_BUILD_ID = $TargetBuildId
+    }
+    if ($Mode -eq "rollback") {
+      if (
+        $Evidence.VersionedCapabilityMode -notin @(
+          "required",
+          "legacy-absent"
+        )
+      ) {
+        throw "Rollback artifact capability mode is invalid."
+      }
+      if (
+        ($Evidence.VersionedCapabilityMode -eq "required") -ne
+        [bool]$TargetBuildId
+      ) {
+        throw "Rollback artifact build ID and capability mode differ."
+      }
+      $env:ESP_ROLLBACK_TARGET_CAPABILITY = `
+        $Evidence.VersionedCapabilityMode
+      if (
+        $Evidence.RollbackActivationMode -notin @(
+          "auto-takeover",
+          "natural-after-client-release"
+        )
+      ) {
+        throw "Rollback artifact activation mode is invalid."
+      }
+      $env:ESP_ROLLBACK_ACTIVATION = $Evidence.RollbackActivationMode
+    }
+    if ($Mode -eq "forward") {
+      if ($Evidence.VersionedCapabilityMode -ne "required") {
+        throw "Forward artifact must provide a versioned capability."
+      }
+      if ($RequirePromptCloseDrill) {
+        $env:ESP_PROMPT_CLOSE_DRILL = "required"
+      } else {
+        # The historical default baseline predates the dormant prompt-close shell.
+        $env:ESP_PROMPT_CLOSE_DRILL = "disabled"
+      }
     }
   }
 
@@ -214,11 +475,22 @@ if ($LASTEXITCODE -ne 0 -or $workingTreeState) {
 if (-not (Test-Path -LiteralPath $ViteCli -PathType Leaf)) {
   throw "Vite CLI is missing. Run npm install before the rehearsal."
 }
-
-New-Item -ItemType Directory -Path $TempRoot | Out-Null
-New-Item -ItemType Directory -Path $ProfileDirectory | Out-Null
+$baselineCommitOutput = @(
+  git -C $ProjectRoot rev-parse --verify "$BaselineCommit^{commit}"
+)
+if (
+  $LASTEXITCODE -ne 0 -or
+  $baselineCommitOutput.Count -ne 1 -or
+  ([string]$baselineCommitOutput[0]).Trim() -notmatch '^[0-9a-f]{40}$'
+) {
+  throw "Rollback baseline did not resolve to one full commit SHA."
+}
+$BaselineCommit = ([string]$baselineCommitOutput[0]).Trim()
 
 try {
+  New-Item -ItemType Directory -Path $TempRoot | Out-Null
+  New-Item -ItemType Directory -Path $ProfileDirectory | Out-Null
+
   Push-Location $ProjectRoot
   try {
     Invoke-CheckedCommand `
@@ -237,29 +509,31 @@ try {
   if ($FinalBuildId -notmatch '^[0-9a-f]{40}$') {
     throw "Final Release A build ID is not a full source SHA."
   }
-  $FinalEvidence = Get-ArtifactEvidence -DistDirectory (
-    Join-Path $ProjectRoot "dist"
-  )
+  $FinalEvidence = Get-ArtifactEvidence `
+    -DistDirectory (Join-Path $ProjectRoot "dist") `
+    -ArtifactId $FinalBuildId
 
   Invoke-CheckedCommand `
     -Command {
-      git -C $ProjectRoot archive `
-        --format=zip `
-        "--output=$BaselineArchive" `
-        $BaselineCommit
+      git -C $ProjectRoot bundle create $BaselineBundle --all
     } `
-    -FailureMessage "Could not archive rollback baseline $BaselineCommit"
-  New-Item -ItemType Directory -Path $BaselineRoot | Out-Null
-  Expand-Archive `
-    -LiteralPath $BaselineArchive `
-    -DestinationPath $BaselineRoot
-  New-Item `
-    -ItemType Junction `
-    -Path $BaselineNodeModules `
-    -Target (Join-Path $ProjectRoot "node_modules") | Out-Null
+    -FailureMessage "Could not bundle rollback baseline repository"
+  Invoke-CheckedCommand `
+    -Command {
+      git clone --no-checkout --quiet $BaselineBundle $BaselineRoot
+    } `
+    -FailureMessage "Could not clone rollback baseline bundle"
+  Invoke-CheckedCommand `
+    -Command {
+      git -C $BaselineRoot switch --detach $BaselineCommit
+    } `
+    -FailureMessage "Could not select rollback baseline $BaselineCommit"
 
   Push-Location $BaselineRoot
   try {
+    Invoke-CheckedCommand `
+      -Command { npm ci } `
+      -FailureMessage "Rollback baseline dependency installation failed"
     $env:VITE_PERSISTENCE_LEGACY_CLEANUP = "false"
     Invoke-CheckedCommand `
       -Command { npm run build } `
@@ -268,9 +542,15 @@ try {
     Remove-Item Env:VITE_PERSISTENCE_LEGACY_CLEANUP -ErrorAction SilentlyContinue
     Pop-Location
   }
-  $BaselineEvidence = Get-ArtifactEvidence -DistDirectory (
-    Join-Path $BaselineRoot "dist"
-  )
+  $BaselineEvidence = Get-ArtifactEvidence `
+    -DistDirectory (Join-Path $BaselineRoot "dist") `
+    -ArtifactId $BaselineCommit
+  if (
+    $RequirePromptCloseDrill -and
+    $BaselineEvidence.PwaLifecycle -ne "prompt-close-all-v1"
+  ) {
+    throw "Prompt-close drill requires a prompt-close-all-v1 predecessor."
+  }
 
   $PreviewProcess = Start-ArtifactPreview -WorkingDirectory $ProjectRoot
   Invoke-BrowserVerifier -Mode "seed"
@@ -282,6 +562,7 @@ try {
     -Mode "rollback" `
     -FromArtifactId $FinalBuildId `
     -TargetArtifactId $BaselineCommit `
+    -TargetBuildId $BaselineEvidence.TargetBuildId `
     -Evidence $BaselineEvidence
   Stop-ArtifactPreview -Process $PreviewProcess
   $PreviewProcess = $null
@@ -304,31 +585,21 @@ try {
   Clear-TransitionEnvironment
   Remove-Item Env:ESP_PREVIEW_URL -ErrorAction SilentlyContinue
   Remove-Item Env:ESP_BROWSER_PROFILE_DIR -ErrorAction SilentlyContinue
-  if (Test-Path -LiteralPath $BaselineNodeModules) {
-    $nodeModulesJunction = Get-Item -LiteralPath $BaselineNodeModules -Force
+  if (Test-Path -LiteralPath $TempRoot) {
+    $resolvedTempRoot = [IO.Path]::GetFullPath($TempRoot)
     if (
-      (
-        $nodeModulesJunction.Attributes -band
-        [IO.FileAttributes]::ReparsePoint
-      ) -eq 0
+      $resolvedTempRoot.StartsWith(
+        $TempBase,
+        [StringComparison]::OrdinalIgnoreCase
+      ) -and
+      (Split-Path $resolvedTempRoot -Leaf).StartsWith(
+        "esp-release-a-rollback-",
+        [StringComparison]::Ordinal
+      )
     ) {
-      throw "Refusing to remove a non-junction node_modules path."
+      Remove-Item -LiteralPath $resolvedTempRoot -Recurse -Force
+    } else {
+      throw "Refusing to remove an unexpected rehearsal path: $resolvedTempRoot"
     }
-    [IO.Directory]::Delete($BaselineNodeModules)
-  }
-  $resolvedTempRoot = [IO.Path]::GetFullPath($TempRoot)
-  if (
-    $resolvedTempRoot.StartsWith(
-      $TempBase,
-      [StringComparison]::OrdinalIgnoreCase
-    ) -and
-    (Split-Path $resolvedTempRoot -Leaf).StartsWith(
-      "esp-release-a-rollback-",
-      [StringComparison]::Ordinal
-    )
-  ) {
-    Remove-Item -LiteralPath $resolvedTempRoot -Recurse -Force
-  } else {
-    throw "Refusing to remove an unexpected rehearsal path: $resolvedTempRoot"
   }
 }

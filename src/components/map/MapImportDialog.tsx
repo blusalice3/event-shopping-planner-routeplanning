@@ -12,11 +12,8 @@ import {
   BlockDefinition,
   CellData,
 } from "../../types/map";
-import { parseMapFile } from "../../utils/xlsxMapParser";
-export {
-  loadBlockDetectionSettings,
-  saveBlockDetectionSettings,
-} from "../../utils/blockDetectionSettingsStorage";
+import type { ParseMapFileResult } from "../../xlsx/domain/mapWorkbook";
+import type { XlsxExecutionPort } from "../../xlsx/port/XlsxExecutionPort";
 
 interface MapImportDialogProps {
   isOpen: boolean;
@@ -29,6 +26,7 @@ interface MapImportDialogProps {
     initialAngles: Record<string, number>,
   ) => void;
   onClose: () => void;
+  xlsxExecutionPort: XlsxExecutionPort;
 }
 
 const normalizeRotationAngle = (angle: number): number => {
@@ -83,6 +81,30 @@ function getParseInputSignature(
   }
 
   return `${fileId}:${file.name}:${file.size}:${file.lastModified}:${file.type}:${getBlockDetectionSettingsSignature(settings)}`;
+}
+
+async function parseMapWorkbook(
+  executionPort: XlsxExecutionPort,
+  file: File,
+  settings: BlockDetectionSettings,
+  kind: "map-preview" | "map-import",
+  signal: AbortSignal,
+): Promise<ParseMapFileResult> {
+  const input =
+    typeof file.arrayBuffer === "function"
+      ? await file.arrayBuffer()
+      : await new Response(file).arrayBuffer();
+  if (signal.aborted) {
+    throw new DOMException("Map workbook parsing was aborted.", "AbortError");
+  }
+  const response = await executionPort.importWorkbook(
+    { kind, input, fileName: file.name, settings },
+    signal,
+  );
+  if (response.kind !== kind) {
+    throw new Error("XLSX Worker returned an unexpected map result kind.");
+  }
+  return response.value;
 }
 
 // ===== ブロック名カスタムソート =====
@@ -293,14 +315,8 @@ const MiniMapPreview: React.FC<MiniMapPreviewProps> = ({
       <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
         {sheetLabel}
       </p>
-      <div
-        className="border border-slate-200 dark:border-slate-600 rounded overflow-auto"
-        style={{ maxHeight: "200px" }}
-      >
-        <canvas
-          ref={canvasRef}
-          style={{ display: "block", imageRendering: "pixelated" }}
-        />
+      <div className="max-h-[200px] overflow-auto rounded border border-slate-200 dark:border-slate-600">
+        <canvas ref={canvasRef} className="block [image-rendering:pixelated]" />
       </div>
     </div>
   );
@@ -315,6 +331,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
   savedSettings,
   onImport,
   onClose,
+  xlsxExecutionPort,
 }) => {
   const [settings, setSettings] = useState<BlockDetectionSettings>(
     cloneBlockDetectionSettings(
@@ -338,6 +355,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
     {},
   );
   const parseRequestTokenRef = useRef(0);
+  const parseAbortControllerRef = useRef<AbortController | null>(null);
   const currentParseSignature = useMemo(
     () => (file ? getParseInputSignature(file, settings) : null),
     [file, settings],
@@ -357,12 +375,16 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
   useEffect(
     () => () => {
       parseRequestTokenRef.current += 1;
+      parseAbortControllerRef.current?.abort();
+      parseAbortControllerRef.current = null;
     },
     [],
   );
 
   const invalidatePreviewForInputChange = useCallback(() => {
     parseRequestTokenRef.current += 1;
+    parseAbortControllerRef.current?.abort();
+    parseAbortControllerRef.current = null;
     setIsPreviewing(false);
     setIsLoading(false);
     setPreviewData(null);
@@ -433,13 +455,22 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
     const requestToken = parseRequestTokenRef.current + 1;
     parseRequestTokenRef.current = requestToken;
     const requestSignature = currentParseSignature;
+    parseAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    parseAbortControllerRef.current = controller;
     const isCurrentRequest = () =>
       parseRequestTokenRef.current === requestToken &&
       currentParseSignatureRef.current === requestSignature;
 
     setIsPreviewing(true);
     try {
-      const parsedResult = await parseMapFile(file, settings);
+      const parsedResult = await parseMapWorkbook(
+        xlsxExecutionPort,
+        file,
+        settings,
+        "map-preview",
+        controller.signal,
+      );
       if (!isCurrentRequest()) return;
 
       if (parsedResult.error) {
@@ -473,8 +504,17 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
       if (parseRequestTokenRef.current === requestToken) {
         setIsPreviewing(false);
       }
+      if (parseAbortControllerRef.current === controller) {
+        parseAbortControllerRef.current = null;
+      }
     }
-  }, [currentParseSignature, file, settings, notifySkippedSheets]);
+  }, [
+    currentParseSignature,
+    file,
+    settings,
+    notifySkippedSheets,
+    xlsxExecutionPort,
+  ]);
 
   // インポート実行
   const handleImport = useCallback(async () => {
@@ -482,6 +522,9 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
     const requestToken = parseRequestTokenRef.current + 1;
     parseRequestTokenRef.current = requestToken;
     const requestSignature = currentParseSignature;
+    parseAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    parseAbortControllerRef.current = controller;
     const isCurrentRequest = () =>
       parseRequestTokenRef.current === requestToken &&
       currentParseSignatureRef.current === requestSignature;
@@ -495,7 +538,13 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
       let data = canReusePreview ? previewData : null;
       let skippedSheets = canReusePreview ? previewSkippedSheets : [];
       if (!data) {
-        const parsedResult = await parseMapFile(file, settings);
+        const parsedResult = await parseMapWorkbook(
+          xlsxExecutionPort,
+          file,
+          settings,
+          "map-import",
+          controller.signal,
+        );
         if (!isCurrentRequest()) return;
 
         if (parsedResult.error) {
@@ -532,6 +581,9 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
       if (parseRequestTokenRef.current === requestToken) {
         setIsLoading(false);
       }
+      if (parseAbortControllerRef.current === controller) {
+        parseAbortControllerRef.current = null;
+      }
     }
   }, [
     currentParseSignature,
@@ -543,6 +595,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
     onImport,
     initialAngles,
     notifySkippedSheets,
+    xlsxExecutionPort,
   ]);
 
   // 初期値にリセット
@@ -610,10 +663,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div
-        className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full mx-4 flex flex-col"
-        style={{ maxWidth: "640px", maxHeight: "90vh" }}
-      >
+      <div className="mx-4 flex max-h-[90vh] w-full max-w-[640px] flex-col rounded-lg bg-white shadow-xl dark:bg-slate-800">
         {/* ヘッダー */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
           <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
@@ -1022,12 +1072,18 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                                 : "bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600"
                             }`}
                           >
-                            <span
-                              className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
-                              style={{
-                                backgroundColor: block.color || "#E3F2FD",
-                              }}
-                            />
+                            <svg
+                              className="h-2.5 w-2.5 flex-shrink-0 rounded-sm"
+                              viewBox="0 0 10 10"
+                              aria-hidden="true"
+                            >
+                              <rect
+                                width="10"
+                                height="10"
+                                rx="1"
+                                fill={block.color || "#E3F2FD"}
+                              />
+                            </svg>
                             <span className="font-medium">{block.name}</span>
                             <span className="text-slate-400 dark:text-slate-500">
                               ({block.numberCells.length})

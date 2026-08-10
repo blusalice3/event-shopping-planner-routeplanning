@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "xlsx-worker-export-roundtrip",
+  "domain": "xlsx-worker",
+  "dataset": {
+    "generator": "event-export-idb-stage-v1",
+    "itemCount": 50000
+  },
+  "operation": {
+    "kind": "event-export",
+    "execution": "worker",
+    "roundTripImport": true
+  },
+  "requiredAssertions": [
+    "worker-execution-observed",
+    "ui-heartbeat-observed",
+    "progress-observed",
+    "single-terminal-result",
+    "round-trip-semantic-parity",
+    "single-atomic-download"
+  ],
+  "requiredTelemetry": [
+    "durationMs",
+    "maxUiHeartbeatGapMs",
+    "peakMemoryDeltaBytes"
+  ]
+}

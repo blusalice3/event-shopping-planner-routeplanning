@@ -513,6 +513,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
     multiRangeNumberCells,
     previewNumberCells,
     blocks,
+    cellsMap,
     sortedBlocks,
   ]);
 
@@ -684,11 +685,19 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                           }}
                           className="flex flex-1 items-center gap-2 text-left"
                         >
-                          <div
-                            className="flex h-8 w-8 items-center justify-center rounded text-xs font-bold"
-                            style={{ backgroundColor: b.color || "#E3F2FD" }}
-                          >
-                            {b.name}
+                          <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded text-xs font-bold">
+                            <svg
+                              className="absolute inset-0 h-full w-full"
+                              viewBox="0 0 32 32"
+                              aria-hidden="true"
+                            >
+                              <rect
+                                width="32"
+                                height="32"
+                                fill={b.color || "#E3F2FD"}
+                              />
+                            </svg>
+                            <span className="relative">{b.name}</span>
                           </div>
                           <div>
                             <div className="text-sm font-medium text-slate-900 dark:text-white">
@@ -753,19 +762,19 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                     <div className="flex gap-1">
                       <button
                         onClick={() => handleSwitchMode("normal")}
-                        className={`px-2 py-1 text-xs rounded ${editMode === "normal" ? "bg-blue-500 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}
+                        className={`px-2 py-1 text-xs rounded ${editMode === "normal" ? "bg-blue-600 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}
                       >
                         通常
                       </button>
                       <button
                         onClick={() => handleSwitchMode("multi")}
-                        className={`px-2 py-1 text-xs rounded ${editMode === "multi" ? "bg-purple-500 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}
+                        className={`px-2 py-1 text-xs rounded ${editMode === "multi" ? "bg-purple-600 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}
                       >
                         複数範囲
                       </button>
                       <button
                         onClick={() => handleSwitchMode("wall")}
-                        className={`px-2 py-1 text-xs rounded ${editMode === "wall" ? "bg-orange-500 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}
+                        className={`px-2 py-1 text-xs rounded ${editMode === "wall" ? "bg-orange-700 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}
                       >
                         壁
                       </button>
@@ -916,9 +925,16 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                           onClick={() =>
                             setEditingBlock((eb) => ({ ...eb, color: c }))
                           }
-                          className={`h-8 w-8 rounded border-2 ${editingBlock.color === c ? "border-blue-500" : "border-transparent"}`}
-                          style={{ backgroundColor: c }}
-                        />
+                          className={`relative h-8 w-8 overflow-hidden rounded border-2 ${editingBlock.color === c ? "border-blue-500" : "border-transparent"}`}
+                        >
+                          <svg
+                            className="absolute inset-0 h-full w-full"
+                            viewBox="0 0 32 32"
+                            aria-hidden="true"
+                          >
+                            <rect width="32" height="32" fill={c} />
+                          </svg>
+                        </button>
                       ))}
                     </div>
                   </div>

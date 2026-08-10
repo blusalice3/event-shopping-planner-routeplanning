@@ -32,9 +32,7 @@ import type {
   BlockSortDirection,
   BulkSortDirection,
   LayoutMode,
-  MapTabMenuPosition,
   SmartInsertMode,
-  SortState,
 } from "../types";
 
 const APP_ZOOM_OPTIONS = [15, 30, 50, 75, 100, 125, 150] as const;
@@ -158,254 +156,322 @@ export const DisplaySettingsResetButton: React.FC<
   );
 };
 
-type AppHeaderShellProps = {
-  activeEventDate: string;
-  activeEventName: string | null;
-  activeTab: ActiveTab;
-  blockSortDirection: BlockSortDirection | null;
-  currentHalls: HallDefinition[];
-  currentMapData: DayMapData | null;
-  currentMapTabName: string | null;
-  currentMapTabRotationState: DayMapRotationState;
-  currentMode: ViewMode;
-  currentSearchIndex: number;
-  DEFAULT_OUTLINE_STYLE: NumberCellOutlineStyle;
-  DEFAULT_PURCHASE_STATUS_CONTROL_MODE: PurchaseStatusControlMode;
-  DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY: boolean;
-  DEFAULT_UI_VISIBILITY: UIVisibilitySettings;
-  disablePriceUndefinedCheck: boolean;
-  disableLimitedPurchaseQuantityCheck: boolean;
-  skipLimitedPurchaseForSingleQuantity: boolean;
-  postEventDistributionCheckEnabled: boolean;
-  eventDates: string[];
-  getHallExecuteCount: (hallId: string) => number;
-  getHallTotalItemCount: (hallId: string) => number;
-  getMapTabForDate: (eventDate: string) => string | null;
-  globalHallOrderHalls: HallDefinition[];
-  globalHallOrderMapTabName: string | null;
-  handleBlockSortToggle: () => void;
-  handleBlockSortToggleCandidate: () => void;
-  handleBulkSort: (direction: BulkSortDirection) => void;
-  handleClearRangeSelection: () => void;
-  handleClearSelection: () => void;
-  handleMapTabRotationAngleChange: (angle: number) => void;
-  handleMoveToExecuteColumn: (itemIds: string[]) => void;
-  handleRemoveFromExecuteColumn: (itemIds: string[]) => void;
-  handleSearchNext: () => void;
-  handleSetViewMode: (mode: ViewMode, scrollToItemId?: string) => void;
-  handleSortToggle: () => void;
-  handleZoomChange: (newZoom: number) => void;
-  hasCandidateSelection: boolean;
-  hasExecuteSelection: boolean;
-  candidateMovePlan: MovePlan;
-  executeMovePlan: MovePlan;
-  hasUndefinedPriorityItems: boolean;
-  isMapTab: boolean;
-  items: ShoppingItem[];
-  itemToEdit: ShoppingItem | null;
-  layoutMode: LayoutMode;
-  mainContentVisible: boolean;
-  mapHallSelectorOpen: boolean;
-  mapIsRouteVisible: boolean;
-  mapSelectedHallId: string;
-  mapSmartInsertEnabled: boolean;
-  mapSmartInsertMode: SmartInsertMode;
-  mapTabMenuOpen: string | null;
-  mapTabMenuPosition: MapTabMenuPosition;
-  mapToggleButtonRef: React.MutableRefObject<HTMLButtonElement | null>;
-  mapToggleLongPressFiredRef: React.MutableRefObject<boolean>;
-  mapToggleLongPressRef: React.MutableRefObject<number | null>;
-  mapToggleMenuRef: React.MutableRefObject<HTMLDivElement | null>;
-  mapViewActive: boolean;
-  numberCellOutlineStyle: NumberCellOutlineStyle;
-  openVisitListPanel: (mapTab: string) => void;
-  onCloseUiSettingsPanel: () => void;
-  onToggleUiSettingsPanel: () => void;
-  purchaseStatusControlMode: PurchaseStatusControlMode;
-  searchKeyword: string;
-  selectedItemIds: Set<string>;
-  executeSpaceGroupingEnabled: boolean;
-  setActiveEventName: React.Dispatch<React.SetStateAction<string | null>>;
-  setActiveTab: React.Dispatch<React.SetStateAction<ActiveTab>>;
-  setBlockDefinitionMode: React.Dispatch<React.SetStateAction<boolean>>;
-  setExecuteCollapsedSpaces: React.Dispatch<React.SetStateAction<Set<string>>>;
-  setExecuteSpaceGroupingEnabled: React.Dispatch<React.SetStateAction<boolean>>;
-  setGlobalHallOrderPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setHallDefinitionMode: React.Dispatch<React.SetStateAction<boolean>>;
-  setItemToEdit: React.Dispatch<React.SetStateAction<ShoppingItem | null>>;
-  setLayoutMode: React.Dispatch<React.SetStateAction<LayoutMode>>;
-  setMapHallSelectorOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setMapIsHallOrderOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setMapIsRouteVisible: React.Dispatch<React.SetStateAction<boolean>>;
-  setMapSelectedHallId: React.Dispatch<React.SetStateAction<string>>;
-  setMapSmartInsertEnabled: React.Dispatch<React.SetStateAction<boolean>>;
-  setMapSmartInsertMode: React.Dispatch<React.SetStateAction<SmartInsertMode>>;
-  setMapTabMenuOpen: React.Dispatch<React.SetStateAction<string | null>>;
-  setMapTabMenuPosition: React.Dispatch<
-    React.SetStateAction<MapTabMenuPosition>
-  >;
-  setMapViewActive: React.Dispatch<React.SetStateAction<boolean>>;
-  setDisablePriceUndefinedCheck: React.Dispatch<React.SetStateAction<boolean>>;
-  setDisableLimitedPurchaseQuantityCheck: React.Dispatch<
-    React.SetStateAction<boolean>
-  >;
-  setSkipLimitedPurchaseForSingleQuantity: React.Dispatch<
-    React.SetStateAction<boolean>
-  >;
-  setPostEventDistributionCheckEnabled: React.Dispatch<
-    React.SetStateAction<boolean>
-  >;
-  setNumberCellOutlineStyle: React.Dispatch<
-    React.SetStateAction<NumberCellOutlineStyle>
-  >;
-  setPurchaseStatusControlMode: React.Dispatch<
-    React.SetStateAction<PurchaseStatusControlMode>
-  >;
-  setSearchKeyword: React.Dispatch<React.SetStateAction<string>>;
-  setSelectedBlockFilters: React.Dispatch<React.SetStateAction<Set<string>>>;
-  setSimpleHallDefinitionMode: React.Dispatch<React.SetStateAction<boolean>>;
-  setThemeMode: React.Dispatch<React.SetStateAction<ThemeMode>>;
-  setUiVisibilitySettings: React.Dispatch<
-    React.SetStateAction<UIVisibilitySettings>
-  >;
-  showHeaderBar: boolean;
-  showMoveButtons: boolean;
-  showSmartInsertToast: (message: string, type?: "success" | "error") => void;
-  showTabBar: boolean;
-  smartInsertLongPressRef: React.MutableRefObject<ReturnType<
-    typeof setTimeout
-  > | null>;
-  smartInsertLongPressTriggeredRef: React.MutableRefObject<boolean>;
-  sortLabels: Record<SortState, string>;
-  sortDisplayLabel: string;
-  sortState: SortState;
-  TabButton: React.FC<TabButtonProps>;
-  themeMode: ThemeMode;
-  uiSettingsPanelOpen: boolean;
-  uiVisibilitySettings: UIVisibilitySettings;
-  updateUIVisibilityConfig: (
-    key: UIVisibilityModeKey,
-    field: "header" | "tabBar",
-    value: boolean,
-  ) => void;
-  visibleSearchMatches: string[];
-  zoomLevel: number;
+export type AppHeaderShellModel = {
+  readonly navigation: {
+    readonly activeEventDate: string;
+    readonly activeEventName: string | null;
+    readonly activeTab: ActiveTab;
+    readonly currentMode: ViewMode;
+    readonly eventDates: string[];
+    readonly isMapTab: boolean;
+  };
+  readonly map: {
+    readonly currentHalls: HallDefinition[];
+    readonly currentMapData: DayMapData | null;
+    readonly currentMapTabName: string | null;
+    readonly currentMapTabRotationState: DayMapRotationState;
+    readonly globalHallOrderHalls: HallDefinition[];
+    readonly globalHallOrderMapTabName: string | null;
+    readonly hasUndefinedPriorityItems: boolean;
+    readonly mapHallSelectorOpen: boolean;
+    readonly mapIsRouteVisible: boolean;
+    readonly mapSelectedHallId: string;
+    readonly mapSmartInsertEnabled: boolean;
+    readonly mapSmartInsertMode: SmartInsertMode;
+    readonly mapTabMenuOpen: string | null;
+    readonly mapToggleButtonRef: React.MutableRefObject<HTMLButtonElement | null>;
+    readonly mapToggleLongPressFiredRef: React.MutableRefObject<boolean>;
+    readonly mapToggleLongPressRef: React.MutableRefObject<number | null>;
+    readonly mapToggleMenuRef: React.MutableRefObject<HTMLDivElement | null>;
+    readonly mapViewActive: boolean;
+    readonly smartInsertLongPressRef: React.MutableRefObject<ReturnType<
+      typeof setTimeout
+    > | null>;
+    readonly smartInsertLongPressTriggeredRef: React.MutableRefObject<boolean>;
+  };
+  readonly list: {
+    readonly blockSortDirection: BlockSortDirection | null;
+    readonly candidateMovePlan: MovePlan;
+    readonly currentSearchIndex: number;
+    readonly executeMovePlan: MovePlan;
+    readonly executeSpaceGroupingEnabled: boolean;
+    readonly hasCandidateSelection: boolean;
+    readonly hasExecuteSelection: boolean;
+    readonly items: ShoppingItem[];
+    readonly searchKeyword: string;
+    readonly selectedItemIds: Set<string>;
+    readonly showMoveButtons: boolean;
+    readonly sortDisplayLabel: string;
+    readonly visibleSearchMatches: string[];
+  };
+  readonly preferences: {
+    readonly DEFAULT_OUTLINE_STYLE: NumberCellOutlineStyle;
+    readonly DEFAULT_PURCHASE_STATUS_CONTROL_MODE: PurchaseStatusControlMode;
+    readonly DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY: boolean;
+    readonly DEFAULT_UI_VISIBILITY: UIVisibilitySettings;
+    readonly disableLimitedPurchaseQuantityCheck: boolean;
+    readonly disablePriceUndefinedCheck: boolean;
+    readonly numberCellOutlineStyle: NumberCellOutlineStyle;
+    readonly postEventDistributionCheckEnabled: boolean;
+    readonly purchaseStatusControlMode: PurchaseStatusControlMode;
+    readonly skipLimitedPurchaseForSingleQuantity: boolean;
+    readonly themeMode: ThemeMode;
+    readonly uiVisibilitySettings: UIVisibilitySettings;
+    readonly zoomLevel: number;
+  };
+  readonly ui: {
+    readonly layoutMode: LayoutMode;
+    readonly mainContentVisible: boolean;
+    readonly showHeaderBar: boolean;
+    readonly showTabBar: boolean;
+    readonly TabButton: React.FC<TabButtonProps>;
+    readonly uiSettingsPanelOpen: boolean;
+  };
 };
 
-const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
+export type AppHeaderShellActions = {
+  readonly navigation: {
+    readonly getMapTabForDate: (eventDate: string) => string | null;
+    readonly handleSetViewMode: (
+      mode: ViewMode,
+      scrollToItemId?: string,
+    ) => void;
+    readonly onShowEventList: () => void;
+    readonly onShowImport: (eventName: string | null) => void;
+    readonly onToggleEventSurface: () => void;
+  };
+  readonly map: {
+    readonly getHallExecuteCount: (hallId: string) => number;
+    readonly getHallTotalItemCount: (hallId: string) => number;
+    readonly handleMapTabRotationAngleChange: (angle: number) => void;
+    readonly openVisitListPanel: (mapTab: string) => void;
+    readonly setBlockDefinitionMode: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setGlobalHallOrderPanelOpen: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setHallDefinitionMode: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setMapHallSelectorOpen: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setMapIsHallOrderOpen: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setMapIsRouteVisible: (visible: boolean) => void;
+    readonly setMapSelectedHallId: React.Dispatch<React.SetStateAction<string>>;
+    readonly setMapSmartInsertEnabled: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setMapSmartInsertMode: React.Dispatch<
+      React.SetStateAction<SmartInsertMode>
+    >;
+    readonly setMapTabMenuOpen: React.Dispatch<
+      React.SetStateAction<string | null>
+    >;
+    readonly setSimpleHallDefinitionMode: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly showSmartInsertToast: (
+      message: string,
+      type?: "success" | "error",
+    ) => void;
+  };
+  readonly list: {
+    readonly handleBlockSortToggle: () => void;
+    readonly handleBlockSortToggleCandidate: () => void;
+    readonly handleBulkSort: (direction: BulkSortDirection) => void;
+    readonly handleClearRangeSelection: () => void;
+    readonly handleClearSelection: () => void;
+    readonly handleMoveToExecuteColumn: (itemIds: string[]) => void;
+    readonly handleRemoveFromExecuteColumn: (itemIds: string[]) => void;
+    readonly handleSearchNext: () => void;
+    readonly handleSortToggle: () => void;
+    readonly setExecuteCollapsedSpaces: React.Dispatch<
+      React.SetStateAction<Set<string>>
+    >;
+    readonly setExecuteSpaceGroupingEnabled: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setItemToEdit: React.Dispatch<
+      React.SetStateAction<ShoppingItem | null>
+    >;
+    readonly setSearchKeyword: React.Dispatch<React.SetStateAction<string>>;
+    readonly setSelectedBlockFilters: React.Dispatch<
+      React.SetStateAction<Set<string>>
+    >;
+  };
+  readonly preferences: {
+    readonly handleZoomChange: (newZoom: number) => void;
+    readonly setDisableLimitedPurchaseQuantityCheck: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setDisablePriceUndefinedCheck: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setNumberCellOutlineStyle: React.Dispatch<
+      React.SetStateAction<NumberCellOutlineStyle>
+    >;
+    readonly setPostEventDistributionCheckEnabled: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setPurchaseStatusControlMode: React.Dispatch<
+      React.SetStateAction<PurchaseStatusControlMode>
+    >;
+    readonly setSkipLimitedPurchaseForSingleQuantity: React.Dispatch<
+      React.SetStateAction<boolean>
+    >;
+    readonly setThemeMode: React.Dispatch<React.SetStateAction<ThemeMode>>;
+    readonly setUiVisibilitySettings: React.Dispatch<
+      React.SetStateAction<UIVisibilitySettings>
+    >;
+    readonly updateUIVisibilityConfig: (
+      key: UIVisibilityModeKey,
+      field: "header" | "tabBar",
+      value: boolean,
+    ) => void;
+  };
+  readonly ui: {
+    readonly onCloseUiSettingsPanel: () => void;
+    readonly onToggleUiSettingsPanel: () => void;
+    readonly setLayoutMode: React.Dispatch<React.SetStateAction<LayoutMode>>;
+  };
+};
+
+export type AppHeaderShellProps = {
+  readonly model: AppHeaderShellModel;
+  readonly actions: AppHeaderShellActions;
+};
+
+const AppHeaderShell: React.FC<AppHeaderShellProps> = ({ model, actions }) => {
   const {
-    activeEventDate,
-    activeEventName,
-    activeTab,
-    blockSortDirection,
-    currentHalls,
-    currentMapData,
-    currentMapTabName,
-    currentMapTabRotationState,
-    currentMode,
-    currentSearchIndex,
-    DEFAULT_OUTLINE_STYLE,
-    DEFAULT_PURCHASE_STATUS_CONTROL_MODE,
-    DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY,
-    DEFAULT_UI_VISIBILITY,
-    disablePriceUndefinedCheck,
-    disableLimitedPurchaseQuantityCheck,
-    skipLimitedPurchaseForSingleQuantity,
-    postEventDistributionCheckEnabled,
-    eventDates,
-    getHallExecuteCount,
-    getHallTotalItemCount,
-    getMapTabForDate,
-    globalHallOrderHalls,
-    globalHallOrderMapTabName,
-    handleBlockSortToggle,
-    handleBlockSortToggleCandidate,
-    handleBulkSort,
-    handleClearRangeSelection,
-    handleClearSelection,
-    handleMapTabRotationAngleChange,
-    handleMoveToExecuteColumn,
-    handleRemoveFromExecuteColumn,
-    handleSearchNext,
-    handleSetViewMode,
-    handleSortToggle,
-    handleZoomChange,
-    hasCandidateSelection,
-    hasExecuteSelection,
-    candidateMovePlan,
-    executeMovePlan,
-    hasUndefinedPriorityItems,
-    isMapTab,
-    items,
-    itemToEdit,
-    layoutMode,
-    mainContentVisible,
-    mapHallSelectorOpen,
-    mapIsRouteVisible,
-    mapSelectedHallId,
-    mapSmartInsertEnabled,
-    mapSmartInsertMode,
-    mapTabMenuOpen,
-    mapTabMenuPosition,
-    mapToggleButtonRef,
-    mapToggleLongPressFiredRef,
-    mapToggleLongPressRef,
-    mapToggleMenuRef,
-    mapViewActive,
-    numberCellOutlineStyle,
-    openVisitListPanel,
-    onCloseUiSettingsPanel,
-    onToggleUiSettingsPanel,
-    purchaseStatusControlMode,
-    searchKeyword,
-    selectedItemIds,
-    executeSpaceGroupingEnabled,
-    setActiveEventName,
-    setActiveTab,
-    setBlockDefinitionMode,
-    setExecuteCollapsedSpaces,
-    setExecuteSpaceGroupingEnabled,
-    setGlobalHallOrderPanelOpen,
-    setHallDefinitionMode,
-    setItemToEdit,
-    setLayoutMode,
-    setMapHallSelectorOpen,
-    setMapIsHallOrderOpen,
-    setMapIsRouteVisible,
-    setMapSelectedHallId,
-    setMapSmartInsertEnabled,
-    setMapSmartInsertMode,
-    setMapTabMenuOpen,
-    setMapTabMenuPosition,
-    setMapViewActive,
-    setDisablePriceUndefinedCheck,
-    setDisableLimitedPurchaseQuantityCheck,
-    setSkipLimitedPurchaseForSingleQuantity,
-    setPostEventDistributionCheckEnabled,
-    setNumberCellOutlineStyle,
-    setPurchaseStatusControlMode,
-    setSearchKeyword,
-    setSelectedBlockFilters,
-    setSimpleHallDefinitionMode,
-    setThemeMode,
-    setUiVisibilitySettings,
-    showHeaderBar,
-    showMoveButtons,
-    showSmartInsertToast,
-    showTabBar,
-    smartInsertLongPressRef,
-    smartInsertLongPressTriggeredRef,
-    sortLabels,
-    sortDisplayLabel,
-    sortState,
-    TabButton,
-    themeMode,
-    uiSettingsPanelOpen,
-    uiVisibilitySettings,
-    updateUIVisibilityConfig,
-    visibleSearchMatches,
-    zoomLevel,
-  } = props;
+    navigation: {
+      activeEventDate,
+      activeEventName,
+      activeTab,
+      currentMode,
+      eventDates,
+      isMapTab,
+    },
+    map: {
+      currentHalls,
+      currentMapData,
+      currentMapTabName,
+      currentMapTabRotationState,
+      globalHallOrderHalls,
+      globalHallOrderMapTabName,
+      hasUndefinedPriorityItems,
+      mapHallSelectorOpen,
+      mapIsRouteVisible,
+      mapSelectedHallId,
+      mapSmartInsertEnabled,
+      mapSmartInsertMode,
+      mapTabMenuOpen,
+      mapToggleButtonRef,
+      mapToggleLongPressFiredRef,
+      mapToggleLongPressRef,
+      mapToggleMenuRef,
+      mapViewActive,
+      smartInsertLongPressRef,
+      smartInsertLongPressTriggeredRef,
+    },
+    list: {
+      blockSortDirection,
+      candidateMovePlan,
+      currentSearchIndex,
+      executeMovePlan,
+      executeSpaceGroupingEnabled,
+      hasCandidateSelection,
+      hasExecuteSelection,
+      items,
+      searchKeyword,
+      selectedItemIds,
+      showMoveButtons,
+      sortDisplayLabel,
+      visibleSearchMatches,
+    },
+    preferences: {
+      DEFAULT_OUTLINE_STYLE,
+      DEFAULT_PURCHASE_STATUS_CONTROL_MODE,
+      DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY,
+      DEFAULT_UI_VISIBILITY,
+      disableLimitedPurchaseQuantityCheck,
+      disablePriceUndefinedCheck,
+      numberCellOutlineStyle,
+      postEventDistributionCheckEnabled,
+      purchaseStatusControlMode,
+      skipLimitedPurchaseForSingleQuantity,
+      themeMode,
+      uiVisibilitySettings,
+      zoomLevel,
+    },
+    ui: {
+      layoutMode,
+      mainContentVisible,
+      showHeaderBar,
+      showTabBar,
+      TabButton,
+      uiSettingsPanelOpen,
+    },
+  } = model;
+  const {
+    navigation: {
+      getMapTabForDate,
+      handleSetViewMode,
+      onShowEventList,
+      onShowImport,
+      onToggleEventSurface,
+    },
+    map: {
+      getHallExecuteCount,
+      getHallTotalItemCount,
+      handleMapTabRotationAngleChange,
+      openVisitListPanel,
+      setBlockDefinitionMode,
+      setGlobalHallOrderPanelOpen,
+      setHallDefinitionMode,
+      setMapHallSelectorOpen,
+      setMapIsHallOrderOpen,
+      setMapIsRouteVisible,
+      setMapSelectedHallId,
+      setMapSmartInsertEnabled,
+      setMapSmartInsertMode,
+      setMapTabMenuOpen,
+      setSimpleHallDefinitionMode,
+      showSmartInsertToast,
+    },
+    list: {
+      handleBlockSortToggle,
+      handleBlockSortToggleCandidate,
+      handleBulkSort,
+      handleClearRangeSelection,
+      handleClearSelection,
+      handleMoveToExecuteColumn,
+      handleRemoveFromExecuteColumn,
+      handleSearchNext,
+      handleSortToggle,
+      setExecuteCollapsedSpaces,
+      setExecuteSpaceGroupingEnabled,
+      setItemToEdit,
+      setSearchKeyword,
+      setSelectedBlockFilters,
+    },
+    preferences: {
+      handleZoomChange,
+      setDisableLimitedPurchaseQuantityCheck,
+      setDisablePriceUndefinedCheck,
+      setNumberCellOutlineStyle,
+      setPostEventDistributionCheckEnabled,
+      setPurchaseStatusControlMode,
+      setSkipLimitedPurchaseForSingleQuantity,
+      setThemeMode,
+      setUiVisibilitySettings,
+      updateUIVisibilityConfig,
+    },
+    ui: { onCloseUiSettingsPanel, onToggleUiSettingsPanel, setLayoutMode },
+  } = actions;
 
   React.useEffect(() => {
     if (!uiSettingsPanelOpen) return;
@@ -554,21 +620,13 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                               mapToggleLongPressFiredRef.current = false;
                               return;
                             }
-                            setMapViewActive((prev: boolean) => !prev);
+                            onToggleEventSurface();
                           }}
-                          onPointerDown={(e) => {
+                          onPointerDown={() => {
                             if (!mapViewActive) return;
-                            const target = e.currentTarget as HTMLButtonElement;
-                            const rect = target.getBoundingClientRect();
-                            const menuLeft = rect.left + rect.width / 2;
-                            const menuTop = rect.bottom + 4;
                             mapToggleLongPressRef.current = window.setTimeout(
                               () => {
                                 mapToggleLongPressFiredRef.current = true;
-                                setMapTabMenuPosition({
-                                  left: menuLeft,
-                                  top: menuTop,
-                                });
                                 setMapTabMenuOpen("mapToggle");
                                 mapToggleLongPressRef.current = null;
                               },
@@ -615,12 +673,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                         {mapTabMenuOpen === "mapToggle" && (
                           <div
                             ref={mapToggleMenuRef}
-                            className="fixed bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 min-w-[160px]"
-                            style={{
-                              left: `${mapTabMenuPosition.left}px`,
-                              top: `${mapTabMenuPosition.top}px`,
-                              transform: "translateX(-50%)",
-                            }}
+                            className="absolute left-1/2 top-[calc(100%+0.25rem)] z-50 min-w-[160px] -translate-x-1/2 rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800"
                           >
                             <div className="py-1">
                               <button
@@ -664,17 +717,12 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                         e.stopPropagation();
                         onToggleUiSettingsPanel();
                       }}
-                      className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                      className={`min-h-11 min-w-11 touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors ${
                         uiSettingsPanelOpen
                           ? "bg-slate-200 dark:bg-slate-700"
                           : "hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600"
                       }`}
                       title="表示項目の設定"
-                      style={{
-                        WebkitTapHighlightColor: "transparent",
-                        minWidth: "44px",
-                        minHeight: "44px",
-                      }}
                       type="button"
                     >
                       <svg
@@ -732,7 +780,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                                   return next;
                                 });
                               }}
-                              className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
+                              className="touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors hover:bg-slate-200 active:bg-slate-300 dark:hover:bg-slate-700 dark:active:bg-slate-600"
                               title={
                                 themeMode === "system"
                                   ? "システム設定 → ライトモードへ"
@@ -740,7 +788,6 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                                     ? "ライトモード → ダークモードへ"
                                     : "ダークモード → システム設定へ"
                               }
-                              style={{ WebkitTapHighlightColor: "transparent" }}
                               type="button"
                             >
                               {themeMode === "system" ? (
@@ -800,7 +847,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                                   layoutMode === "pc" ? "smartphone" : "pc",
                                 )
                               }
-                              className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                              className={`touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors ${
                                 layoutMode === "smartphone"
                                   ? "bg-blue-600 text-white"
                                   : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
@@ -810,7 +857,6 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                                   ? "スマートフォンモードに切替"
                                   : "タブレット/PCモードに切替"
                               }
-                              style={{ WebkitTapHighlightColor: "transparent" }}
                               type="button"
                             >
                               {layoutMode === "smartphone" ? (
@@ -1205,17 +1251,12 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                       {/* 表示処理の補足 */}
                       <button
                         onClick={() => handleSetViewMode("edit")}
-                        className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                        className={`min-h-10 min-w-10 touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors ${
                           currentMode === "edit"
                             ? "bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400"
                             : "hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400"
                         }`}
                         title="編集モード"
-                        style={{
-                          WebkitTapHighlightColor: "transparent",
-                          minWidth: "40px",
-                          minHeight: "40px",
-                        }}
                         type="button"
                       >
                         <span className="text-lg">📝</span>
@@ -1224,17 +1265,12 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                       {/* 表示処理の補足 */}
                       <button
                         onClick={() => handleSetViewMode("execute")}
-                        className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                        className={`min-h-10 min-w-10 touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors ${
                           currentMode === "execute"
                             ? "bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400"
                             : "hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400"
                         }`}
                         title="実行モード"
-                        style={{
-                          WebkitTapHighlightColor: "transparent",
-                          minWidth: "40px",
-                          minHeight: "40px",
-                        }}
                         type="button"
                       >
                         <span className="text-lg">🏃‍♂️</span>
@@ -1243,17 +1279,12 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                       {/* 表示処理の補足 */}
                       <button
                         onClick={() => handleSetViewMode("focus")}
-                        className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                        className={`min-h-10 min-w-10 touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors ${
                           currentMode === "focus"
                             ? "bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-400"
                             : "hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400"
                         }`}
                         title="集中モード"
-                        style={{
-                          WebkitTapHighlightColor: "transparent",
-                          minWidth: "40px",
-                          minHeight: "40px",
-                        }}
                         type="button"
                       >
                         <span className="text-lg">🔍</span>
@@ -1272,17 +1303,12 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                               onClick={() =>
                                 setMapHallSelectorOpen(!mapHallSelectorOpen)
                               }
-                              className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                              className={`min-h-11 min-w-11 touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors ${
                                 mapHallSelectorOpen
                                   ? "bg-slate-200 dark:bg-slate-700"
                                   : "hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600"
                               }`}
                               title={`表示ホール: ${mapSelectedHallId === "all" ? "全ホール" : currentHalls.find((h) => h.id === mapSelectedHallId)?.name || ""}`}
-                              style={{
-                                WebkitTapHighlightColor: "transparent",
-                                minWidth: "44px",
-                                minHeight: "44px",
-                              }}
                               type="button"
                             >
                               {/* 表示処理の補足 */}
@@ -1356,13 +1382,8 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                           {/* 表示処理の補足 */}
                           <button
                             onClick={() => setMapIsHallOrderOpen(true)}
-                            className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
+                            className="min-h-11 min-w-11 touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors hover:bg-slate-200 active:bg-slate-300 dark:hover:bg-slate-700 dark:active:bg-slate-600"
                             title="ホール順を編集"
-                            style={{
-                              WebkitTapHighlightColor: "transparent",
-                              minWidth: "44px",
-                              minHeight: "44px",
-                            }}
                             type="button"
                           >
                             <svg
@@ -1385,7 +1406,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                       {/* 表示処理の補足 */}
                       <button
                         onClick={() => setMapIsRouteVisible(!mapIsRouteVisible)}
-                        className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                        className={`min-h-11 min-w-11 touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors ${
                           mapIsRouteVisible
                             ? "bg-blue-100 dark:bg-blue-900/50 hover:bg-blue-200 dark:hover:bg-blue-800"
                             : "hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600"
@@ -1395,11 +1416,6 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                             ? "ルート表示: 有効"
                             : "ルート表示: 無効"
                         }
-                        style={{
-                          WebkitTapHighlightColor: "transparent",
-                          minWidth: "44px",
-                          minHeight: "44px",
-                        }}
                         type="button"
                       >
                         {/* 表示処理の補足 */}
@@ -1455,17 +1471,12 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                           }
                           setMapSmartInsertEnabled(!mapSmartInsertEnabled);
                         }}
-                        className={`relative p-2 rounded-md transition-colors touch-manipulation select-none ${
+                        className={`relative min-h-11 min-w-11 touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors ${
                           mapSmartInsertEnabled
                             ? "bg-green-100 dark:bg-green-900/50 hover:bg-green-200 dark:hover:bg-green-800"
                             : "hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600"
                         }`}
                         title={`スマート挿入: ${mapSmartInsertEnabled ? "有効" : "無効"}（${mapSmartInsertMode === "map" ? "マップ" : "プレビュー"}）`}
-                        style={{
-                          WebkitTapHighlightColor: "transparent",
-                          minWidth: "44px",
-                          minHeight: "44px",
-                        }}
                         type="button"
                       >
                         <svg
@@ -1569,7 +1580,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                       }}
                       className={`px-2 py-1 text-xs font-medium rounded transition-colors flex-shrink-0 ${
                         executeSpaceGroupingEnabled
-                          ? "bg-blue-600 text-white dark:bg-blue-500"
+                          ? "bg-blue-600 text-white dark:bg-blue-600"
                           : "bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600"
                       }`}
                     >
@@ -1586,11 +1597,10 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                   tab="eventList"
                   label="イベント一覧"
                   onClick={() => {
-                    setActiveEventName(null);
                     setItemToEdit(null);
                     handleClearSelection();
                     setSelectedBlockFilters(new Set());
-                    setActiveTab("eventList");
+                    onShowEventList();
                   }}
                 />
                 {activeEventName ? (
@@ -1631,7 +1641,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                           }}
                           className={`px-2 py-1 text-xs font-medium rounded transition-colors whitespace-nowrap flex-shrink-0 ${
                             executeSpaceGroupingEnabled
-                              ? "bg-blue-600 text-white dark:bg-blue-500"
+                              ? "bg-blue-600 text-white dark:bg-blue-600"
                               : "bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600"
                           }`}
                         >
@@ -1643,7 +1653,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                   <button
                     onClick={() => {
                       setItemToEdit(null);
-                      setActiveTab("import");
+                      onShowImport(activeEventName);
                     }}
                     className={`px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 whitespace-nowrap ${
                       activeTab === "import"

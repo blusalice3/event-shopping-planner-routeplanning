@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ShoppingItem } from "../../types/item";
 import { createAppBackup, parseAppBackup } from "../../utils/appBackup";
-import { exportToXlsx, importFromXlsx } from "../../utils/exportImport";
+import {
+  exportToXlsx,
+  importFromXlsx,
+} from "../../xlsx/engine/eventWorkbookEngine";
 import { buildXlsxEventRestoreSource, toImportedEventData } from "./fileImport";
 
 const EVENT_NAME = "簡易復元イベント";

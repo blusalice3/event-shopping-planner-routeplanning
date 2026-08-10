@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FocusPhase } from "../../types/focus";
 import type { ShoppingItem } from "../../types/item";
@@ -93,7 +93,37 @@ export function PhaseChangeDialogView({
   onSaved: () => void;
   onCancel: () => void;
 }) {
-  if (!dialog.isOpen || !dialog.targetPhase) return null;
+  const titleId = useId();
+  const descriptionId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const isRendered = dialog.isOpen && dialog.targetPhase !== null;
+
+  useModalInteractionLock(isRendered);
+
+  useLayoutEffect(() => {
+    if (!isRendered) return;
+
+    returnFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    dialogRef.current
+      ?.querySelector<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )
+      ?.focus({ preventScroll: true });
+
+    return () => {
+      const returnFocus = returnFocusRef.current;
+      returnFocusRef.current = null;
+      if (returnFocus?.isConnected) {
+        returnFocus.focus({ preventScroll: true });
+      }
+    };
+  }, [isRendered]);
+
+  if (!isRendered || !dialog.targetPhase) return null;
 
   const targetPhaseName =
     dialog.targetPhase === "normal"
@@ -107,12 +137,59 @@ export function PhaseChangeDialogView({
     ? `${targetVisit.items[0]?.block}-${targetVisit.items[0]?.number} ${targetVisit.items[0]?.circle}`
     : "";
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onCancel();
+      return;
+    }
+    if (event.key !== "Tab") return;
+
+    const dialogElement = dialogRef.current;
+    if (!dialogElement) return;
+    const focusableElements = Array.from(
+      dialogElement.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+    const first = focusableElements[0];
+    const last = focusableElements[focusableElements.length - 1];
+    if (!first || !last) return;
+
+    if (
+      event.shiftKey &&
+      (document.activeElement === first ||
+        !dialogElement.contains(document.activeElement))
+    ) {
+      event.preventDefault();
+      last.focus();
+    } else if (
+      !event.shiftKey &&
+      (document.activeElement === last ||
+        !dialogElement.contains(document.activeElement))
+    ) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-md w-full mx-4 overflow-hidden">
-        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-4">
-          <h2 className="text-lg font-bold">フェーズを切り替えますか？</h2>
-          <p className="text-sm opacity-80 mt-1">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        onKeyDown={handleKeyDown}
+        className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-md w-full mx-4 overflow-hidden"
+      >
+        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-4">
+          <h2 id={titleId} className="text-lg font-bold">
+            フェーズを切り替えますか？
+          </h2>
+          <p id={descriptionId} className="text-sm mt-1">
             {targetPhaseName}フェーズに移動します
           </p>
         </div>
@@ -129,11 +206,12 @@ export function PhaseChangeDialogView({
               </p>
               <div className="space-y-2">
                 <button
+                  type="button"
                   onClick={onStart}
                   className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
                 >
                   最初から開始
-                  <span className="block text-xs opacity-80 mt-0.5">
+                  <span className="block text-xs mt-0.5">
                     {targetVisits[0]?.items[0]?.block}-
                     {targetVisits[0]?.items[0]?.number}{" "}
                     {targetVisits[0]?.items[0]?.circle}
@@ -141,11 +219,12 @@ export function PhaseChangeDialogView({
                 </button>
                 {dialog.hasSavedIndex && (
                   <button
+                    type="button"
                     onClick={onSaved}
-                    className="w-full py-3 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
+                    className="w-full py-3 px-4 bg-green-700 hover:bg-green-800 text-white rounded-lg font-medium transition-colors"
                   >
                     途中から再開
-                    <span className="block text-xs opacity-80 mt-0.5">
+                    <span className="block text-xs mt-0.5">
                       {savedVisitInfo} （{dialog.savedIndex + 1}/
                       {targetVisits.length}）
                     </span>
@@ -155,6 +234,7 @@ export function PhaseChangeDialogView({
             </>
           )}
           <button
+            type="button"
             onClick={onCancel}
             className="w-full py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors"
           >
@@ -319,7 +399,7 @@ export function CellItemPopup({
           <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700">
             <button
               onClick={onAddItem}
-              className="w-full py-2 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+              className="w-full py-2 px-4 bg-green-700 hover:bg-green-800 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
             >
               <svg
                 className="w-5 h-5"
@@ -408,9 +488,7 @@ export function TemporaryPhaseChoiceDialog({
       <div className="w-full max-w-lg overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-slate-800">
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 text-white">
           <h2 className="text-lg font-bold">{title}</h2>
-          {description && (
-            <p className="mt-1 text-sm opacity-85">{description}</p>
-          )}
+          {description && <p className="mt-1 text-sm">{description}</p>}
         </div>
         <div className="space-y-2 p-4">
           {choices.map((choice) => (
@@ -472,9 +550,7 @@ export function TemporaryRemainingSpacesDialog({
       <div className="flex max-h-[85dvh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-slate-800">
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 text-white">
           <h2 className="text-lg font-bold">残りスペース</h2>
-          <p className="mt-1 text-sm opacity-85">
-            購入状態を再集計した最新の候補です
-          </p>
+          <p className="mt-1 text-sm">購入状態を再集計した最新の候補です</p>
         </div>
         <div className="flex-1 space-y-4 overflow-y-auto p-4">
           <button
@@ -561,7 +637,52 @@ export function AddItemDialogView({
   onClose: () => void;
   onSubmit: () => void;
 }) {
+  const idPrefix = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
+  useModalInteractionLock(dialog.isOpen);
+
+  useLayoutEffect(() => {
+    if (!dialog.isOpen) return;
+
+    returnFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    dialogRef.current
+      ?.querySelector<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )
+      ?.focus({ preventScroll: true });
+
+    return () => {
+      const returnFocus = returnFocusRef.current;
+      returnFocusRef.current = null;
+      if (returnFocus?.isConnected) {
+        returnFocus.focus({ preventScroll: true });
+      }
+    };
+  }, [dialog.isOpen]);
+
   if (!dialog.isOpen) return null;
+
+  const ids = {
+    dialogTitle: `${idPrefix}-title`,
+    dialogDescription: `${idPrefix}-description`,
+    circle: `${idPrefix}-circle`,
+    circleSuggestions: `${idPrefix}-circle-suggestions`,
+    title: `${idPrefix}-item-title`,
+    eventDate: `${idPrefix}-event-date`,
+    block: `${idPrefix}-block`,
+    number: `${idPrefix}-number`,
+    price: `${idPrefix}-price`,
+    priceQuickSelect: `${idPrefix}-price-quick-select`,
+    quantity: `${idPrefix}-quantity`,
+    purchaseStatus: `${idPrefix}-purchase-status`,
+    remarks: `${idPrefix}-remarks`,
+    url: `${idPrefix}-url`,
+  };
 
   const circles = currentVisit
     ? [
@@ -571,29 +692,77 @@ export function AddItemDialogView({
       ]
     : [];
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+
+    const dialogElement = dialogRef.current;
+    if (!dialogElement) return;
+    const focusableElements = Array.from(
+      dialogElement.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+    const first = focusableElements[0];
+    const last = focusableElements[focusableElements.length - 1];
+    if (!first || !last) return;
+
+    if (
+      event.shiftKey &&
+      (document.activeElement === first ||
+        !dialogElement.contains(document.activeElement))
+    ) {
+      event.preventDefault();
+      last.focus();
+    } else if (
+      !event.shiftKey &&
+      (document.activeElement === last ||
+        !dialogElement.contains(document.activeElement))
+    ) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-lg w-full mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
-        <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4">
-          <h2 className="text-lg font-bold">新規アイテム追加</h2>
-          <p className="text-sm opacity-80 mt-1">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={ids.dialogTitle}
+        aria-describedby={ids.dialogDescription}
+        onKeyDown={handleKeyDown}
+        className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-lg w-full mx-4 overflow-hidden max-h-[90vh] overflow-y-auto"
+      >
+        <div className="bg-gradient-to-r from-green-700 to-emerald-700 text-white p-4">
+          <h2 id={ids.dialogTitle} className="text-lg font-bold">
+            新規アイテム追加
+          </h2>
+          <p id={ids.dialogDescription} className="text-sm mt-1">
             {dialog.eventDate} {dialog.block}-{dialog.number}
           </p>
         </div>
         <div className="p-4 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <TextField
+              id={ids.circle}
               label="サークル名"
               value={form.circle}
               onChange={(value) =>
                 setForm((prev) => ({ ...prev, circle: value }))
               }
               required
-              list="focus-add-circle-suggestions"
+              list={ids.circleSuggestions}
               placeholder="サークル名"
             >
               {circles.length > 0 && (
-                <datalist id="focus-add-circle-suggestions">
+                <datalist id={ids.circleSuggestions}>
                   {circles.map((circle) => (
                     <option key={circle} value={circle} />
                   ))}
@@ -601,6 +770,7 @@ export function AddItemDialogView({
               )}
             </TextField>
             <TextField
+              id={ids.title}
               label="タイトル"
               value={form.title}
               onChange={(value) =>
@@ -611,9 +781,20 @@ export function AddItemDialogView({
           </div>
 
           <div className="grid grid-cols-3 gap-4">
-            <TextField label="参加日" value={dialog.eventDate} readOnly />
-            <TextField label="ブロック" value={dialog.block} readOnly />
             <TextField
+              id={ids.eventDate}
+              label="参加日"
+              value={dialog.eventDate}
+              readOnly
+            />
+            <TextField
+              id={ids.block}
+              label="ブロック"
+              value={dialog.block}
+              readOnly
+            />
+            <TextField
+              id={ids.number}
               label="ナンバー"
               value={dialog.number}
               onChange={(value) =>
@@ -625,8 +806,11 @@ export function AddItemDialogView({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
             <div className="relative">
-              <label className={labelClass}>購入金額</label>
+              <label htmlFor={ids.price} className={labelClass}>
+                購入金額
+              </label>
               <input
+                id={ids.price}
                 type="text"
                 value={form.price}
                 onChange={onPriceInputChange}
@@ -639,8 +823,11 @@ export function AddItemDialogView({
               </span>
             </div>
             <div>
-              <label className={labelClass}>クイック選択</label>
+              <label htmlFor={ids.priceQuickSelect} className={labelClass}>
+                クイック選択
+              </label>
               <select
+                id={ids.priceQuickSelect}
                 onChange={onPriceSelectChange}
                 className={formInputClass}
                 value={
@@ -661,6 +848,7 @@ export function AddItemDialogView({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <SelectField
+              id={ids.quantity}
               label="数量"
               value={form.quantity}
               onChange={(value) =>
@@ -669,6 +857,7 @@ export function AddItemDialogView({
               options={buildQuantityOptions(form.quantity).map(String)}
             />
             <SelectField
+              id={ids.purchaseStatus}
               label="購入状態"
               value={form.purchaseStatus}
               onChange={(value) =>
@@ -684,6 +873,7 @@ export function AddItemDialogView({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <TextField
+              id={ids.remarks}
               label="利用者メモ"
               value={form.remarks}
               onChange={(value) =>
@@ -692,6 +882,7 @@ export function AddItemDialogView({
               placeholder="スケブお願い"
             />
             <TextField
+              id={ids.url}
               label="URL"
               value={form.url}
               onChange={(value) => setForm((prev) => ({ ...prev, url: value }))}
@@ -701,15 +892,17 @@ export function AddItemDialogView({
         </div>
         <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex gap-2">
           <button
+            type="button"
             onClick={onClose}
             className="flex-1 py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors"
           >
             キャンセル
           </button>
           <button
+            type="button"
             onClick={onSubmit}
             disabled={!form.circle.trim()}
-            className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white rounded-lg font-medium transition-colors"
+            className="flex-1 py-2 px-4 bg-green-700 hover:bg-green-800 disabled:bg-slate-400 text-white rounded-lg font-medium transition-colors"
           >
             リストに追加
           </button>
@@ -721,6 +914,7 @@ export function AddItemDialogView({
 }
 
 function TextField({
+  id,
   label,
   value,
   onChange,
@@ -730,6 +924,7 @@ function TextField({
   placeholder,
   children,
 }: {
+  id: string;
   label: string;
   value: string;
   onChange?: (value: string) => void;
@@ -741,16 +936,19 @@ function TextField({
 }) {
   return (
     <div>
-      <label className={labelClass}>
+      <label htmlFor={id} className={labelClass}>
         {label}
         {required && (
           <>
             {" "}
-            <span className="text-red-500">*</span>
+            <span aria-hidden="true" className="text-red-500">
+              *
+            </span>
           </>
         )}
       </label>
       <input
+        id={id}
         type="text"
         value={value}
         onChange={(e) => onChange?.(e.target.value)}
@@ -759,6 +957,7 @@ function TextField({
             ? `${formInputClass} bg-slate-100 dark:bg-slate-700`
             : formInputClass
         }
+        required={required}
         readOnly={readOnly}
         list={list}
         placeholder={placeholder}
@@ -769,12 +968,14 @@ function TextField({
 }
 
 function SelectField({
+  id,
   label,
   value,
   onChange,
   options,
   labels = {},
 }: {
+  id: string;
   label: string;
   value: string;
   onChange: (value: string) => void;
@@ -783,10 +984,12 @@ function SelectField({
 }) {
   return (
     <div>
-      <label className={labelClass}>{label}</label>
+      <label htmlFor={id} className={labelClass}>
+        {label}
+      </label>
       <select
+        id={id}
         value={value}
-        aria-label={label}
         onChange={(e) => onChange(e.target.value)}
         className={formInputClass}
       >

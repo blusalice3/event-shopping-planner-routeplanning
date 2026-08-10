@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "kind": "foundation-p0a-authorities-policy/v1",
+  "bindingStatus": "unconfigured",
+  "providerCredentialEnvironmentName": "VERCEL_TOKEN",
+  "githubCredentialEnvironmentName": "GITHUB_TOKEN",
+  "applicationDatabase": {
+    "provisioningStatus": "unconfigured",
+    "credentialOwner": null,
+    "backupOwner": null,
+    "restoreOwner": null
+  },
+  "controlStore": {
+    "namespaceStatus": "unconfigured",
+    "credentialOwner": null
+  },
+  "bootstrapRecovery": {
+    "deploymentBindingSha256": null,
+    "maximumRecoverySeconds": 900,
+    "requiredRoutes": [
+      "/",
+      "/index.html",
+      "/persistence-release-a-capability.json",
+      "/sw.js"
+    ],
+    "cleanupMode": "delete-alias-and-preview-deployments"
+  },
+  "blockerCodes": [
+    "p0a-application-database-owners-unconfigured",
+    "p0a-control-store-owner-unconfigured",
+    "p0a-bootstrap-deployment-binding-unconfigured"
+  ]
+}

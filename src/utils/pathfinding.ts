@@ -1,6 +1,5 @@
 import {
   CellData,
-  PathNode,
   RouteSegment,
   DayMapData,
   RoutePathConstraint,
@@ -29,14 +28,6 @@ function isPassableCellData(cell: CellData): boolean {
   if (cell.backgroundColor && cell.backgroundColor !== "#FFFFFF") return false;
 
   return true;
-}
-
-// サブセル座標から親セル座標（1-based）を取得
-function subCellToCell(sr: number, sc: number): { row: number; col: number } {
-  return {
-    row: Math.floor(sr / SUB_CELL_RESOLUTION) + 1,
-    col: Math.floor(sc / SUB_CELL_RESOLUTION) + 1,
-  };
 }
 
 // セル座標（1-based）から中央サブセル座標（0-based）を取得
@@ -440,18 +431,6 @@ const DIRECTIONS = [
   { dr: 0, dc: 1, cost: 1 }, // 右
 ];
 
-// サブセルが特定セル内にあるかを判定
-function isSubCellInCell(
-  sr: number,
-  sc: number,
-  cellRow: number,
-  cellCol: number,
-): boolean {
-  const N = SUB_CELL_RESOLUTION;
-  const { row, col } = subCellToCell(sr, sc);
-  return row === cellRow && col === cellCol;
-}
-
 // サブセルグリッド上のA*探索（Theta*ライクなline-of-sight最適化付き）
 export type PathfindingResult = {
   path: { row: number; col: number }[];
@@ -468,8 +447,7 @@ function findSubCellPath(
   usedSubCells?: Uint32Array,
 ): PathfindingResult {
   const N = SUB_CELL_RESOLUTION;
-  const { maxRow, maxCol, maxSubRow, maxSubCol, passableCells, bufferCosts } =
-    context;
+  const { maxCol, maxSubRow, maxSubCol, passableCells, bufferCosts } = context;
   scratch.generation++;
   if (scratch.generation === 0xffffffff) {
     scratch.seenGenerations.fill(0);

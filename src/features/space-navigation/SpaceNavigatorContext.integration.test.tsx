@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   act,
   fireEvent,
@@ -80,10 +80,13 @@ function RegistrationHarness({
     [action, currentIndex, formalIndex, layoutMode],
   );
 
-  useEffect(() => navigator.register(registration), [navigator.register]);
+  const initialRegistration = useRef(registration);
+  const register = navigator.register;
+  const updateRegistration = navigator.updateRegistration;
+  useEffect(() => register(initialRegistration.current), [register]);
   useEffect(
-    () => navigator.updateRegistration(registration),
-    [navigator, registration],
+    () => updateRegistration(registration),
+    [registration, updateRegistration],
   );
   return null;
 }
@@ -444,18 +447,20 @@ describe("SpaceNavigatorContext", () => {
 });
 
 describe("useSpaceNavigatorSettings", () => {
-  beforeEach(() => {
-    localStorage.clear();
-  });
-
   it("merges saved partial values with defaults and persists updates", async () => {
-    localStorage.setItem(
-      "spaceNavigatorSettings",
-      JSON.stringify({ railVisible: false }),
-    );
+    const storedPreferences = new Map<string, string>([
+      ["spaceNavigatorSettings", JSON.stringify({ railVisible: false })],
+    ]);
+    const settingsPersistence = {
+      loadPreference: (key: string) => storedPreferences.get(key) ?? null,
+      savePreference: (key: string, value: string) => {
+        storedPreferences.set(key, value);
+      },
+    };
 
     function SettingsProbe() {
-      const { settings, updateSettings } = useSpaceNavigatorSettings();
+      const { settings, updateSettings } =
+        useSpaceNavigatorSettings(settingsPersistence);
       return (
         <>
           <output data-testid="settings">
@@ -478,7 +483,7 @@ describe("useSpaceNavigatorSettings", () => {
     fireEvent.click(screen.getByRole("button", { name: "右へ" }));
     await waitFor(() => {
       expect(
-        JSON.parse(localStorage.getItem("spaceNavigatorSettings") ?? "{}"),
+        JSON.parse(storedPreferences.get("spaceNavigatorSettings") ?? "{}"),
       ).toMatchObject({
         railVisible: false,
         footerButtonVisible: true,

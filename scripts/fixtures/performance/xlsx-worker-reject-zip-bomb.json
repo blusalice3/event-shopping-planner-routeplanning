@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "xlsx-worker-reject-zip-bomb",
+  "domain": "xlsx-worker",
+  "dataset": {
+    "generator": "zip-compression-ratio-v1",
+    "entryCount": 1,
+    "compressionRatio": 101
+  },
+  "resourcePolicyExpectation": {
+    "limitField": "maxCompressionRatio",
+    "configuredLimit": 100
+  },
+  "operation": {
+    "kind": "event-import",
+    "execution": "worker"
+  },
+  "expectedTerminal": {
+    "kind": "error",
+    "category": "resource-limit"
+  },
+  "requiredAssertions": [
+    "rejected-during-preflight",
+    "single-terminal-error",
+    "zero-domain-commits",
+    "zero-download-side-effects"
+  ],
+  "requiredTelemetry": ["durationMs", "peakMemoryDeltaBytes"]
+}

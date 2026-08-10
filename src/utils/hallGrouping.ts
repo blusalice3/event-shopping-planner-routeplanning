@@ -6,7 +6,7 @@ import {
   normalizeBlockName,
 } from "./hallFallback";
 import { findRouteLookupNumberCell } from "./mapRoutingSignature";
-import { extractNumberFromItemNumber } from "./xlsxMapParser";
+import { extractNumberFromItemNumber } from "../xlsx/domain/itemNumber";
 import { isPointInPolygonInclusive } from "./mapRoutePolygon";
 
 export type PriorityLevel = "none" | "priority" | "highest";
@@ -416,16 +416,6 @@ export function areMapRouteGroupKeysCompatible(
  * 返り値の Map への挿入順はアイテム入力順に依存（4段階ロジックの共通前処理）。
  */
 type ResolveGroupId = (item: ShoppingItem) => string | null;
-
-function bucketItemsByGroupId(
-  items: ShoppingItem[],
-  dayMapData: DayMapData | null,
-  hallDefinitions: HallDefinition[],
-): Map<string | null, ShoppingItem[]> {
-  return bucketItemsByGroupIdWithResolver(items, (item) =>
-    getItemGroupId(item, dayMapData, hallDefinitions),
-  );
-}
 
 function bucketItemsByGroupIdWithResolver(
   items: ShoppingItem[],

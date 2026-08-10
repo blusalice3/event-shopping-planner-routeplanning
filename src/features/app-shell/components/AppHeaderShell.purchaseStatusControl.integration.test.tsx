@@ -24,143 +24,164 @@ const renderSettings = (
   return { setPurchaseStatusControlMode };
 };
 
-const minimalAppHeaderShellProps = (): ComponentProps<
-  typeof AppHeaderShell
-> => ({
-  activeEventDate: "Day1",
-  activeEventName: "Event",
-  activeTab: "Day1",
-  blockSortDirection: null,
-  currentHalls: [],
-  currentMapData: null,
-  currentMapTabName: null,
-  currentMapTabRotationState: {
-    initialAngle: 0,
-    mapTabAngle: 0,
-    focusModeAngle: 0,
+type MutableDomainFields<T> = {
+  -readonly [Domain in keyof T]: {
+    -readonly [Field in keyof T[Domain]]: T[Domain][Field];
+  };
+};
+
+type MutableAppHeaderShellProps = {
+  model: MutableDomainFields<ComponentProps<typeof AppHeaderShell>["model"]>;
+  actions: MutableDomainFields<
+    ComponentProps<typeof AppHeaderShell>["actions"]
+  >;
+};
+
+const minimalAppHeaderShellProps = (): MutableAppHeaderShellProps => ({
+  model: {
+    navigation: {
+      activeEventDate: "Day1",
+      activeEventName: "Event",
+      activeTab: "Day1",
+      currentMode: "execute",
+      eventDates: ["Day1"],
+      isMapTab: false,
+    },
+    map: {
+      currentHalls: [],
+      currentMapData: null,
+      currentMapTabName: null,
+      currentMapTabRotationState: {
+        initialAngle: 0,
+        mapTabAngle: 0,
+        focusModeAngle: 0,
+      },
+      globalHallOrderHalls: [],
+      globalHallOrderMapTabName: null,
+      hasUndefinedPriorityItems: false,
+      mapHallSelectorOpen: false,
+      mapIsRouteVisible: false,
+      mapSelectedHallId: "all",
+      mapSmartInsertEnabled: false,
+      mapSmartInsertMode: "map",
+      mapTabMenuOpen: null,
+      mapToggleButtonRef: { current: null },
+      mapToggleLongPressFiredRef: { current: false },
+      mapToggleLongPressRef: { current: null },
+      mapToggleMenuRef: { current: null },
+      mapViewActive: false,
+      smartInsertLongPressRef: { current: null },
+      smartInsertLongPressTriggeredRef: { current: false },
+    },
+    list: {
+      blockSortDirection: null,
+      candidateMovePlan: {
+        requested: [],
+        effective: [],
+        implicit: [],
+        excluded: { missing: [], wrongDate: [], notInSourceColumn: [] },
+      },
+      currentSearchIndex: -1,
+      executeMovePlan: {
+        requested: [],
+        effective: [],
+        implicit: [],
+        excluded: { missing: [], wrongDate: [], notInSourceColumn: [] },
+      },
+      executeSpaceGroupingEnabled: false,
+      hasCandidateSelection: false,
+      hasExecuteSelection: false,
+      items: [],
+      searchKeyword: "",
+      selectedItemIds: new Set(),
+      showMoveButtons: false,
+      sortDisplayLabel: "Manual",
+      visibleSearchMatches: [],
+    },
+    preferences: {
+      DEFAULT_OUTLINE_STYLE: "rounded",
+      DEFAULT_PURCHASE_STATUS_CONTROL_MODE: "cycle",
+      DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY: true,
+      DEFAULT_UI_VISIBILITY,
+      disableLimitedPurchaseQuantityCheck: false,
+      disablePriceUndefinedCheck: false,
+      numberCellOutlineStyle: "rounded",
+      postEventDistributionCheckEnabled: true,
+      purchaseStatusControlMode: "cycle",
+      skipLimitedPurchaseForSingleQuantity: true,
+      themeMode: "system",
+      uiVisibilitySettings: DEFAULT_UI_VISIBILITY,
+      zoomLevel: 100,
+    },
+    ui: {
+      layoutMode: "pc",
+      mainContentVisible: true,
+      showHeaderBar: true,
+      showTabBar: false,
+      TabButton: ({ label }) => <button>{label}</button>,
+      uiSettingsPanelOpen: true,
+    },
   },
-  currentMode: "execute",
-  currentSearchIndex: -1,
-  DEFAULT_OUTLINE_STYLE: "rounded",
-  DEFAULT_PURCHASE_STATUS_CONTROL_MODE: "cycle",
-  DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY: true,
-  DEFAULT_UI_VISIBILITY,
-  disablePriceUndefinedCheck: false,
-  disableLimitedPurchaseQuantityCheck: false,
-  skipLimitedPurchaseForSingleQuantity: true,
-  postEventDistributionCheckEnabled: true,
-  eventDates: ["Day1"],
-  executeSpaceGroupingEnabled: false,
-  getHallExecuteCount: vi.fn(() => 0),
-  getHallTotalItemCount: vi.fn(() => 0),
-  getMapTabForDate: vi.fn(() => null),
-  globalHallOrderHalls: [],
-  globalHallOrderMapTabName: null,
-  handleBlockSortToggle: vi.fn(),
-  handleBlockSortToggleCandidate: vi.fn(),
-  handleBulkSort: vi.fn(),
-  handleClearRangeSelection: vi.fn(),
-  handleClearSelection: vi.fn(),
-  handleMapTabRotationAngleChange: vi.fn(),
-  handleMoveToExecuteColumn: vi.fn(),
-  handleRemoveFromExecuteColumn: vi.fn(),
-  handleSearchNext: vi.fn(),
-  handleSetViewMode: vi.fn(),
-  handleSortToggle: vi.fn(),
-  handleZoomChange: vi.fn(),
-  hasCandidateSelection: false,
-  hasExecuteSelection: false,
-  candidateMovePlan: {
-    requested: [],
-    effective: [],
-    implicit: [],
-    excluded: { missing: [], wrongDate: [], notInSourceColumn: [] },
+  actions: {
+    navigation: {
+      getMapTabForDate: vi.fn(() => null),
+      handleSetViewMode: vi.fn(),
+      onShowEventList: vi.fn(),
+      onShowImport: vi.fn(),
+      onToggleEventSurface: vi.fn(),
+    },
+    map: {
+      getHallExecuteCount: vi.fn(() => 0),
+      getHallTotalItemCount: vi.fn(() => 0),
+      handleMapTabRotationAngleChange: vi.fn(),
+      openVisitListPanel: vi.fn(),
+      setBlockDefinitionMode: vi.fn(),
+      setGlobalHallOrderPanelOpen: vi.fn(),
+      setHallDefinitionMode: vi.fn(),
+      setMapHallSelectorOpen: vi.fn(),
+      setMapIsHallOrderOpen: vi.fn(),
+      setMapIsRouteVisible: vi.fn(),
+      setMapSelectedHallId: vi.fn(),
+      setMapSmartInsertEnabled: vi.fn(),
+      setMapSmartInsertMode: vi.fn(),
+      setMapTabMenuOpen: vi.fn(),
+      setSimpleHallDefinitionMode: vi.fn(),
+      showSmartInsertToast: vi.fn(),
+    },
+    list: {
+      handleBlockSortToggle: vi.fn(),
+      handleBlockSortToggleCandidate: vi.fn(),
+      handleBulkSort: vi.fn(),
+      handleClearRangeSelection: vi.fn(),
+      handleClearSelection: vi.fn(),
+      handleMoveToExecuteColumn: vi.fn(),
+      handleRemoveFromExecuteColumn: vi.fn(),
+      handleSearchNext: vi.fn(),
+      handleSortToggle: vi.fn(),
+      setExecuteCollapsedSpaces: vi.fn(),
+      setExecuteSpaceGroupingEnabled: vi.fn(),
+      setItemToEdit: vi.fn(),
+      setSearchKeyword: vi.fn(),
+      setSelectedBlockFilters: vi.fn(),
+    },
+    preferences: {
+      handleZoomChange: vi.fn(),
+      setDisableLimitedPurchaseQuantityCheck: vi.fn(),
+      setDisablePriceUndefinedCheck: vi.fn(),
+      setNumberCellOutlineStyle: vi.fn(),
+      setPostEventDistributionCheckEnabled: vi.fn(),
+      setPurchaseStatusControlMode: vi.fn(),
+      setSkipLimitedPurchaseForSingleQuantity: vi.fn(),
+      setThemeMode: vi.fn(),
+      setUiVisibilitySettings: vi.fn(),
+      updateUIVisibilityConfig: vi.fn(),
+    },
+    ui: {
+      onCloseUiSettingsPanel: vi.fn(),
+      onToggleUiSettingsPanel: vi.fn(),
+      setLayoutMode: vi.fn(),
+    },
   },
-  executeMovePlan: {
-    requested: [],
-    effective: [],
-    implicit: [],
-    excluded: { missing: [], wrongDate: [], notInSourceColumn: [] },
-  },
-  hasUndefinedPriorityItems: false,
-  isMapTab: false,
-  items: [],
-  itemToEdit: null,
-  layoutMode: "pc",
-  mainContentVisible: true,
-  mapHallSelectorOpen: false,
-  mapIsRouteVisible: false,
-  mapSelectedHallId: "all",
-  mapSmartInsertEnabled: false,
-  mapSmartInsertMode: "map",
-  mapTabMenuOpen: null,
-  mapTabMenuPosition: { left: 0, top: 0 },
-  mapToggleButtonRef: { current: null },
-  mapToggleLongPressFiredRef: { current: false },
-  mapToggleLongPressRef: { current: null },
-  mapToggleMenuRef: { current: null },
-  mapViewActive: false,
-  numberCellOutlineStyle: "rounded",
-  openVisitListPanel: vi.fn(),
-  onCloseUiSettingsPanel: vi.fn(),
-  onToggleUiSettingsPanel: vi.fn(),
-  purchaseStatusControlMode: "cycle",
-  searchKeyword: "",
-  selectedItemIds: new Set(),
-  setActiveEventName: vi.fn(),
-  setActiveTab: vi.fn(),
-  setBlockDefinitionMode: vi.fn(),
-  setExecuteCollapsedSpaces: vi.fn(),
-  setExecuteSpaceGroupingEnabled: vi.fn(),
-  setGlobalHallOrderPanelOpen: vi.fn(),
-  setHallDefinitionMode: vi.fn(),
-  setItemToEdit: vi.fn(),
-  setLayoutMode: vi.fn(),
-  setMapHallSelectorOpen: vi.fn(),
-  setMapIsHallOrderOpen: vi.fn(),
-  setMapIsRouteVisible: vi.fn(),
-  setMapSelectedHallId: vi.fn(),
-  setMapSmartInsertEnabled: vi.fn(),
-  setMapSmartInsertMode: vi.fn(),
-  setMapTabMenuOpen: vi.fn(),
-  setMapTabMenuPosition: vi.fn(),
-  setMapViewActive: vi.fn(),
-  setDisablePriceUndefinedCheck: vi.fn(),
-  setDisableLimitedPurchaseQuantityCheck: vi.fn(),
-  setSkipLimitedPurchaseForSingleQuantity: vi.fn(),
-  setPostEventDistributionCheckEnabled: vi.fn(),
-  setNumberCellOutlineStyle: vi.fn(),
-  setPurchaseStatusControlMode: vi.fn(),
-  setSearchKeyword: vi.fn(),
-  setSelectedBlockFilters: vi.fn(),
-  setSimpleHallDefinitionMode: vi.fn(),
-  setThemeMode: vi.fn(),
-  setUiVisibilitySettings: vi.fn(),
-  showHeaderBar: true,
-  showMoveButtons: false,
-  showSmartInsertToast: vi.fn(),
-  showTabBar: false,
-  smartInsertLongPressRef: { current: null },
-  smartInsertLongPressTriggeredRef: { current: false },
-  sortLabels: {
-    Manual: "Manual",
-    Postpone: "Postpone",
-    Late: "Late",
-    Absent: "Absent",
-    SoldOut: "SoldOut",
-    None: "None",
-    Purchased: "Purchased",
-    LimitedPurchase: "LimitedPurchase",
-  },
-  sortDisplayLabel: "Manual",
-  sortState: "Manual",
-  TabButton: ({ label }) => <button>{label}</button>,
-  themeMode: "system",
-  uiSettingsPanelOpen: true,
-  uiVisibilitySettings: DEFAULT_UI_VISIBILITY,
-  updateUIVisibilityConfig: vi.fn(),
-  visibleSearchMatches: [],
-  zoomLevel: 100,
 });
 
 describe("PurchaseStatusControlModeSettings", () => {
@@ -232,7 +253,9 @@ describe("AppHeaderShell purchase status settings integration", () => {
 
     fireEvent.change(zoomSelect, { target: { value: "125" } });
 
-    expect(props.handleZoomChange).toHaveBeenCalledWith(125);
+    expect(props.actions.preferences.handleZoomChange).toHaveBeenCalledWith(
+      125,
+    );
   });
 
   it("changes the persistence status visibility in the draft settings", () => {
@@ -241,8 +264,11 @@ describe("AppHeaderShell purchase status settings integration", () => {
 
     fireEvent.click(screen.getByRole("checkbox", { name: /保存状態を表示/ }));
 
-    expect(props.setUiVisibilitySettings).toHaveBeenCalledOnce();
-    const update = vi.mocked(props.setUiVisibilitySettings).mock.calls[0][0];
+    expect(
+      props.actions.preferences.setUiVisibilitySettings,
+    ).toHaveBeenCalledOnce();
+    const update = vi.mocked(props.actions.preferences.setUiVisibilitySettings)
+      .mock.calls[0][0];
     expect(typeof update).toBe("function");
     if (typeof update === "function") {
       expect(update(DEFAULT_UI_VISIBILITY)).toEqual(
@@ -261,27 +287,27 @@ describe("AppHeaderShell purchase status settings integration", () => {
       })[0],
     );
 
-    expect(props.updateUIVisibilityConfig).toHaveBeenCalledWith(
-      "focus_sp_mapOn",
-      "header",
-      true,
-    );
-    expect(props.setUiVisibilitySettings).not.toHaveBeenCalled();
+    expect(
+      props.actions.preferences.updateUIVisibilityConfig,
+    ).toHaveBeenCalledWith("focus_sp_mapOn", "header", true);
+    expect(
+      props.actions.preferences.setUiVisibilitySettings,
+    ).not.toHaveBeenCalled();
 
     fireEvent.click(document.querySelector(".fixed.inset-0.z-40")!);
-    expect(props.onCloseUiSettingsPanel).toHaveBeenCalledOnce();
+    expect(props.actions.ui.onCloseUiSettingsPanel).toHaveBeenCalledOnce();
   });
 });
 
 describe("AppHeaderShell move plan integration", () => {
   it("shows selected and effective candidate counts and submits explicit IDs", () => {
     const props = minimalAppHeaderShellProps();
-    props.currentMode = "edit";
-    props.uiSettingsPanelOpen = false;
-    props.showMoveButtons = true;
-    props.hasCandidateSelection = true;
-    props.selectedItemIds = new Set(["a", "b"]);
-    props.items = [
+    props.model.navigation.currentMode = "edit";
+    props.model.ui.uiSettingsPanelOpen = false;
+    props.model.list.showMoveButtons = true;
+    props.model.list.hasCandidateSelection = true;
+    props.model.list.selectedItemIds = new Set(["a", "b"]);
+    props.model.list.items = [
       {
         id: "a",
         circle: "A",
@@ -295,7 +321,7 @@ describe("AppHeaderShell move plan integration", () => {
         remarks: "",
       },
     ];
-    props.candidateMovePlan = {
+    props.model.list.candidateMovePlan = {
       requested: ["a", "b"],
       effective: ["a", "b", "c"],
       implicit: ["c"],
@@ -309,17 +335,20 @@ describe("AppHeaderShell move plan integration", () => {
     });
     fireEvent.click(moveButton);
 
-    expect(props.handleMoveToExecuteColumn).toHaveBeenCalledWith(["a", "b"]);
+    expect(props.actions.list.handleMoveToExecuteColumn).toHaveBeenCalledWith([
+      "a",
+      "b",
+    ]);
   });
 
   it("keeps the concise count when the move plan has no implicit additions", () => {
     const props = minimalAppHeaderShellProps();
-    props.currentMode = "edit";
-    props.uiSettingsPanelOpen = false;
-    props.showMoveButtons = true;
-    props.hasExecuteSelection = true;
-    props.selectedItemIds = new Set(["a", "b"]);
-    props.items = [
+    props.model.navigation.currentMode = "edit";
+    props.model.ui.uiSettingsPanelOpen = false;
+    props.model.list.showMoveButtons = true;
+    props.model.list.hasExecuteSelection = true;
+    props.model.list.selectedItemIds = new Set(["a", "b"]);
+    props.model.list.items = [
       {
         id: "a",
         circle: "A",
@@ -333,7 +362,7 @@ describe("AppHeaderShell move plan integration", () => {
         remarks: "",
       },
     ];
-    props.executeMovePlan = {
+    props.model.list.executeMovePlan = {
       requested: ["a", "b"],
       effective: ["a", "b"],
       implicit: [],
@@ -353,8 +382,8 @@ describe("AppHeaderShell move plan integration", () => {
 describe("AppHeaderShell range reset integration", () => {
   it("clears range endpoints when execute grouping changes", () => {
     const props = minimalAppHeaderShellProps();
-    props.uiSettingsPanelOpen = false;
-    props.items = [
+    props.model.ui.uiSettingsPanelOpen = false;
+    props.model.list.items = [
       {
         id: "a",
         circle: "A",
@@ -372,7 +401,47 @@ describe("AppHeaderShell range reset integration", () => {
     render(<AppHeaderShell {...props} />);
     fireEvent.click(screen.getByRole("button", { name: "スペース別" }));
 
-    expect(props.handleClearRangeSelection).toHaveBeenCalledOnce();
-    expect(props.setExecuteCollapsedSpaces).toHaveBeenCalledWith(new Set());
+    expect(props.actions.list.handleClearRangeSelection).toHaveBeenCalledOnce();
+    expect(props.actions.list.setExecuteCollapsedSpaces).toHaveBeenCalledWith(
+      new Set(),
+    );
+  });
+});
+
+describe("AppHeaderShell typed navigation integration", () => {
+  it("routes event-list and map actions through navigation commands", () => {
+    const props = minimalAppHeaderShellProps();
+    props.model.ui.uiSettingsPanelOpen = false;
+    props.model.ui.showTabBar = true;
+    props.actions.navigation.getMapTabForDate = vi.fn(() => "Day1Map");
+    props.model.ui.TabButton = ({ label, onClick }) => (
+      <button onClick={onClick}>{label}</button>
+    );
+
+    render(<AppHeaderShell {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "イベント一覧" }));
+    expect(props.actions.navigation.onShowEventList).toHaveBeenCalledOnce();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "マップ表示に切り替え" }),
+    );
+    expect(
+      props.actions.navigation.onToggleEventSurface,
+    ).toHaveBeenCalledOnce();
+  });
+
+  it("routes new-list creation through the typed import command", () => {
+    const props = minimalAppHeaderShellProps();
+    props.model.navigation.activeEventName = null;
+    props.model.navigation.activeTab = "eventList";
+    props.model.ui.mainContentVisible = false;
+    props.model.ui.uiSettingsPanelOpen = false;
+    props.model.ui.showTabBar = true;
+
+    render(<AppHeaderShell {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "新規リスト作成" }));
+
+    expect(props.actions.navigation.onShowImport).toHaveBeenCalledWith(null);
   });
 });

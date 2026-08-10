@@ -2,7 +2,10 @@ import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
 import type { ShoppingItem } from "../types/item";
 import { DEFAULT_BLOCK_DETECTION_SETTINGS } from "../types/map";
-import { exportToXlsx, importFromXlsx } from "./exportImport";
+import {
+  exportToXlsx,
+  importFromXlsx,
+} from "../xlsx/engine/eventWorkbookEngine";
 
 const EVENT_NAME = "設定復元イベント";
 

@@ -1,7 +1,10 @@
 import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
 import type { DayMapData } from "../types/map";
-import { findZeroBlockMapSheets, parseMapFile } from "./xlsxMapParser";
+import {
+  findZeroBlockMapSheets,
+  parseMapFile,
+} from "../xlsx/engine/mapWorkbookEngine";
 
 const createMap = (sheetName: string, blockCount: number): DayMapData => ({
   sheetName,

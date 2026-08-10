@@ -1,7 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import ReactDOM from "react-dom";
 import { SpaceNavigatorFooterButton } from "../../features/space-navigation/components/SpaceNavigatorFooterButton";
 import { useOptionalSpaceNavigator } from "../../features/space-navigation/SpaceNavigatorContext";
+import {
+  clearFooterHeightAttribute,
+  setFooterHeightAttribute,
+} from "../../styles/runtimeLayoutAttributes";
 
 interface FocusModeFooterPortalProps {
   compact?: boolean;
@@ -36,7 +40,8 @@ export function FocusModeFooterPortal({
   onToggleMapVisibility,
   onLayoutModeChange,
 }: FocusModeFooterPortalProps) {
-  const footerRef = useRef<HTMLDivElement>(null);
+  const footerRef = useRef<HTMLElement>(null);
+  const footerHeightOwnerId = useId();
   const spaceNavigator = useOptionalSpaceNavigator();
   const spaceNavigatorFooterEnabled = Boolean(
     spaceNavigator?.settings.footerButtonVisible,
@@ -46,34 +51,29 @@ export function FocusModeFooterPortal({
     const element = footerRef.current;
     if (!element) return;
     const updateHeight = () => {
-      document.documentElement.style.setProperty(
-        "--footer-height",
-        `${element.offsetHeight}px`,
-      );
+      setFooterHeightAttribute(footerHeightOwnerId, element.offsetHeight);
     };
     const observer = new ResizeObserver(updateHeight);
     observer.observe(element);
     updateHeight();
     return () => {
       observer.disconnect();
-      document.documentElement.style.setProperty("--footer-height", "0px");
+      clearFooterHeightAttribute(footerHeightOwnerId);
     };
-  }, []);
+  }, [footerHeightOwnerId]);
 
   return ReactDOM.createPortal(
-    <div
+    <footer
       ref={footerRef}
       id="focus-mode-footer"
+      aria-label="集中モード操作"
       className={`fixed bottom-0 left-0 right-0 ${
         compact
           ? "bg-white/90 dark:bg-slate-800/90"
           : "bg-white/80 dark:bg-slate-800/80"
-      } backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20`}
-      style={{
-        paddingBottom: spaceNavigatorFooterEnabled
-          ? "env(safe-area-inset-bottom)"
-          : undefined,
-      }}
+      } ${
+        spaceNavigatorFooterEnabled ? "pb-[env(safe-area-inset-bottom)]" : ""
+      } z-20 border-t border-slate-200 shadow-t-lg backdrop-blur-sm dark:border-slate-700`}
     >
       <div
         className={
@@ -99,7 +99,7 @@ export function FocusModeFooterPortal({
               {currentPhaseVisitsLength}
             </span>
             {!compact && (
-              <span className="text-sm text-slate-500 dark:text-slate-400 ml-3 opacity-60">
+              <span className="ml-3 text-sm text-slate-500 dark:text-slate-400">
                 ({currentVisitNumber}/{totalVisits})
               </span>
             )}
@@ -198,7 +198,7 @@ export function FocusModeFooterPortal({
           </div>
         </div>
       </div>
-    </div>,
+    </footer>,
     document.body,
   );
 }

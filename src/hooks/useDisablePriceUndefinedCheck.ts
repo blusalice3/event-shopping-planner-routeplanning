@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
+import type { PreferencePersistencePort } from "../app/ports/PersistenceCommandPort";
 
 const STORAGE_KEY = "disablePriceUndefinedCheck";
 
-export function useDisablePriceUndefinedCheck() {
+export function useDisablePriceUndefinedCheck(
+  preferences: PreferencePersistencePort,
+) {
   const [disablePriceUndefinedCheck, setDisablePriceUndefinedCheck] =
     useState<boolean>(() => {
       try {
-        const saved = localStorage.getItem(STORAGE_KEY);
+        const saved = preferences.loadPreference(STORAGE_KEY);
         if (saved !== null) return saved === "true";
       } catch {
         // Ignore malformed localStorage payload.
@@ -15,8 +18,8 @@ export function useDisablePriceUndefinedCheck() {
     });
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, String(disablePriceUndefinedCheck));
-  }, [disablePriceUndefinedCheck]);
+    preferences.savePreference(STORAGE_KEY, String(disablePriceUndefinedCheck));
+  }, [disablePriceUndefinedCheck, preferences]);
 
   return { disablePriceUndefinedCheck, setDisablePriceUndefinedCheck } as const;
 }

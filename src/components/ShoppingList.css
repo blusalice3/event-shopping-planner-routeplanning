@@ -1,0 +1,30 @@
+.esp-shopping-touch-clone {
+  position: fixed !important;
+  z-index: 9999 !important;
+  pointer-events: none !important;
+  opacity: 0.8 !important;
+  transform: scale(0.95) !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 25px rgb(0 0 0 / 30%) !important;
+  transition: none !important;
+}
+
+.esp-shopping-touch-clone-hidden {
+  display: none !important;
+}
+
+.esp-virtual-list {
+  position: relative;
+}
+
+.esp-virtual-list-canvas {
+  position: relative;
+  width: 100%;
+}
+
+.esp-virtual-list-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}

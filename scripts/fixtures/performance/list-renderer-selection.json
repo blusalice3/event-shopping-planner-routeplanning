@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "list-renderer-selection",
+  "domain": "shopping-list",
+  "dataset": {
+    "generator": "shopping-list-seeded-v1",
+    "seed": 1967,
+    "rowCount": 10000,
+    "grouped": false
+  },
+  "operation": {
+    "rendererPreference": "auto",
+    "interaction": "eligibility-matrix"
+  },
+  "eligibilityMatrix": [
+    {
+      "case": "eligible-single-column",
+      "columnCount": 1,
+      "zoomPercent": 100,
+      "dragActive": false,
+      "modalActive": false,
+      "recoveryActive": false,
+      "expectedRenderer": "virtual"
+    },
+    {
+      "case": "drag-active",
+      "columnCount": 1,
+      "zoomPercent": 100,
+      "dragActive": true,
+      "modalActive": false,
+      "recoveryActive": false,
+      "expectedRenderer": "full"
+    },
+    {
+      "case": "multiple-columns",
+      "columnCount": 2,
+      "zoomPercent": 100,
+      "dragActive": false,
+      "modalActive": false,
+      "recoveryActive": false,
+      "expectedRenderer": "full"
+    },
+    {
+      "case": "unsupported-zoom",
+      "columnCount": 1,
+      "zoomPercent": 125,
+      "dragActive": false,
+      "modalActive": false,
+      "recoveryActive": false,
+      "expectedRenderer": "full"
+    },
+    {
+      "case": "modal-active",
+      "columnCount": 1,
+      "zoomPercent": 100,
+      "dragActive": false,
+      "modalActive": true,
+      "recoveryActive": false,
+      "expectedRenderer": "full"
+    },
+    {
+      "case": "recovery-active",
+      "columnCount": 1,
+      "zoomPercent": 100,
+      "dragActive": false,
+      "modalActive": false,
+      "recoveryActive": true,
+      "expectedRenderer": "disabled",
+      "expectedSurface": "recovery-screen"
+    }
+  ],
+  "requiredAssertions": [
+    "all-eligibility-cases-match",
+    "unknown-state-selects-full",
+    "drag-selects-full-before-reorder",
+    "selection-reason-exposed",
+    "recovery-disables-list-graph"
+  ],
+  "requiredTelemetry": ["durationMs", "rendererMismatchCount"]
+}

@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
 import { NumberCellOutlineStyle } from "../types/map";
+import type { PreferencePersistencePort } from "../app/ports/PersistenceCommandPort";
 
 const STORAGE_KEY = "numberCellOutlineStyle";
 const DEFAULT_STYLE: NumberCellOutlineStyle = "rounded";
 
-export function useNumberCellOutlineStyle() {
+export function useNumberCellOutlineStyle(
+  preferences: PreferencePersistencePort,
+) {
   const [numberCellOutlineStyle, setNumberCellOutlineStyle] =
     useState<NumberCellOutlineStyle>(() => {
       try {
-        const saved = localStorage.getItem(STORAGE_KEY);
+        const saved = preferences.loadPreference(STORAGE_KEY);
         if (saved && ["rounded", "square", "none", "dashed"].includes(saved)) {
           return saved as NumberCellOutlineStyle;
         }
@@ -19,8 +22,8 @@ export function useNumberCellOutlineStyle() {
     });
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, numberCellOutlineStyle);
-  }, [numberCellOutlineStyle]);
+    preferences.savePreference(STORAGE_KEY, numberCellOutlineStyle);
+  }, [numberCellOutlineStyle, preferences]);
 
   return {
     numberCellOutlineStyle,

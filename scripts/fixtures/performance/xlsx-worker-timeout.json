@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "xlsx-worker-timeout",
+  "domain": "xlsx-worker",
+  "dataset": {
+    "generator": "non-terminating-worker-harness-v1"
+  },
+  "operation": {
+    "kind": "event-import",
+    "execution": "worker",
+    "requestTimeoutMs": 30000
+  },
+  "faultInjection": {
+    "method": "playwright-exact-worker-response-substitution-v1",
+    "replacementRef": "scripts/performance/fault-workers/timeout.worker.js",
+    "replacementSha256": "c494a8b4d05c8676c8b7b8606d7ce7e1cb38aa30a2d5b463a0752fc4b0f85ca7",
+    "beaconPath": "/__foundation-performance-worker-beacon"
+  },
+  "resourcePolicyExpectation": {
+    "limitField": "maxWallTimeMs",
+    "configuredLimitMs": 30000
+  },
+  "expectedTerminal": {
+    "kind": "error",
+    "category": "timeout"
+  },
+  "requiredAssertions": [
+    "cancel-message-observed",
+    "worker-terminated",
+    "late-result-ignored",
+    "single-timeout-error-dialog",
+    "zero-domain-commits",
+    "zero-download-side-effects"
+  ],
+  "requiredTelemetry": ["timeoutAcknowledgementMs"]
+}

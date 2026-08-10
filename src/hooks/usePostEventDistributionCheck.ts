@@ -1,15 +1,18 @@
 import { useEffect, useState } from "react";
+import type { PreferencePersistencePort } from "../app/ports/PersistenceCommandPort";
 
 const STORAGE_KEY = "postEventDistributionCheckEnabled";
 export const DEFAULT_POST_EVENT_DISTRIBUTION_CHECK_ENABLED = true;
 
-export function usePostEventDistributionCheck() {
+export function usePostEventDistributionCheck(
+  preferences: PreferencePersistencePort,
+) {
   const [
     postEventDistributionCheckEnabled,
     setPostEventDistributionCheckEnabled,
   ] = useState<boolean>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = preferences.loadPreference(STORAGE_KEY);
       if (saved === "true") return true;
       if (saved === "false") return false;
     } catch {
@@ -20,14 +23,14 @@ export function usePostEventDistributionCheck() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(
+      preferences.savePreference(
         STORAGE_KEY,
         String(postEventDistributionCheckEnabled),
       );
     } catch {
       // Ignore unavailable localStorage writes.
     }
-  }, [postEventDistributionCheckEnabled]);
+  }, [postEventDistributionCheckEnabled, preferences]);
 
   return {
     postEventDistributionCheckEnabled,

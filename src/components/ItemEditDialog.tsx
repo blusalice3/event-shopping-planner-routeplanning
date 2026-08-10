@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useId, useMemo } from "react";
 import type { ShoppingItem, PurchaseStatus } from "../types/item";
 import type { HallDefinition } from "../types/map";
 import { findHallsByBlockName } from "../utils/hallFallback";
@@ -18,6 +18,7 @@ import {
   validateLimitedPurchaseQuantities,
   type LimitedPurchaseValidationError,
 } from "../utils/purchaseQuantity";
+import { useModalDialogBehavior } from "../hooks/useModalDialogBehavior";
 
 interface ItemEditDialogProps {
   item: ShoppingItem;
@@ -54,6 +55,27 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
   halls = [],
   onPriorityChange,
 }) => {
+  const fieldIdPrefix = useId();
+  const dialogTitleId = `${fieldIdPrefix}-title`;
+  const dialogDescriptionId = `${fieldIdPrefix}-description`;
+  const fieldIds = {
+    circle: `${fieldIdPrefix}-circle`,
+    circleSuggestions: `${fieldIdPrefix}-circle-suggestions`,
+    title: `${fieldIdPrefix}-item-title`,
+    eventDate: `${fieldIdPrefix}-event-date`,
+    block: `${fieldIdPrefix}-block`,
+    number: `${fieldIdPrefix}-number`,
+    price: `${fieldIdPrefix}-price`,
+    priceQuickSelect: `${fieldIdPrefix}-price-quick-select`,
+    limitedActual: `${fieldIdPrefix}-limited-actual`,
+    limitedPlanned: `${fieldIdPrefix}-limited-planned`,
+    quantity: `${fieldIdPrefix}-quantity`,
+    purchaseStatus: `${fieldIdPrefix}-purchase-status`,
+    manualHall: `${fieldIdPrefix}-manual-hall`,
+    priority: `${fieldIdPrefix}-priority`,
+    remarks: `${fieldIdPrefix}-remarks`,
+    url: `${fieldIdPrefix}-url`,
+  } as const;
   const [form, setForm] = useState({
     circle: item.circle,
     title: item.title,
@@ -84,6 +106,10 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
     item: ShoppingItem;
     planned: number;
   } | null>(null);
+  const { dialogRef, onDialogKeyDown } = useModalDialogBehavior({
+    isOpen: true,
+    onEscape: onClose,
+  });
 
   // 現在のブロックが属するホール候補（blockNamesに含まれているホール）
   const blockHallCandidates = useMemo(
@@ -214,34 +240,46 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={dialogTitleId}
+        aria-describedby={dialogDescriptionId}
         className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-lg w-full mx-4 overflow-hidden max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={onDialogKeyDown}
       >
-        <div className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white p-4">
-          <h2 className="text-lg font-bold">アイテム編集</h2>
-          <p className="text-sm opacity-80 mt-1">
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-4">
+          <h2 id={dialogTitleId} className="text-lg font-bold">
+            アイテム編集
+          </h2>
+          <p id={dialogDescriptionId} className="mt-1 text-sm">
             {form.eventDate} {form.block}-{form.number}
           </p>
         </div>
         <div className="p-4 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className={labelClass}>
-                サークル名 <span className="text-red-500">*</span>
+              <label htmlFor={fieldIds.circle} className={labelClass}>
+                サークル名{" "}
+                <span aria-hidden="true" className="text-red-500">
+                  *
+                </span>
               </label>
               <input
+                id={fieldIds.circle}
                 type="text"
+                required
                 value={form.circle}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, circle: e.target.value }))
                 }
                 className={formInputClass}
                 placeholder="サークル名"
-                autoFocus
-                list="edit-circle-suggestions"
+                list={fieldIds.circleSuggestions}
               />
               {circleSuggestions.length > 0 && (
-                <datalist id="edit-circle-suggestions">
+                <datalist id={fieldIds.circleSuggestions}>
                   {circleSuggestions.map((c) => (
                     <option key={c} value={c} />
                   ))}
@@ -249,8 +287,11 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               )}
             </div>
             <div>
-              <label className={labelClass}>タイトル</label>
+              <label htmlFor={fieldIds.title} className={labelClass}>
+                タイトル
+              </label>
               <input
+                id={fieldIds.title}
                 type="text"
                 value={form.title}
                 onChange={(e) =>
@@ -263,8 +304,11 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
           </div>
           <div className="grid grid-cols-3 gap-4">
             <div>
-              <label className={labelClass}>参加日</label>
+              <label htmlFor={fieldIds.eventDate} className={labelClass}>
+                参加日
+              </label>
               <input
+                id={fieldIds.eventDate}
                 type="text"
                 value={form.eventDate}
                 onChange={(e) =>
@@ -274,8 +318,11 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               />
             </div>
             <div>
-              <label className={labelClass}>ブロック</label>
+              <label htmlFor={fieldIds.block} className={labelClass}>
+                ブロック
+              </label>
               <input
+                id={fieldIds.block}
                 type="text"
                 value={form.block}
                 onChange={(e) =>
@@ -285,8 +332,11 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               />
             </div>
             <div>
-              <label className={labelClass}>ナンバー</label>
+              <label htmlFor={fieldIds.number} className={labelClass}>
+                ナンバー
+              </label>
               <input
+                id={fieldIds.number}
                 type="text"
                 value={form.number}
                 onChange={(e) =>
@@ -314,8 +364,11 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
             <div className="relative">
-              <label className={labelClass}>購入金額（利用者が編集）</label>
+              <label htmlFor={fieldIds.price} className={labelClass}>
+                購入金額（利用者が編集）
+              </label>
               <input
+                id={fieldIds.price}
                 type="text"
                 value={form.price}
                 onChange={handlePriceInputChange}
@@ -329,8 +382,11 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               </span>
             </div>
             <div>
-              <label className={labelClass}>クイック選択</label>
+              <label htmlFor={fieldIds.priceQuickSelect} className={labelClass}>
+                クイック選択
+              </label>
               <select
+                id={fieldIds.priceQuickSelect}
                 onChange={handlePriceSelectChange}
                 className={formInputClass}
                 value={
@@ -352,8 +408,14 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
             {form.purchaseStatus === "LimitedPurchase" ? (
               <>
                 <div>
-                  <label className={labelClass}>実購入数</label>
+                  <label
+                    htmlFor={fieldIds.limitedActual}
+                    className={labelClass}
+                  >
+                    実購入数
+                  </label>
                   <input
+                    id={fieldIds.limitedActual}
                     value={limitedActualText}
                     onChange={(e) => {
                       setLimitedActualText(e.target.value);
@@ -364,8 +426,14 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
                   />
                 </div>
                 <div>
-                  <label className={labelClass}>購入予定量</label>
+                  <label
+                    htmlFor={fieldIds.limitedPlanned}
+                    className={labelClass}
+                  >
+                    購入予定量
+                  </label>
                   <input
+                    id={fieldIds.limitedPlanned}
                     value={limitedPlannedText}
                     onChange={(e) => {
                       setLimitedPlannedText(e.target.value);
@@ -378,8 +446,11 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               </>
             ) : (
               <div>
-                <label className={labelClass}>数量</label>
+                <label htmlFor={fieldIds.quantity} className={labelClass}>
+                  数量
+                </label>
                 <select
+                  id={fieldIds.quantity}
                   value={form.quantity}
                   aria-label="数量"
                   onChange={(e) =>
@@ -396,8 +467,11 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               </div>
             )}
             <div>
-              <label className={labelClass}>購入状態</label>
+              <label htmlFor={fieldIds.purchaseStatus} className={labelClass}>
+                購入状態
+              </label>
               <select
+                id={fieldIds.purchaseStatus}
                 value={form.purchaseStatus}
                 onChange={(e) => {
                   const nextStatus = e.target.value;
@@ -432,13 +506,14 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
           )}
           {showHallSelector && (
             <div className="border border-amber-200 dark:border-amber-700/50 bg-amber-50/50 dark:bg-amber-900/20 rounded-lg p-3">
-              <label className={labelClass}>
+              <label htmlFor={fieldIds.manualHall} className={labelClass}>
                 ホール設定
                 <span className="ml-2 text-xs font-normal text-amber-700 dark:text-amber-400">
                   （ブロック「{form.block}」は複数ホールに所属）
                 </span>
               </label>
               <select
+                id={fieldIds.manualHall}
                 value={form.manualHallId}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, manualHallId: e.target.value }))
@@ -461,8 +536,11 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
           )}
           {onPriorityChange && (
             <div>
-              <label className={labelClass}>優先度</label>
+              <label htmlFor={fieldIds.priority} className={labelClass}>
+                優先度
+              </label>
               <select
+                id={fieldIds.priority}
                 value={form.priorityLevel}
                 onChange={(e) =>
                   setForm((prev) => ({
@@ -510,8 +588,11 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className={labelClass}>利用者メモ</label>
+              <label htmlFor={fieldIds.remarks} className={labelClass}>
+                利用者メモ
+              </label>
               <input
+                id={fieldIds.remarks}
                 type="text"
                 value={form.remarks}
                 onChange={(e) =>
@@ -523,8 +604,11 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               />
             </div>
             <div>
-              <label className={labelClass}>URL</label>
+              <label htmlFor={fieldIds.url} className={labelClass}>
+                URL
+              </label>
               <input
+                id={fieldIds.url}
                 type="text"
                 value={form.url}
                 onChange={(e) =>
@@ -538,12 +622,14 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
         </div>
         <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex gap-2">
           <button
+            type="button"
             onClick={onClose}
             className="flex-1 py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors"
           >
             キャンセル
           </button>
           <button
+            type="button"
             onClick={handleSave}
             disabled={!form.circle.trim()}
             className="flex-1 py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white rounded-lg font-medium transition-colors"

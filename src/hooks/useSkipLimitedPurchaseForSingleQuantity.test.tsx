@@ -8,6 +8,11 @@ import {
 } from "./useSkipLimitedPurchaseForSingleQuantity";
 
 const STORAGE_KEY = "skipLimitedPurchaseForSingleQuantity";
+const preferences = {
+  loadPreference: (key: string) => localStorage.getItem(key),
+  savePreference: (key: string, value: string) =>
+    localStorage.setItem(key, value),
+};
 
 describe("useSkipLimitedPurchaseForSingleQuantity", () => {
   beforeEach(() => {
@@ -17,7 +22,7 @@ describe("useSkipLimitedPurchaseForSingleQuantity", () => {
 
   it("defaults to true when localStorage is empty", () => {
     const { result } = renderHook(() =>
-      useSkipLimitedPurchaseForSingleQuantity(),
+      useSkipLimitedPurchaseForSingleQuantity(preferences),
     );
 
     expect(DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY).toBe(true);
@@ -28,19 +33,23 @@ describe("useSkipLimitedPurchaseForSingleQuantity", () => {
   it("restores true and false saved values", () => {
     localStorage.setItem(STORAGE_KEY, "false");
     const { result, unmount } = renderHook(() =>
-      useSkipLimitedPurchaseForSingleQuantity(),
+      useSkipLimitedPurchaseForSingleQuantity(preferences),
     );
     expect(result.current.skipLimitedPurchaseForSingleQuantity).toBe(false);
 
     unmount();
     localStorage.setItem(STORAGE_KEY, "true");
-    const next = renderHook(() => useSkipLimitedPurchaseForSingleQuantity());
+    const next = renderHook(() =>
+      useSkipLimitedPurchaseForSingleQuantity(preferences),
+    );
     expect(next.result.current.skipLimitedPurchaseForSingleQuantity).toBe(true);
   });
 
   it("falls back to true for invalid saved values and read failures", () => {
     localStorage.setItem(STORAGE_KEY, "invalid");
-    const invalid = renderHook(() => useSkipLimitedPurchaseForSingleQuantity());
+    const invalid = renderHook(() =>
+      useSkipLimitedPurchaseForSingleQuantity(preferences),
+    );
     expect(invalid.result.current.skipLimitedPurchaseForSingleQuantity).toBe(
       true,
     );
@@ -51,7 +60,7 @@ describe("useSkipLimitedPurchaseForSingleQuantity", () => {
     });
 
     const failedRead = renderHook(() =>
-      useSkipLimitedPurchaseForSingleQuantity(),
+      useSkipLimitedPurchaseForSingleQuantity(preferences),
     );
     expect(failedRead.result.current.skipLimitedPurchaseForSingleQuantity).toBe(
       true,
@@ -60,7 +69,7 @@ describe("useSkipLimitedPurchaseForSingleQuantity", () => {
 
   it("persists direct and functional setter updates", () => {
     const { result } = renderHook(() =>
-      useSkipLimitedPurchaseForSingleQuantity(),
+      useSkipLimitedPurchaseForSingleQuantity(preferences),
     );
 
     act(() => {
@@ -86,7 +95,7 @@ describe("useSkipLimitedPurchaseForSingleQuantity", () => {
     });
 
     const { result } = renderHook(() =>
-      useSkipLimitedPurchaseForSingleQuantity(),
+      useSkipLimitedPurchaseForSingleQuantity(preferences),
     );
 
     expect(() => {

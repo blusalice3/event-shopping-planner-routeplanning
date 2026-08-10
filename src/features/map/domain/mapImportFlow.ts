@@ -17,25 +17,39 @@ export interface MapImportDispatchEffects {
   commit: (
     preparedImport: PreparedMapImport,
     options: MapReimportOptions,
-  ) => void;
+  ) => Promise<void>;
 }
 
-export const dispatchPreparedMapImport = (
+export const dispatchPreparedMapImport = async (
   preparedImport: PreparedMapImport,
   effects: MapImportDispatchEffects,
-): "confirmation" | "committed" => {
+): Promise<"confirmation" | "committed"> => {
   if (preparedImport.plan.requiresConfirmation) {
     effects.requestConfirmation(preparedImport);
     return "confirmation";
   }
 
-  effects.commit(preparedImport, {
+  await effects.commit(preparedImport, {
     preserveMaplessHalls: true,
   });
   return "committed";
 };
 
 export interface MapImportCommitEffects {
+  commitApplicationSnapshotPatch(
+    patch: Pick<
+      MapReimportState,
+      | "eventLists"
+      | "mapData"
+      | "mapRotationSettings"
+      | "routeSettings"
+      | "hallDefinitions"
+      | "hallRouteSettings"
+      | "mapViewportSettings"
+    >,
+    eventName: string,
+    settings: BlockDetectionSettings,
+  ): Promise<void>;
   setEventLists: (value: MapReimportState["eventLists"]) => void;
   setMapData: (value: MapReimportState["mapData"]) => void;
   setMapRotationSettings: (
@@ -47,16 +61,12 @@ export interface MapImportCommitEffects {
   setMapViewportSettings: (
     value: MapReimportState["mapViewportSettings"],
   ) => void;
-  saveBlockDetectionSettings: (
-    eventName: string,
-    settings: BlockDetectionSettings,
-  ) => void;
   activateTarget: (eventName: string, mapTabName: string) => void;
   finishImport: () => void;
   notify: (message: string) => void;
 }
 
-export const commitPreparedMapImport = ({
+export const commitPreparedMapImport = async ({
   state,
   preparedImport,
   options,
@@ -66,8 +76,22 @@ export const commitPreparedMapImport = ({
   preparedImport: PreparedMapImport;
   options: MapReimportOptions;
   effects: MapImportCommitEffects;
-}): void => {
+}): Promise<void> => {
   const nextState = applyMapReimportPlan(state, preparedImport.plan, options);
+
+  await effects.commitApplicationSnapshotPatch(
+    {
+      eventLists: nextState.eventLists,
+      mapData: nextState.mapData,
+      mapRotationSettings: nextState.mapRotationSettings,
+      routeSettings: nextState.routeSettings,
+      hallDefinitions: nextState.hallDefinitions,
+      hallRouteSettings: nextState.hallRouteSettings,
+      mapViewportSettings: nextState.mapViewportSettings,
+    },
+    preparedImport.plan.eventName,
+    preparedImport.settings,
+  );
 
   if (nextState.eventLists !== state.eventLists) {
     effects.setEventLists(nextState.eventLists);
@@ -78,10 +102,6 @@ export const commitPreparedMapImport = ({
   effects.setHallDefinitions(nextState.hallDefinitions);
   effects.setHallRouteSettings(nextState.hallRouteSettings);
   effects.setMapViewportSettings(nextState.mapViewportSettings);
-  effects.saveBlockDetectionSettings(
-    preparedImport.plan.eventName,
-    preparedImport.settings,
-  );
 
   const firstTarget = preparedImport.plan.targets[0];
   if (firstTarget) {

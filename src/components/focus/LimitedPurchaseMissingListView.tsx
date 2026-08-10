@@ -254,7 +254,7 @@ export function LimitedPurchaseMissingListView({
                   <button
                     type="button"
                     onClick={() => handleSave(item)}
-                    className="rounded bg-orange-600 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-700"
+                    className="rounded bg-orange-700 px-4 py-2 text-sm font-semibold text-white hover:bg-orange-800"
                   >
                     保存
                   </button>

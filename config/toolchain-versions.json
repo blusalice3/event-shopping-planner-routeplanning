@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "runtime": {
+    "node": "24.19.0",
+    "npm": "11.19.0",
+    "providerNodeFamily": "24.x"
+  },
+  "packages": {
+    "@eslint/js": "9.39.5",
+    "@playwright/test": "1.62.1",
+    "@tanstack/react-virtual": "3.14.9",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
+    "@types/node": "24.13.3",
+    "@types/pg": "8.20.4",
+    "@types/react": "18.3.27",
+    "@types/react-dom": "18.3.7",
+    "@vite-pwa/assets-generator": "1.0.2",
+    "@vitejs/plugin-react": "6.0.5",
+    "@vitest/coverage-v8": "4.1.10",
+    "@zip.js/zip.js": "2.8.34",
+    "autoprefixer": "10.5.4",
+    "axe-core": "4.12.1",
+    "canonicalize": "3.0.0",
+    "eslint": "9.39.5",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "exceljs": "4.4.0",
+    "fake-indexeddb": "6.2.5",
+    "globals": "17.9.0",
+    "jsdom": "30.0.1",
+    "pg": "8.22.0",
+    "postcss": "8.5.25",
+    "prettier": "3.8.1",
+    "react-dom": "18.3.1",
+    "supabase": "2.111.0",
+    "tailwindcss": "3.4.19",
+    "typescript-eslint": "8.66.0",
+    "vercel": "58.5.1",
+    "vite": "8.2.0",
+    "vite-plugin-pwa": "1.3.0",
+    "vitest": "4.1.10",
+    "yauzl": "3.4.0",
+    "yazl": "3.3.1"
+  },
+  "preservedPackages": {
+    "react": "18.3.1",
+    "typescript": "5.9.3"
+  },
+  "singleVersionPackages": [
+    "@vitejs/plugin-react",
+    "@vitest/coverage-v8",
+    "@tanstack/react-virtual",
+    "@types/pg",
+    "@zip.js/zip.js",
+    "autoprefixer",
+    "axe-core",
+    "canonicalize",
+    "eslint",
+    "eslint-plugin-react-hooks",
+    "jsdom",
+    "js-yaml",
+    "pg",
+    "postcss",
+    "supabase",
+    "tailwindcss",
+    "typescript",
+    "typescript-eslint",
+    "vercel",
+    "vite",
+    "vite-plugin-pwa",
+    "vitest",
+    "yazl"
+  ],
+  "duplicatePackageBaseline": {
+    "packageCount": 73,
+    "sha256": "c6d5b7a684e1e05477ed46cb78b5ac1c2a7d4491e27cae1c79a5b61697c129e6",
+    "owner": "Build/Quality",
+    "reviewTrigger": "Any lockfile or dependency-cluster change"
+  },
+  "commandGraph": {
+    "build": ["build:release-a"],
+    "build:release-a": ["build:app", "scripts/verify-release-a-build.mjs"],
+    "build:app": ["tsc --noEmit", "scripts/build-release-vite.mjs"],
+    "build:containment": [
+      "tsc --noEmit",
+      "scripts/build-release-vite.mjs --role containment"
+    ]
+  },
+  "temporaryExceptions": []
+}

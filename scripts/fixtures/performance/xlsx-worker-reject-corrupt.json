@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "xlsx-worker-reject-corrupt",
+  "domain": "xlsx-worker",
+  "dataset": {
+    "generator": "corrupt-zip-header-v1",
+    "compressedBytes": 4096
+  },
+  "operation": {
+    "kind": "event-import",
+    "execution": "worker"
+  },
+  "expectedTerminal": {
+    "kind": "error",
+    "category": "invalid-archive"
+  },
+  "requiredAssertions": [
+    "single-terminal-error",
+    "zero-domain-commits",
+    "zero-download-side-effects"
+  ],
+  "requiredTelemetry": ["durationMs"]
+}

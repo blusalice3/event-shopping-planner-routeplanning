@@ -3,17 +3,20 @@ import {
   PurchaseStatusControlModes,
   type PurchaseStatusControlMode,
 } from "../types/item";
+import type { PreferencePersistencePort } from "../app/ports/PersistenceCommandPort";
 
 const STORAGE_KEY = "purchaseStatusControlMode";
 export const DEFAULT_PURCHASE_STATUS_CONTROL_MODE: PurchaseStatusControlMode =
   "cycle";
 const VALID_MODES = new Set<string>(PurchaseStatusControlModes);
 
-export function usePurchaseStatusControlMode() {
+export function usePurchaseStatusControlMode(
+  preferences: PreferencePersistencePort,
+) {
   const [purchaseStatusControlMode, setPurchaseStatusControlMode] =
     useState<PurchaseStatusControlMode>(() => {
       try {
-        const saved = localStorage.getItem(STORAGE_KEY);
+        const saved = preferences.loadPreference(STORAGE_KEY);
         if (saved && VALID_MODES.has(saved)) {
           return saved as PurchaseStatusControlMode;
         }
@@ -25,11 +28,11 @@ export function usePurchaseStatusControlMode() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, purchaseStatusControlMode);
+      preferences.savePreference(STORAGE_KEY, purchaseStatusControlMode);
     } catch {
       // Ignore unavailable localStorage writes.
     }
-  }, [purchaseStatusControlMode]);
+  }, [preferences, purchaseStatusControlMode]);
 
   return {
     purchaseStatusControlMode,

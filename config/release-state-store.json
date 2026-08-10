@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "bindingStatus": "unconfigured",
+  "engine": "postgresql",
+  "postgresMajor": 17,
+  "timezone": "UTC",
+  "databaseUrlEnvironmentName": "RELEASE_STATE_DATABASE_URL",
+  "tlsMode": "verify-full",
+  "allowedHosts": [],
+  "allowedDatabases": [],
+  "allowedExecutorRoles": [],
+  "connectTimeoutMilliseconds": 5000,
+  "statementTimeoutMilliseconds": 15000,
+  "maximumEvidenceObjectBytes": 268435456,
+  "credentialRotationDays": 90,
+  "backupOwner": null,
+  "restoreOwner": null,
+  "productionCaSha256": null,
+  "localContainerImage": null,
+  "migrations": [
+    {
+      "path": "ops/release-state/migrations/0001_release_state_store.sql",
+      "sha256": "4ca7e6e4285e6590a911ed5115c629bf662db0499254a58cee564d46c120d6a8"
+    },
+    {
+      "path": "ops/release-state/migrations/0002_acceptance_evidence_chains.sql",
+      "sha256": "e790e8798b3deacab8e185883e01c84fa535e0cf9ef6c19279fa53c5c95e4804"
+    },
+    {
+      "path": "ops/release-state/migrations/0003_phase_exit_attestations.sql",
+      "sha256": "3b9dbafd37e160db8daec3a08093542f64b04d7bc0823fac59ecbfc48cc951b7"
+    }
+  ],
+  "migrationSetSha256": "427ed4454cc8422ca1321a4ef2a9b45de3cbf7a19608d530fd4c10480bd506be",
+  "blockerCodes": [
+    "control-database-host-unconfigured",
+    "control-database-name-unconfigured",
+    "executor-role-unconfigured",
+    "production-ca-unobserved",
+    "backup-owner-unconfigured"
+  ]
+}

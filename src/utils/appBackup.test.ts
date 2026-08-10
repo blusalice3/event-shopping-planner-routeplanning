@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import type { AppData } from "../app/ports/PersistenceCommandPort";
 import { DEFAULT_BLOCK_DETECTION_SETTINGS } from "../types/map";
-import type { AppData } from "./indexedDB";
 import {
   APP_BACKUP_SECTION_KEYS,
   createAppBackup,

@@ -1,0 +1,194 @@
+{
+  "schemaVersion": 2,
+  "provider": "v8",
+  "reportsDirectory": "coverage",
+  "reporters": ["text", "json-summary", "lcov"],
+  "include": ["src/**/*.{ts,tsx}"],
+  "exclude": [
+    "src/**/*.test.{ts,tsx}",
+    "src/**/*.integration.test.{ts,tsx}",
+    "src/**/*_backup.tsx",
+    "src/index.tsx",
+    "src/test/**",
+    "src/types/**",
+    "src/**/*.d.ts"
+  ],
+  "globalThresholds": {
+    "branches": 35,
+    "functions": 40,
+    "lines": 45,
+    "statements": 45
+  },
+  "changedCodeThresholds": {
+    "branches": 80,
+    "lines": 85
+  },
+  "subsystemThresholds": [
+    {
+      "id": "release-a-metrics",
+      "vitestGlobs": ["src/utils/persistenceReleaseAMetrics*.ts"],
+      "changedScope": {
+        "prefixes": [],
+        "files": [
+          "src/utils/persistenceReleaseAMetrics.ts",
+          "src/utils/persistenceReleaseAMetricsBackend.ts"
+        ]
+      },
+      "branches": 75,
+      "functions": 85,
+      "lines": 85,
+      "statements": 85,
+      "changedCodeThresholds": {
+        "branches": 80,
+        "lines": 85
+      },
+      "requiredFromExit": "P0-TOOLCHAIN"
+    },
+    {
+      "id": "pwa-recovery",
+      "vitestGlobs": ["src/pwa/**/*.ts"],
+      "changedScope": {
+        "prefixes": ["src/pwa/"],
+        "files": ["scripts/build-pwa-recovery-agent.mjs"]
+      },
+      "branches": 50,
+      "functions": 60,
+      "lines": 65,
+      "statements": 65,
+      "changedCodeThresholds": {
+        "branches": 80,
+        "lines": 85
+      },
+      "nodeCoverage": {
+        "include": ["scripts/build-pwa-recovery-agent.mjs"],
+        "tests": ["scripts/build-pwa-recovery-agent.test.mjs"],
+        "report": "coverage/node/pwa-recovery.lcov",
+        "branches": 40,
+        "functions": 70,
+        "lines": 75
+      },
+      "requiredFromExit": "P1-PWA"
+    },
+    {
+      "id": "artifact-reducer",
+      "vitestGlobs": [],
+      "changedScope": {
+        "prefixes": [],
+        "files": [
+          "scripts/deterministic-zip.mjs",
+          "scripts/lib/artifact-builder-core.mjs",
+          "scripts/lib/artifact-contract.mjs",
+          "scripts/lib/content-addressed-store.mjs",
+          "scripts/lib/file-manifest.mjs",
+          "scripts/release-state/releaseStateReducer.mjs",
+          "scripts/verify-release-artifact.mjs"
+        ]
+      },
+      "branches": 60,
+      "functions": 70,
+      "lines": 70,
+      "statements": 70,
+      "changedCodeThresholds": {
+        "branches": 80,
+        "lines": 85
+      },
+      "nodeCoverage": {
+        "include": [
+          "scripts/deterministic-zip.mjs",
+          "scripts/lib/artifact-builder-core.mjs",
+          "scripts/lib/artifact-contract.mjs",
+          "scripts/lib/content-addressed-store.mjs",
+          "scripts/lib/file-manifest.mjs",
+          "scripts/release-state/releaseStateReducer.mjs",
+          "scripts/verify-release-artifact.mjs"
+        ],
+        "tests": [
+          "scripts/deterministic-zip.test.mjs",
+          "scripts/release-artifact.test.mjs",
+          "scripts/release-state/releaseStateReducer.test.mjs"
+        ],
+        "report": "coverage/node/artifact-reducer.lcov",
+        "branches": 60,
+        "functions": 70,
+        "lines": 70
+      },
+      "requiredFromExit": "P0-ARTIFACT"
+    },
+    {
+      "id": "xlsx-protocol-security",
+      "vitestGlobs": [
+        "src/xlsx/{port,security}/**/*.ts",
+        "src/xlsx/worker/workerServer.ts",
+        "src/xlsx/adapters/workerXlsxExecutionPort.ts"
+      ],
+      "changedScope": {
+        "prefixes": ["src/xlsx/port/", "src/xlsx/security/"],
+        "files": [
+          "src/xlsx/worker/workerServer.ts",
+          "src/xlsx/adapters/workerXlsxExecutionPort.ts"
+        ]
+      },
+      "branches": 65,
+      "functions": 70,
+      "lines": 75,
+      "statements": 75,
+      "changedCodeThresholds": {
+        "branches": 80,
+        "lines": 85
+      },
+      "requiredFromExit": "P3-XLSX"
+    },
+    {
+      "id": "shopping-list-model-selector",
+      "vitestGlobs": [
+        "src/features/shopping-list/model/**/*.ts",
+        "src/features/shopping-list/renderers/{rendererSelector,virtualEligibility,rowAccessibility}.ts"
+      ],
+      "changedScope": {
+        "prefixes": ["src/features/shopping-list/model/"],
+        "files": [
+          "src/features/shopping-list/renderers/rendererSelector.ts",
+          "src/features/shopping-list/renderers/virtualEligibility.ts",
+          "src/features/shopping-list/renderers/rowAccessibility.ts"
+        ]
+      },
+      "branches": 80,
+      "functions": 90,
+      "lines": 90,
+      "statements": 90,
+      "changedCodeThresholds": {
+        "branches": 80,
+        "lines": 85
+      },
+      "requiredFromExit": "P5-DUAL"
+    },
+    {
+      "id": "persistence-transactions",
+      "vitestGlobs": [
+        "src/{persistence/{db/transactionCoordinator,adapters/indexedDbPersistenceCommandAdapter},utils/{indexedDB,persistenceResilience,mapDataPersistence}}.ts"
+      ],
+      "changedScope": {
+        "prefixes": [],
+        "files": [
+          "src/persistence/db/transactionCoordinator.ts",
+          "src/persistence/adapters/indexedDbPersistenceCommandAdapter.ts",
+          "src/utils/indexedDB.ts",
+          "src/utils/persistenceResilience.ts",
+          "src/utils/mapDataPersistence.ts"
+        ]
+      },
+      "branches": 35,
+      "functions": 40,
+      "lines": 45,
+      "statements": 45,
+      "changedCodeThresholds": {
+        "branches": 80,
+        "lines": 85
+      },
+      "requiredFromExit": "P0-TOOLCHAIN"
+    }
+  ],
+  "exceptions": [],
+  "waivers": [],
+  "futureSubsystems": []
+}

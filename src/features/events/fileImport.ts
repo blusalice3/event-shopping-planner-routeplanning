@@ -14,8 +14,8 @@ import type {
   MapViewportSettingsStore,
   RouteSettingsStore,
 } from "../../types/map";
-import type { ImportResult } from "../../utils/exportImport";
-import type { AppData } from "../../utils/indexedDB";
+import type { AppData } from "../../app/ports/PersistenceCommandPort";
+import type { EventWorkbookImportResult } from "../../xlsx/domain/eventWorkbook";
 import { expandEventMapDataFromStorage } from "../../utils/mapDataPersistence";
 
 export type ImportedEventData = {
@@ -45,7 +45,9 @@ function hasEntries(
   return !!record && Object.keys(record).length > 0;
 }
 
-export function toImportedEventData(result: ImportResult): ImportedEventData {
+export function toImportedEventData(
+  result: EventWorkbookImportResult,
+): ImportedEventData {
   const hallDefinitions = hasEntries(result.hallDefinitions)
     ? (result.hallDefinitions as HallDefinitionsStore[string])
     : null;

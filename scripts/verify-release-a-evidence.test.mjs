@@ -17,6 +17,7 @@ const RELEASE_SHA = "0123456789abcdef0123456789abcdef01234567";
 const BASELINE_SHA = "89abcdef0123456789abcdef0123456789abcdef";
 const D2389A0_SHA = "d2389a02363176ba8354c4562f1a669a0b15dab9";
 const NOW_MS = Date.parse("2026-08-03T00:00:00.000Z");
+const HUMAN_OPERATOR_ID = "single-human-operator";
 
 function evidenceRef(id) {
   return `artifact://release-a/${id}`;
@@ -142,9 +143,9 @@ function pwaCheck(
     offlineStatus: "PASS",
     updateStatus: "PASS",
     legacyOriginalsUnchanged: true,
-    executedBy: `executor-${suffix}`,
+    executedBy: HUMAN_OPERATOR_ID,
     executedAt,
-    reviewedBy: `reviewer-${suffix}`,
+    reviewedBy: HUMAN_OPERATOR_ID,
     reviewedAt,
     evidenceRef: evidenceRef(`pwa-${suffix}`),
   };
@@ -161,7 +162,7 @@ function auditSource(name, finding = "INCONCLUSIVE") {
 function approval(role, approvedAt = "2026-08-02T06:00:00.000Z") {
   return {
     decision: "APPROVED",
-    approver: `approver-${role}`,
+    approver: HUMAN_OPERATOR_ID,
     approvedAt,
     commitSha: RELEASE_SHA,
     evidenceRef: evidenceRef(`approval-${role}`),
@@ -192,9 +193,9 @@ function makeValidEvidence() {
         declaredDurationHours: 24,
         cohortRef: evidenceRef("baseline-cohort"),
         queryEvidenceRef: evidenceRef("baseline-query"),
-        selectedBy: "baseline-selector",
+        selectedBy: HUMAN_OPERATOR_ID,
         selectedAt: "2026-07-31T22:15:00.000Z",
-        reviewedBy: "baseline-reviewer",
+        reviewedBy: HUMAN_OPERATOR_ID,
         reviewedAt: "2026-07-31T23:00:00.000Z",
         selectionApprovalRef: evidenceRef("baseline-selection-approval"),
         metrics: baselineMetrics(),
@@ -268,9 +269,9 @@ function makeValidEvidence() {
       externalRecordsComplete: false,
       verdict: "UNKNOWN",
       safetyDisposition: "TREAT_AS_DEPLOYED",
-      auditedBy: "historical-auditor",
+      auditedBy: HUMAN_OPERATOR_ID,
       auditedAt: "2026-08-02T02:30:00.000Z",
-      reviewedBy: "historical-reviewer",
+      reviewedBy: HUMAN_OPERATOR_ID,
       reviewedAt: "2026-08-02T04:00:00.000Z",
       reviewEvidenceRef: evidenceRef("audit-review"),
       dedicatedE2e: {
@@ -642,14 +643,37 @@ test("allows factual NOT_DEPLOYED only when every source is negative and complet
   assert.deepEqual(validateReleaseAEvidence(evidence, { nowMs: NOW_MS }), []);
 });
 
-test("requires dedicated d2389a0 E2E PASS and independent approvals", () => {
+test("requires dedicated d2389a0 E2E PASS while allowing approval-role overlap", () => {
   const evidence = makeValidEvidence();
   evidence.historicalDeploymentAudit.dedicatedE2e.status = "PENDING";
   evidence.approvals.operationsReviewer.approver =
     evidence.approvals.releaseOwner.approver;
   const errors = errorsFor(evidence);
   assert.match(errors, /dedicatedE2e\.status.*PASS/);
-  assert.match(errors, /distinct across required approval roles/);
+  assert.doesNotMatch(errors, /distinct across required approval roles/);
+});
+
+test("accepts one account across every human evidence and approval role", () => {
+  const evidence = makeValidEvidence();
+  assert.equal(evidence.canary.baseline.selectedBy, HUMAN_OPERATOR_ID);
+  assert.equal(evidence.canary.baseline.reviewedBy, HUMAN_OPERATOR_ID);
+  assert.ok(
+    evidence.installedPwaChecks.every(
+      ({ executedBy, reviewedBy }) =>
+        executedBy === HUMAN_OPERATOR_ID && reviewedBy === HUMAN_OPERATOR_ID,
+    ),
+  );
+  assert.equal(evidence.historicalDeploymentAudit.auditedBy, HUMAN_OPERATOR_ID);
+  assert.equal(
+    evidence.historicalDeploymentAudit.reviewedBy,
+    HUMAN_OPERATOR_ID,
+  );
+  assert.ok(
+    Object.values(evidence.approvals).every(
+      ({ approver }) => approver === HUMAN_OPERATOR_ID,
+    ),
+  );
+  assert.deepEqual(validateReleaseAEvidence(evidence, { nowMs: NOW_MS }), []);
 });
 
 test("requires approvals after all gate evidence is complete", () => {

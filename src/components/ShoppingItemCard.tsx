@@ -13,7 +13,6 @@ import {
   PurchaseStatusControlMode,
   PurchaseStatuses,
   ProtectionLevel,
-  ProtectionLevels,
 } from "../types/item";
 import GripVerticalIcon from "./icons/GripVerticalIcon";
 import CheckCircleIcon from "./icons/CheckCircleIcon";
@@ -95,7 +94,7 @@ const statusConfig: Record<
   PurchaseStatus,
   {
     label: string;
-    icon: React.FC<any>;
+    icon: React.FC<React.SVGProps<SVGSVGElement>>;
     color: string;
     dim: boolean;
     bg: string;
@@ -104,7 +103,7 @@ const statusConfig: Record<
   None: {
     label: "未購入",
     icon: CircleIcon,
-    color: "text-slate-400 dark:text-slate-500",
+    color: "text-slate-600 dark:text-slate-300",
     dim: false,
     bg: "",
   },
@@ -132,14 +131,14 @@ const statusConfig: Record<
   Postpone: {
     label: "後回し",
     icon: PauseCircleIcon,
-    color: "text-purple-600 dark:text-purple-400",
+    color: "text-purple-600 dark:text-purple-300",
     dim: false,
     bg: "bg-purple-500/20 dark:bg-purple-500/30",
   },
   Late: {
     label: "遅参",
     icon: ClockIcon,
-    color: "text-blue-600 dark:text-blue-400",
+    color: "text-blue-600 dark:text-blue-300",
     dim: false,
     bg: "bg-blue-500/20 dark:bg-blue-500/30",
   },
@@ -186,8 +185,15 @@ type PurchaseStatusRadialMenuProps = {
   onCancel: () => void;
 };
 
-const RADIAL_MENU_RADIUS = 46;
-const RADIAL_MENU_ITEM_SIZE = 40;
+const RADIAL_MENU_POSITION_CLASSES = [
+  "-left-5 -top-[66px]",
+  "left-4 -top-[49px]",
+  "left-[25px] -top-2.5",
+  "left-0 top-[21px]",
+  "-left-10 top-[21px]",
+  "-left-[65px] -top-2.5",
+  "-left-14 -top-[49px]",
+] as const;
 export const OUTSIDE_CLICK_FALLBACK_CLOSE_DELAY_MS = 300;
 
 const ITEM_NOT_FOUND_MESSAGE =
@@ -202,12 +208,11 @@ type LimitedDialogSource = "current" | "singleQuantityChoice";
 
 const PurchaseStatusRadialMenu: React.FC<PurchaseStatusRadialMenuProps> = ({
   itemId,
-  anchorRef,
+  anchorRef: _anchorRef,
   currentStatus,
   onSelect,
   onCancel,
 }) => {
-  const [center, setCenter] = useState<{ x: number; y: number } | null>(null);
   const itemButtonRefs = useRef<
     Partial<Record<PurchaseStatus, HTMLButtonElement | null>>
   >({});
@@ -241,34 +246,11 @@ const PurchaseStatusRadialMenu: React.FC<PurchaseStatusRadialMenuProps> = ({
     onCancel();
   }, [clearScheduledCancel, onCancel]);
 
-  useLayoutEffect(() => {
-    const updateCenter = () => {
-      const rect = anchorRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      setCenter({
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2,
-      });
-    };
-
-    updateCenter();
-    window.addEventListener("resize", updateCenter);
-    window.addEventListener("scroll", updateCenter, true);
-
-    return () => {
-      window.removeEventListener("resize", updateCenter);
-      window.removeEventListener("scroll", updateCenter, true);
-    };
-  }, [anchorRef]);
-
   useEffect(() => {
-    if (!center) return;
     itemButtonRefs.current[currentStatus]?.focus();
-  }, [center, currentStatus]);
+  }, [currentStatus]);
 
   useEffect(() => clearScheduledCancel, [clearScheduledCancel]);
-
-  if (!center) return null;
 
   // Known a11y debt: this is a non-modal dialog without focus trapping. Tab can
   // leave the dialog and reach background UI. The radiogroup uses tabbable
@@ -295,8 +277,7 @@ const PurchaseStatusRadialMenu: React.FC<PurchaseStatusRadialMenuProps> = ({
     >
       <div
         data-purchase-status-menu={itemId}
-        className="absolute"
-        style={{ left: center.x, top: center.y }}
+        className="purchase-status-radial-menu absolute"
         role="dialog"
         aria-label="購入状態を選択"
         onPointerDown={(event) => {
@@ -315,10 +296,6 @@ const PurchaseStatusRadialMenu: React.FC<PurchaseStatusRadialMenuProps> = ({
 
         <div role="radiogroup" aria-label="購入状態">
           {PurchaseStatuses.map((status, index) => {
-            const angle = -90 + (360 / PurchaseStatuses.length) * index;
-            const rad = (angle * Math.PI) / 180;
-            const x = Math.cos(rad) * RADIAL_MENU_RADIUS;
-            const y = Math.sin(rad) * RADIAL_MENU_RADIUS;
             const config = statusConfig[status];
             const Icon = config.icon;
             const selected = status === currentStatus;
@@ -336,17 +313,11 @@ const PurchaseStatusRadialMenu: React.FC<PurchaseStatusRadialMenuProps> = ({
                 title={config.label}
                 data-status={status}
                 onClick={() => onSelect(status)}
-                className={`absolute flex items-center justify-center rounded-full border shadow-md transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                className={`absolute flex h-10 w-10 items-center justify-center rounded-full border shadow-md transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-blue-500 ${RADIAL_MENU_POSITION_CLASSES[index]} ${
                   selected
                     ? "bg-blue-600 border-blue-500 text-white"
                     : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700"
                 }`}
-                style={{
-                  width: RADIAL_MENU_ITEM_SIZE,
-                  height: RADIAL_MENU_ITEM_SIZE,
-                  left: x - RADIAL_MENU_ITEM_SIZE / 2,
-                  top: y - RADIAL_MENU_ITEM_SIZE / 2,
-                }}
               >
                 <Icon
                   className={`w-5 h-5 ${selected ? "text-white" : config.color}`}
@@ -1068,7 +1039,6 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   const cardClasses = `
     rounded-lg shadow-md transition-all duration-300 relative overflow-hidden
     ${baseBg}
-    ${currentStatus.dim ? "opacity-60 dark:opacity-50" : "opacity-100"}
     ${isSearchMatch ? "ring-4 ring-red-500 ring-offset-2" : ""}
   `;
 
@@ -1115,15 +1085,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 
   if (layoutMode === "smartphone") {
     const warningStripe = hasWarningTags ? (
-      <div
-        className="absolute right-0 top-0 bottom-0 w-32 pointer-events-none"
-        style={{
-          backgroundImage:
-            "repeating-linear-gradient(45deg, #fef08a 0px, #fef08a 10px, #000 10px, #000 20px)",
-          backgroundSize: "28.28px 28.28px",
-          opacity: 0.3,
-        }}
-      />
+      <div className="pointer-events-none absolute bottom-0 right-0 top-0 w-32 opacity-30 [background-image:repeating-linear-gradient(45deg,#fef08a_0px,#fef08a_10px,#000_10px,#000_20px)] [background-size:28.28px_28.28px]" />
     ) : null;
 
     const contextualMenu =
@@ -1168,7 +1130,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           }}
           className={`h-8 min-w-10 rounded bg-orange-50 px-1.5 text-center text-xs font-semibold text-orange-700 dark:bg-orange-900/30 dark:text-orange-200 ${
             highlightLimitedMissing
-              ? "ring-2 ring-orange-500 animate-pulse"
+              ? "ring-2 ring-orange-500 animate-attention-outline attention-outline-orange"
               : ""
           }`}
         >
@@ -1204,7 +1166,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           aria-label="購入金額"
           className={`h-8 w-16 appearance-none rounded bg-slate-100 px-0.5 text-right text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-700 ${
             item.price === null ? "text-red-600 dark:text-red-400" : ""
-          } ${highlightPrice && item.price === null ? "ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse" : ""}`}
+          } ${highlightPrice && item.price === null ? "ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-attention-outline attention-outline-red" : ""}`}
         >
           {priceOptions.map((p) => (
             <option key={p === null ? "" : p} value={p === null ? "" : p}>
@@ -1229,7 +1191,9 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             ? purchaseStatusMenuOpen
             : undefined
         }
-        className="flex h-8 min-w-8 items-center justify-center gap-0.5 rounded-md bg-slate-100 px-1 transition-colors hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600"
+        className={`flex h-8 min-w-8 items-center justify-center gap-0.5 rounded-md bg-slate-100 px-1 transition-colors hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 ${
+          purchaseStatusMenuOpen ? "purchase-status-radial-anchor" : ""
+        }`}
         aria-label={`Current status: ${currentStatus.label}. Click to change.`}
         title={currentStatus.label}
       >
@@ -1272,7 +1236,6 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           onTouchMove={handlePointerLeave}
           data-search-match={isSearchMatch ? "true" : undefined}
           data-testid="shopping-item-card-smartphone-compact"
-          aria-readonly={readOnly}
         >
           {isSelected && (
             <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500" />
@@ -1363,7 +1326,6 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         onPointerLeave={handlePointerLeave}
         onTouchMove={handlePointerLeave}
         data-search-match={isSearchMatch ? "true" : undefined}
-        aria-readonly={readOnly}
       >
         {isSelected && (
           <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500" />
@@ -1382,7 +1344,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                   priorityLevel === "highest"
                     ? "bg-red-600"
                     : priorityLevel === "priority"
-                      ? "bg-orange-500"
+                      ? "bg-orange-700"
                       : "bg-blue-600"
                 }`}
               >
@@ -1506,7 +1468,6 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   const pcCardClasses = `
     rounded-lg shadow-md transition-all duration-300 flex items-stretch relative overflow-hidden
     ${baseBg}
-    ${currentStatus.dim ? "opacity-60 dark:opacity-50" : "opacity-100"}
     ${isSearchMatch ? "ring-4 ring-red-500 ring-offset-2" : ""}
   `;
 
@@ -1519,7 +1480,6 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       onPointerLeave={handlePointerLeave}
       onTouchMove={handlePointerLeave} // Cancel on scroll
       data-search-match={isSearchMatch ? "true" : undefined}
-      aria-readonly={readOnly}
     >
       {isSelected && (
         <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500 z-30"></div>
@@ -1528,13 +1488,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 
       {/* 警告ストライプ: カード左端の縦バー（右側の可読性を阻害しない） */}
       {hasWarningTags && !isSelected && (
-        <div
-          className="absolute left-0 top-0 bottom-0 w-1.5 pointer-events-none z-10"
-          style={{
-            backgroundImage:
-              "repeating-linear-gradient(45deg, #fef08a 0px, #fef08a 6px, #000 6px, #000 12px)",
-          }}
-        />
+        <div className="pointer-events-none absolute bottom-0 left-0 top-0 z-10 w-1.5 [background-image:repeating-linear-gradient(45deg,#fef08a_0px,#fef08a_6px,#000_6px,#000_12px)]" />
       )}
 
       {/* 左サイドバー */}
@@ -1549,7 +1503,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
               priorityLevel === "highest"
                 ? "bg-red-600"
                 : priorityLevel === "priority"
-                  ? "bg-orange-500"
+                  ? "bg-orange-700"
                   : "bg-blue-600"
             }`}
           >
@@ -1624,10 +1578,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       </div>
 
       {/* 中央エリア: CSS Grid 3行構造（情報 / タイトル / 備考） */}
-      <div
-        className="relative flex-grow p-4 min-w-0 z-20 grid gap-2"
-        style={{ gridTemplateRows: "auto 1fr auto" }}
-      >
+      <div className="relative z-20 grid min-w-0 flex-grow grid-rows-[auto_1fr_auto] gap-2 p-4">
         {/* 背景オーバーレイ */}
         <div
           className={`absolute inset-0 rounded-lg pointer-events-none ${textAreaOverlayClassName}`}
@@ -1782,7 +1733,9 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
               ? purchaseStatusMenuOpen
               : undefined
           }
-          className="flex items-center space-x-2 p-2 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors relative z-10 justify-start"
+          className={`relative z-10 flex items-center justify-start space-x-2 rounded-md bg-slate-100 p-2 transition-colors hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 ${
+            purchaseStatusMenuOpen ? "purchase-status-radial-anchor" : ""
+          }`}
           aria-label={`Current status: ${currentStatus.label}. Click to change.`}
         >
           <IconComponent
@@ -1795,7 +1748,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           </span>
         </button>
         <div className="flex items-center gap-2 relative z-10">
-          <span className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
+          <span className="text-sm text-slate-600 dark:text-slate-300 whitespace-nowrap">
             数量
           </span>
           {item.purchaseStatus === "LimitedPurchase" ? (
@@ -1810,7 +1763,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
               }}
               className={`flex-1 text-base font-semibold rounded-md py-1 px-2 text-center bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-200 tabular-nums ${
                 highlightLimitedMissing
-                  ? "ring-2 ring-orange-500 animate-pulse"
+                  ? "ring-2 ring-orange-500 animate-attention-outline attention-outline-orange"
                   : ""
               }`}
             >
@@ -1833,11 +1786,11 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           )}
         </div>
         <div className="flex items-center gap-1 relative z-10">
-          <span className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
+          <span className="text-sm text-slate-600 dark:text-slate-300 whitespace-nowrap">
             購入金額
           </span>
           {item.price !== null && (
-            <span className="text-slate-500 dark:text-slate-400 text-sm">
+            <span className="text-slate-600 dark:text-slate-300 text-sm">
               ¥
             </span>
           )}
@@ -1848,7 +1801,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             aria-label="購入金額"
             className={`flex-1 text-base font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none tabular-nums ${
               item.price === null ? "text-red-600 dark:text-red-400" : ""
-            } ${highlightPrice && item.price === null ? "ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse" : ""}`}
+            } ${highlightPrice && item.price === null ? "ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-attention-outline attention-outline-red" : ""}`}
           >
             {priceOptions.map((p) => (
               <option key={p === null ? "" : p} value={p === null ? "" : p}>

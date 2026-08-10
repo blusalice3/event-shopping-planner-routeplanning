@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "fresh",
+      "fixturePath": "scripts/fixtures/persistence-startup/fresh.json",
+      "fixtureSha256": "765e7cd26943e01e123d1c823ed110afb6a4d9e63170de298041f2bcfeeecdb3",
+      "startupCompletion": "ready",
+      "quietPeriodMilliseconds": 2000,
+      "expectedTuples": [
+        {
+          "eventName": "startup",
+          "outcome": "ready",
+          "minimumCount": 1,
+          "maximumCount": 1
+        }
+      ]
+    },
+    {
+      "id": "populated-no-recovery",
+      "fixturePath": "scripts/fixtures/persistence-startup/populated-no-recovery.json",
+      "fixtureSha256": "1485a2607e11049ca0e3072d136b2b4c216f6938dda71dcda061917d89bace79",
+      "startupCompletion": "ready",
+      "quietPeriodMilliseconds": 2000,
+      "expectedTuples": [
+        {
+          "eventName": "startup",
+          "outcome": "ready",
+          "minimumCount": 1,
+          "maximumCount": 1
+        }
+      ]
+    },
+    {
+      "id": "recovery-candidate",
+      "fixturePath": "scripts/fixtures/persistence-startup/recovery-candidate.json",
+      "fixtureSha256": "2226a40d70eeeffda952bdebf425dc95a96d52871ab44760f15463750ee38360",
+      "startupCompletion": "recovery-required",
+      "quietPeriodMilliseconds": 2000,
+      "expectedTuples": [
+        {
+          "eventName": "startup",
+          "outcome": "recovery-required",
+          "minimumCount": 1,
+          "maximumCount": 1
+        }
+      ]
+    }
+  ],
+  "activationStatus": "unconfigured",
+  "blockerCodes": ["production-waf-rate-unobserved"]
+}

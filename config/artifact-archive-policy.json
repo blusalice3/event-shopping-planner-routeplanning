@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "pathFormat": "posix-relative",
+  "entryOrder": "utf8-byte",
+  "directoryEntries": false,
+  "modifiedAt": "1980-01-01T00:00:00.000Z",
+  "forceDosTimestamp": true,
+  "compressionLevel": 9,
+  "fileMode": "0644",
+  "utf8Flag": true,
+  "archiveComment": "",
+  "allowUnknownExtraFields": false,
+  "allowSymlinks": false,
+  "allowHardlinks": false,
+  "allowDeviceFiles": false,
+  "rejectTraversal": true,
+  "rejectAbsolutePaths": true,
+  "rejectDuplicatePaths": true,
+  "rejectCaseCollisions": true
+}

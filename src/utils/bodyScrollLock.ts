@@ -10,46 +10,29 @@ interface ActiveBodyScrollLock {
 
 let nextLockId = 0;
 const activeLocks = new Map<number, ActiveBodyScrollLock>();
-let originalOverflow: string | null = null;
-let originalOverscrollBehavior: string | null = null;
-let originalTouchAction: string | null = null;
+const BODY_SCROLL_LOCK_CLASS = "esp-body-scroll-lock";
+const BODY_OVERSCROLL_LOCK_CLASS = "esp-body-overscroll-lock";
+const BODY_TOUCH_LOCK_CLASS = "esp-body-touch-lock";
 
 function applyBodyScrollLockState(): void {
   if (typeof document === "undefined") return;
 
-  if (activeLocks.size === 0) {
-    document.body.style.overflow = originalOverflow ?? "";
-    document.body.style.overscrollBehavior = originalOverscrollBehavior ?? "";
-    document.body.style.touchAction = originalTouchAction ?? "";
-    originalOverflow = null;
-    originalOverscrollBehavior = null;
-    originalTouchAction = null;
-    return;
-  }
-
-  document.body.style.overflow = "hidden";
-  document.body.style.overscrollBehavior = Array.from(
-    activeLocks.values(),
-  ).some((lock) => lock.lockOverscroll)
-    ? "none"
-    : (originalOverscrollBehavior ?? "");
-  document.body.style.touchAction = Array.from(activeLocks.values()).some(
-    (lock) => lock.lockTouchAction,
-  )
-    ? "none"
-    : (originalTouchAction ?? "");
+  const locks = Array.from(activeLocks.values());
+  document.body.classList.toggle(BODY_SCROLL_LOCK_CLASS, locks.length > 0);
+  document.body.classList.toggle(
+    BODY_OVERSCROLL_LOCK_CLASS,
+    locks.some((lock) => lock.lockOverscroll),
+  );
+  document.body.classList.toggle(
+    BODY_TOUCH_LOCK_CLASS,
+    locks.some((lock) => lock.lockTouchAction),
+  );
 }
 
 export function acquireBodyScrollLock(
   options: BodyScrollLockOptions = {},
 ): () => void {
   if (typeof document === "undefined") return () => {};
-
-  if (activeLocks.size === 0) {
-    originalOverflow = document.body.style.overflow;
-    originalOverscrollBehavior = document.body.style.overscrollBehavior;
-    originalTouchAction = document.body.style.touchAction;
-  }
 
   const lockId = ++nextLockId;
   activeLocks.set(lockId, {

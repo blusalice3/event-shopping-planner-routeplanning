@@ -1,0 +1,239 @@
+{
+  "schemaVersion": 1,
+  "requestKeys": [
+    "appMode",
+    "browserFamily",
+    "buildId",
+    "event",
+    "online",
+    "schemaVersion"
+  ],
+  "buildId": {
+    "productionPattern": "^[0-9a-f]{40}$",
+    "nonproductionSentinel": "unknown-source"
+  },
+  "browserFamilies": ["chromium", "firefox", "safari", "other"],
+  "appModes": ["browser-tab", "installed-pwa"],
+  "events": {
+    "checkpoint-adoption": {
+      "keys": ["name", "outcome", "version"],
+      "outcomes": [
+        "adopted",
+        "already-absorbed",
+        "not-needed",
+        "failed",
+        "conflict"
+      ]
+    },
+    "fallback-repair": {
+      "keys": ["name", "outcome", "version"],
+      "outcomes": ["succeeded", "failed", "conflict"]
+    },
+    "load": {
+      "keys": ["name", "outcome", "version"],
+      "outcomes": ["succeeded", "missing", "failed", "conflict"]
+    },
+    "save": {
+      "keys": ["name", "outcome", "version"],
+      "outcomes": ["succeeded", "failed"]
+    },
+    "startup": {
+      "keys": ["durationBucket", "name", "outcome", "version"],
+      "outcomes": ["ready", "recovery-required"],
+      "durationBuckets": [
+        "lt-250ms",
+        "250-999ms",
+        "1-2999ms",
+        "3-9999ms",
+        "gte-10s"
+      ]
+    },
+    "cleanup": {
+      "keysWithoutReason": ["mode", "name", "outcome", "version"],
+      "keysWithReason": ["mode", "name", "outcome", "reason", "version"],
+      "modes": ["auto", "manual"],
+      "outcomesWithoutReason": [
+        "attempted",
+        "task-started",
+        "completed",
+        "key-confirmed-removed"
+      ],
+      "outcomesWithReason": [
+        "deferred",
+        "blocked",
+        "physical-deferred",
+        "physical-blocked"
+      ],
+      "reasonsByOutcome": {
+        "deferred": [
+          "runtime-kill-switch-unknown",
+          "web-locks-unsupported",
+          "exclusive-lock-unavailable",
+          "exclusive-lock-not-proven",
+          "exclusive-lock-request-failed",
+          "service-worker-state-unknown",
+          "service-worker-unsupported",
+          "service-worker-registration-missing",
+          "service-worker-not-active",
+          "service-worker-update-waiting",
+          "service-worker-version-unconfigured",
+          "service-worker-version-unknown",
+          "service-worker-version-mismatch",
+          "supported-client-version-unconfigured",
+          "client-handshake-unknown",
+          "client-version-unknown",
+          "unsupported-client-version",
+          "unresponsive-client",
+          "client-quiescence-unknown",
+          "client-not-quiescent"
+        ],
+        "blocked": [
+          "feature-flag-disabled",
+          "runtime-kill-switch-active",
+          "manual-other-tabs-not-confirmed",
+          "cleanup-task-failed",
+          "exclusive-lock-lifecycle-failed"
+        ],
+        "physical-deferred": [
+          "runtime-kill-switch-unknown",
+          "web-locks-unsupported",
+          "exclusive-lock-unavailable",
+          "exclusive-lock-not-proven",
+          "exclusive-lock-request-failed",
+          "service-worker-state-unknown",
+          "service-worker-unsupported",
+          "service-worker-registration-missing",
+          "service-worker-not-active",
+          "service-worker-update-waiting",
+          "service-worker-version-unconfigured",
+          "service-worker-version-unknown",
+          "service-worker-version-mismatch",
+          "supported-client-version-unconfigured",
+          "client-handshake-unknown",
+          "client-version-unknown",
+          "unsupported-client-version",
+          "unresponsive-client",
+          "client-quiescence-unknown",
+          "client-not-quiescent",
+          "cleanup-not-ready",
+          "migration-journal-cas-failed",
+          "legacy-source-remove-failed",
+          "legacy-source-missing-after-claim"
+        ],
+        "physical-blocked": [
+          "feature-flag-disabled",
+          "runtime-kill-switch-active",
+          "manual-other-tabs-not-confirmed",
+          "cleanup-task-failed",
+          "exclusive-lock-lifecycle-failed",
+          "migration-journal-invalid",
+          "migration-archive-invalid",
+          "committed-target-invalid",
+          "legacy-storage-unavailable",
+          "legacy-source-changed",
+          "legacy-source-reappeared",
+          "legacy-source-missing-before-claim",
+          "legacy-source-digest-mismatch"
+        ]
+      }
+    }
+  },
+  "transport": {
+    "endpoint": "/api/persistence-release-a-metrics",
+    "method": "POST",
+    "credentials": "omit",
+    "cache": "no-store",
+    "keepalive": true,
+    "maximumBytes": 1024
+  },
+  "handler": {
+    "requiredEnvironmentNames": [
+      "PERSISTENCE_METRICS_SUPABASE_URL",
+      "PERSISTENCE_METRICS_SUPABASE_SERVICE_ROLE_KEY",
+      "PERSISTENCE_METRICS_EXPECTED_PROJECT_REF",
+      "PERSISTENCE_METRICS_EXPECTED_PROVIDER_PROJECT_ID",
+      "PERSISTENCE_METRICS_ALLOWED_ORIGIN",
+      "VERCEL_DEPLOYMENT_ID",
+      "VERCEL_PROJECT_ID",
+      "VERCEL_PROJECT_PRODUCTION_URL",
+      "VERCEL_URL"
+    ],
+    "forbiddenEnvironmentNames": [
+      "SUPABASE_URL",
+      "SUPABASE_SERVICE_ROLE_KEY",
+      "PERSISTENCE_METRICS_ALLOW_GENERIC_FALLBACK"
+    ],
+    "upstreamTimeoutMilliseconds": 5000,
+    "redirect": "error",
+    "prefer": "return=minimal",
+    "responses": {
+      "accepted": {
+        "status": 202,
+        "body": {
+          "accepted": true
+        }
+      },
+      "method-not-allowed": {
+        "status": 405,
+        "body": {
+          "error": "method-not-allowed"
+        }
+      },
+      "forbidden": {
+        "status": 403,
+        "body": {
+          "error": "forbidden"
+        }
+      },
+      "unsupported-media-type": {
+        "status": 415,
+        "body": {
+          "error": "unsupported-media-type"
+        }
+      },
+      "invalid-json": {
+        "status": 400,
+        "body": {
+          "error": "invalid-json"
+        }
+      },
+      "invalid-schema": {
+        "status": 400,
+        "body": {
+          "error": "invalid-schema"
+        }
+      },
+      "request-too-large": {
+        "status": 413,
+        "body": {
+          "error": "request-too-large"
+        }
+      },
+      "metrics-backend-unavailable": {
+        "status": 503,
+        "body": {
+          "error": "metrics-backend-unavailable"
+        }
+      },
+      "metrics-insert-failed": {
+        "status": 502,
+        "body": {
+          "error": "metrics-insert-failed"
+        }
+      }
+    }
+  },
+  "databaseColumns": [
+    "app_mode",
+    "browser_family",
+    "build_id",
+    "cleanup_mode",
+    "cleanup_reason",
+    "duration_bucket",
+    "event_name",
+    "event_version",
+    "online",
+    "outcome",
+    "schema_version"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "list-long-virtual",
+  "domain": "shopping-list",
+  "dataset": {
+    "generator": "shopping-list-seeded-v1",
+    "seed": 1967,
+    "rowCount": 10000,
+    "grouped": false
+  },
+  "viewport": {
+    "columnCount": 1,
+    "zoomPercent": 100
+  },
+  "operation": {
+    "rendererPreference": "auto",
+    "interaction": "initial-render"
+  },
+  "requiredAssertions": [
+    "eligible-state-proven",
+    "selected-renderer-virtual",
+    "canonical-row-model",
+    "accessible-name-parity",
+    "bounded-dom-window"
+  ],
+  "requiredTelemetry": [
+    "durationMs",
+    "maxMainThreadTaskMs",
+    "renderedDomRowCount"
+  ]
+}

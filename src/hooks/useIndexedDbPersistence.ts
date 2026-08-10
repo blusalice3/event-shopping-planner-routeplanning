@@ -38,6 +38,7 @@ import {
   bucketPersistenceStartupDuration,
   recordPersistenceReleaseAMetric,
 } from "../utils/persistenceReleaseAMetrics";
+import type { PersistenceCommandPort } from "../app/ports/PersistenceCommandPort";
 
 export type PersistedStateValues = {
   eventLists: Record<string, ShoppingItem[]>;
@@ -264,37 +265,45 @@ type SaveTask = {
 const createSaveTasks = (
   previousValues: PersistedStateValues,
   currentValues: PersistedStateValues,
+  persistenceCommands: PersistenceCommandPort,
 ): SaveTask[] => {
   const saveTasks: SaveTask[] = [];
   if (previousValues.eventLists !== currentValues.eventLists) {
     saveTasks.push({
       label: "eventLists",
-      save: () => db.saveEventLists(currentValues.eventLists),
+      save: () => persistenceCommands.saveEventLists(currentValues.eventLists),
     });
   }
   if (previousValues.eventMetadata !== currentValues.eventMetadata) {
     saveTasks.push({
       label: "eventMetadata",
-      save: () => db.saveEventMetadata(currentValues.eventMetadata),
+      save: () =>
+        persistenceCommands.saveEventMetadata(currentValues.eventMetadata),
     });
   }
   if (previousValues.executeModeItems !== currentValues.executeModeItems) {
     saveTasks.push({
       label: "executeModeItems",
-      save: () => db.saveExecuteModeItems(currentValues.executeModeItems),
+      save: () =>
+        persistenceCommands.saveExecuteModeItems(
+          currentValues.executeModeItems,
+        ),
     });
   }
   if (previousValues.dayModes !== currentValues.dayModes) {
     saveTasks.push({
       label: "dayModes",
-      save: () => db.saveDayModes(currentValues.dayModes),
+      save: () => persistenceCommands.saveDayModes(currentValues.dayModes),
     });
   }
   if (previousValues.mapData !== currentValues.mapData) {
     saveTasks.push({
       label: "mapData",
       save: () =>
-        db.saveMapDataChanges(previousValues.mapData, currentValues.mapData),
+        persistenceCommands.saveMapDataChanges(
+          previousValues.mapData,
+          currentValues.mapData,
+        ),
     });
   }
   if (
@@ -302,25 +311,33 @@ const createSaveTasks = (
   ) {
     saveTasks.push({
       label: "mapRotationSettings",
-      save: () => db.saveMapRotationSettings(currentValues.mapRotationSettings),
+      save: () =>
+        persistenceCommands.saveMapRotationSettings(
+          currentValues.mapRotationSettings,
+        ),
     });
   }
   if (previousValues.routeSettings !== currentValues.routeSettings) {
     saveTasks.push({
       label: "routeSettings",
-      save: () => db.saveRouteSettings(currentValues.routeSettings),
+      save: () =>
+        persistenceCommands.saveRouteSettings(currentValues.routeSettings),
     });
   }
   if (previousValues.hallDefinitions !== currentValues.hallDefinitions) {
     saveTasks.push({
       label: "hallDefinitions",
-      save: () => db.saveHallDefinitions(currentValues.hallDefinitions),
+      save: () =>
+        persistenceCommands.saveHallDefinitions(currentValues.hallDefinitions),
     });
   }
   if (previousValues.hallRouteSettings !== currentValues.hallRouteSettings) {
     saveTasks.push({
       label: "hallRouteSettings",
-      save: () => db.saveHallRouteSettings(currentValues.hallRouteSettings),
+      save: () =>
+        persistenceCommands.saveHallRouteSettings(
+          currentValues.hallRouteSettings,
+        ),
     });
   }
   if (
@@ -328,7 +345,10 @@ const createSaveTasks = (
   ) {
     saveTasks.push({
       label: "mapViewportSettings",
-      save: () => db.saveMapViewportSettings(currentValues.mapViewportSettings),
+      save: () =>
+        persistenceCommands.saveMapViewportSettings(
+          currentValues.mapViewportSettings,
+        ),
     });
   }
   return saveTasks;
@@ -352,12 +372,14 @@ type PersistedStateSetters = {
 type UseIndexedDbPersistenceParams = {
   values: PersistedStateValues;
   setters: PersistedStateSetters;
+  persistenceCommands: PersistenceCommandPort;
   saveDelayMs?: number;
 };
 
 export function useIndexedDbPersistence({
   values,
   setters,
+  persistenceCommands,
   saveDelayMs = 500,
 }: UseIndexedDbPersistenceParams) {
   const [startupState, setStartupState] = useState<PersistenceStartupState>({
@@ -389,11 +411,13 @@ export function useIndexedDbPersistence({
   const persistenceStatusRef = useRef<PersistenceStatus>(persistenceStatus);
   const failedStoresRef = useRef<PersistedStoreName[]>(failedStores);
   const failureDetailsRef = useRef<PersistenceFailureDetail[]>(failureDetails);
+  const isInitializedRef = useRef(false);
   latestValuesRef.current = values;
   persistenceStatusRef.current = persistenceStatus;
   failedStoresRef.current = failedStores;
   failureDetailsRef.current = failureDetails;
   const isInitialized = startupState.status === "ready";
+  isInitializedRef.current = isInitialized;
   const {
     eventLists,
     eventMetadata,
@@ -457,7 +481,11 @@ export function useIndexedDbPersistence({
         saveRequestedRef.current = false;
         const currentValues = latestValuesRef.current;
         const previousValues = previousSavedValuesRef.current;
-        const saveTasks = createSaveTasks(previousValues, currentValues);
+        const saveTasks = createSaveTasks(
+          previousValues,
+          currentValues,
+          persistenceCommands,
+        );
 
         if (saveTasks.length === 0) {
           updateFailedStores([]);
@@ -531,6 +559,7 @@ export function useIndexedDbPersistence({
       const pendingStores = createSaveTasks(
         previousSavedValuesRef.current,
         latestValuesRef.current,
+        persistenceCommands,
       ).map(({ label }) => label);
       const normalizedFailures = pendingStores.map((storeName) =>
         normalizePersistenceFailure(storeName, error),
@@ -551,6 +580,7 @@ export function useIndexedDbPersistence({
       }
     }
   }, [
+    persistenceCommands,
     resolveSaveIdleWaiters,
     updateFailedStores,
     updateFailureDetails,
@@ -562,6 +592,64 @@ export function useIndexedDbPersistence({
     saveRequestedRef.current = true;
     void drainSaveQueue();
   }, [drainSaveQueue, isInitialized]);
+
+  const isUpdateBlocked = useCallback((): boolean => {
+    if (
+      !isInitializedRef.current ||
+      restoreInProgressRef.current ||
+      recoveryAdoptionInProgressRef.current ||
+      isSavingRef.current ||
+      saveRequestedRef.current ||
+      persistenceStatusRef.current !== "saved"
+    ) {
+      return true;
+    }
+
+    return (
+      createSaveTasks(
+        previousSavedValuesRef.current,
+        latestValuesRef.current,
+        persistenceCommands,
+      ).length > 0
+    );
+  }, [persistenceCommands]);
+
+  const flushPendingSave = useCallback(async (): Promise<void> => {
+    if (recoveryAdoptionInProgressRef.current) {
+      throw new Error("復旧候補の採用中は保存を確定できません。");
+    }
+    if (!isInitializedRef.current) {
+      throw new Error("保存データの初期化が完了していません。");
+    }
+    if (restoreInProgressRef.current) {
+      throw new Error("復元処理の完了前に保存を確定できません。");
+    }
+
+    while (isUpdateBlocked()) {
+      if (restoreInProgressRef.current) {
+        throw new Error("復元処理の完了前に保存を確定できません。");
+      }
+      if (recoveryAdoptionInProgressRef.current) {
+        throw new Error("復旧候補の採用中は保存を確定できません。");
+      }
+
+      // debounce待ちと実行中の保存のどちらでも、最新snapshotをもう一度queueへ載せる。
+      // drainSaveQueueはsingle-flightなので、実行中ならこの要求を現在の保存後に処理する。
+      saveRequestedRef.current = true;
+      await drainSaveQueue();
+      await waitForSaveIdle();
+
+      if (restoreInProgressRef.current) {
+        throw new Error("復元処理の完了前に保存を確定できません。");
+      }
+      if (recoveryAdoptionInProgressRef.current) {
+        throw new Error("復旧候補の採用中は保存を確定できません。");
+      }
+      if (persistenceStatusRef.current === "failed") {
+        throw new Error("保存を完了できませんでした。");
+      }
+    }
+  }, [drainSaveQueue, isUpdateBlocked, waitForSaveIdle]);
 
   const runExclusiveRestore = useCallback(
     async <T>(
@@ -615,6 +703,7 @@ export function useIndexedDbPersistence({
             createSaveTasks(
               previousSavedValuesRef.current,
               latestValuesRef.current,
+              persistenceCommands,
             ).length > 0;
           updateFailedStores(settledFailedStores);
           updateFailureDetails(settledFailureDetails);
@@ -633,6 +722,7 @@ export function useIndexedDbPersistence({
     [
       drainSaveQueue,
       isInitialized,
+      persistenceCommands,
       updateFailedStores,
       updateFailureDetails,
       updatePersistenceStatus,
@@ -659,7 +749,8 @@ export function useIndexedDbPersistence({
     };
 
     try {
-      const migrationResult = await db.migrateFromLocalStorage();
+      const migrationResult =
+        await persistenceCommands.migrateFromLocalStorage();
       const loadedSyncQueue = await db.loadSyncQueue();
       if (migrationResult.status === "recovery-required") {
         const syncQueueFailed =
@@ -889,6 +980,7 @@ export function useIndexedDbPersistence({
       recordStartupOutcome("recovery-required");
     }
   }, [
+    persistenceCommands,
     setDayModes,
     setEventLists,
     setEventMetadata,
@@ -959,7 +1051,7 @@ export function useIndexedDbPersistence({
       setIsAdoptingRecoveryCandidate(true);
       setRecoveryAdoptionError(null);
       try {
-        await db.adoptRecoveryCandidate(candidate);
+        await persistenceCommands.adoptRecoveryCandidate(candidate);
         await startInitialization();
       } catch (error) {
         if (!isMountedRef.current) return;
@@ -976,7 +1068,7 @@ export function useIndexedDbPersistence({
         }
       }
     },
-    [startInitialization, startupState],
+    [persistenceCommands, startInitialization, startupState],
   );
 
   useEffect(() => {
@@ -1045,6 +1137,8 @@ export function useIndexedDbPersistence({
     retryInitialization,
     adoptRecoveryCandidate,
     retrySave,
+    isUpdateBlocked,
+    flushPendingSave,
     runExclusiveRestore,
   } as const;
 }

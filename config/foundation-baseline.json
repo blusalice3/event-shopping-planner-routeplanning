@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "implementationTreeBaselineSha": "806794df6222053235139e7ef6684f4aa6538b3d",
+  "measurementSourceSha": "638dc0d2b05a09da9ea09e3f25e00bb36e1b2994",
+  "bootstrapBaselineSourceSha": null,
+  "baselineEvidence": {
+    "measurementSourceSha": "638dc0d2b05a09da9ea09e3f25e00bb36e1b2994",
+    "sourceState": "clean",
+    "runtime": {
+      "node": "20.20.0",
+      "npm": "10.8.2"
+    },
+    "lockfileSha256": "b4f16c215a39bb4d09c2f84ea7471a029f7e446d18ef5793f37596a48d0dce0e",
+    "buildInputClosure": {
+      "algorithm": "sha256-jcs-path-byteLength-fileSha256-v1",
+      "fileCount": 329,
+      "sha256": "09441fa55ee268d3aaaff683619ec37630ec1488a8128fdfc26601529d8b135e"
+    },
+    "policyHashes": {
+      "config/architecture-baseline.json": "b1a7b744e38a7101574877ead34601fb804c5a2bf98ef58eaf9ff68bad266dc1",
+      "config/architecture-policy.json": "d7d81bf81f94a15c55742657a5013bb269712a5055cbb349942bba66379f5d10",
+      "config/audit-waivers.json": "e0f936192f6ee6b7357aa2a8c3fc6e3e6e0fbcca8cbbec5cf76cb588b2034cfa",
+      "config/coverage-policy.json": "a023058ef6c2ef3500fe0ed42c4099129ad4c08ca3f99878823292bfc6c3f3d6",
+      "config/encoding-policy.json": "14cc71e2e1baf4571af438e0a683f1656ce8c5361bf1f03a0793746a1a034c06",
+      "config/performance-budgets.json": "59945bbcac56f85dfdb8997049420a3f39d4462bc34d34b8ca75c8b7e826aff0",
+      "config/test-project-membership.json": "7e1fab86c8a92d59b64ca10e8e52d76cabf9562c7cb23fac20bb45b103edf6d6",
+      "config/toolchain-versions.json": "505ce256877f4baa8b7784c5b5031b2114ac6f07a230b9a3fac98f325a4eff6b",
+      "config/ui-scenarios.json": "2777e038d108ba09bbb9d8757654cc2ee003c60180ffa169e6f3c5fc2d877e1c"
+    },
+    "commandEvidenceHash": "2298696db2743f58ea5e8e59c9c445f332d0f170b14f8673790c04707faa6a93",
+    "commandResults": {
+      "encoding": {
+        "command": "npm run test:encoding",
+        "status": "pass",
+        "textFileCount": 328,
+        "representativeStrings": {
+          "エラーが発生しました": 6,
+          "ユーザー登録": 3
+        }
+      },
+      "typecheck": {
+        "command": "npm run typecheck",
+        "status": "pass"
+      },
+      "lint": {
+        "command": "npm run lint",
+        "status": "pass-with-baseline",
+        "errors": 0,
+        "warnings": 130
+      },
+      "tests": {
+        "command": "npm run test:run",
+        "status": "pass",
+        "files": 120,
+        "tests": 1198
+      },
+      "releaseABuild": {
+        "command": "npm run build:release-a",
+        "status": "pass"
+      },
+      "auditAll": {
+        "command": "npm audit",
+        "status": "blocking",
+        "critical": 1,
+        "high": 19,
+        "moderate": 8,
+        "low": 1
+      },
+      "auditProduction": {
+        "command": "npm audit --omit=dev",
+        "status": "blocking",
+        "critical": 0,
+        "high": 4,
+        "moderate": 2,
+        "low": 0
+      }
+    },
+    "artifactObservation": {
+      "authority": "local-reference-only",
+      "mainJavaScriptBytes": 941325,
+      "xlsxParserBytes": 974780,
+      "precacheEntries": 19,
+      "precacheKiB": 3085.67,
+      "rawDistManifestSha256": null
+    },
+    "moduleObservation": {
+      "supabaseBrowserImporters": 0,
+      "inlineJsxStyleCount": 101
+    }
+  },
+  "baselineEvidenceSha256": "a5997fe5fdbb9e410aa81ec37197092fcb717957a68ba9f31f4fc63431564aeb",
+  "externalBindings": {
+    "providerProduction": {
+      "status": "unknown",
+      "projectId": null,
+      "deploymentId": null,
+      "sourceSha": null,
+      "domains": [],
+      "environmentName": null
+    },
+    "metricsDatabase": {
+      "status": "unknown",
+      "projectRef": null,
+      "fingerprint": null,
+      "backupOwner": null,
+      "restoreOwner": null
+    },
+    "releaseStateDatabase": {
+      "status": "not-provisioned",
+      "namespace": null,
+      "credentialOwner": null,
+      "backupOwner": null,
+      "restoreOwner": null
+    }
+  },
+  "blockers": [
+    {
+      "id": "P0-PROVIDER-BINDING",
+      "blocks": ["P0-BASELINE", "P0-PROMOTE"],
+      "reason": "Production project, deployment, source, domains, and environment have not been observed through the provider API."
+    },
+    {
+      "id": "P0-BOOTSTRAP-BASELINE",
+      "blocks": ["P0-BASELINE", "P0-PROMOTE"],
+      "reason": "No provider-bound bootstrapBaselineSourceSha, raw-dist manifest, or recovery rehearsal evidence is available."
+    },
+    {
+      "id": "P0-RELEASE-STATE-STORE",
+      "blocks": ["P0-BASELINE", "P0-ARTIFACT"],
+      "reason": "The protected PostgreSQL control store, namespace roles, credentials, and backup/restore owners are not provisioned."
+    },
+    {
+      "id": "P0-DATABASE-BINDING",
+      "blocks": ["P0-BASELINE", "P0-DATA"],
+      "reason": "The production metrics database schema, privilege state, project reference, and backup/PITR ownership are not remotely observed."
+    }
+  ]
+}

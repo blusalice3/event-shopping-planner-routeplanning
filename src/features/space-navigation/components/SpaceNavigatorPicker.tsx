@@ -9,7 +9,7 @@ import type { NavigatorEntry, NavigatorStatusKind } from "../types";
 import type { SpaceNavigatorSide } from "../hooks/useSpaceNavigatorSettings";
 import { clampCandidateIndex } from "../domain/candidateIndex";
 import {
-  NAVIGATOR_STATUS_COLORS,
+  NAVIGATOR_STATUS_CLASS_NAMES,
   SpaceNavigatorLegend,
 } from "./SpaceNavigatorLegend";
 
@@ -125,11 +125,6 @@ export function SpaceNavigatorPicker({
       return { index, entry: entries[index] };
     });
   }, [candidateIndex, entries, layoutMode, windowRadius]);
-  const selectedRowIndex = Math.max(
-    0,
-    rows.findIndex(({ index }) => index === candidateIndex),
-  );
-
   useLayoutEffect(() => {
     if (layoutMode !== "smartphone") return;
     const selectedRow = selectedRowRef.current;
@@ -158,10 +153,9 @@ export function SpaceNavigatorPicker({
     >
       <section
         ref={sheetRef}
-        className={`fixed top-[env(safe-area-inset-top)] flex w-[90vw] max-w-[420px] flex-col overflow-hidden bg-white/95 shadow-2xl dark:bg-slate-900/95 ${
+        className={`fixed bottom-[var(--footer-height,0px)] top-[env(safe-area-inset-top)] flex w-[90vw] max-w-[420px] flex-col overflow-hidden bg-white/95 shadow-2xl dark:bg-slate-900/95 ${
           side === "left" ? "left-0 rounded-r-2xl" : "right-0 rounded-l-2xl"
         }`}
-        style={{ bottom: "var(--footer-height, 0px)" }}
         role="dialog"
         aria-modal="true"
         aria-label="スペース一覧"
@@ -194,20 +188,9 @@ export function SpaceNavigatorPicker({
           ref={listRef}
           className={`relative mx-3 my-3 min-h-0 flex-1 select-none rounded-xl border border-slate-200 bg-slate-100/70 dark:border-slate-700 dark:bg-slate-950/50 ${
             layoutMode === "smartphone"
-              ? "block overflow-y-auto overscroll-contain"
-              : "grid overflow-hidden"
+              ? "block touch-pan-y overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch]"
+              : "flex touch-none flex-col overflow-hidden"
           }`}
-          style={
-            layoutMode === "smartphone"
-              ? {
-                  touchAction: "pan-y",
-                  WebkitOverflowScrolling: "touch",
-                }
-              : {
-                  gridTemplateRows: `repeat(${rows.length}, minmax(0, 1fr))`,
-                  touchAction: "none",
-                }
-          }
           data-testid="space-navigator-window"
           data-visible-row-count={rows.length}
           data-scroll-mode={
@@ -321,16 +304,6 @@ export function SpaceNavigatorPicker({
             }
           }}
         >
-          {layoutMode === "pc" && rows.length > 0 && (
-            <div
-              className="pointer-events-none absolute left-0 right-0 z-10 -translate-y-1/2 border-y-2 border-indigo-500 bg-indigo-100/20 dark:bg-indigo-400/10"
-              style={{
-                height: `${100 / rows.length}%`,
-                top: `${((selectedRowIndex + 0.5) / rows.length) * 100}%`,
-              }}
-              data-testid="space-navigator-selection"
-            />
-          )}
           {rows.map(({ index, entry }, rowIndex) => {
             const isSelected = index === candidateIndex;
             if (!entry) {
@@ -350,17 +323,22 @@ export function SpaceNavigatorPicker({
                     : undefined
                 }
                 type="button"
-                className={`relative z-20 flex w-full items-center gap-3 overflow-hidden border-b border-slate-200/70 px-3 text-left transition-colors last:border-b-0 dark:border-slate-700/70 ${
+                className={`relative z-20 flex w-full flex-1 items-center gap-3 overflow-hidden border-b border-slate-200/70 px-3 text-left transition-colors last:border-b-0 dark:border-slate-700/70 ${
                   layoutMode === "smartphone" ? "min-h-[68px]" : "min-h-0"
                 } ${
                   isSelected
                     ? `font-semibold text-indigo-950 dark:text-indigo-100 ${
                         layoutMode === "smartphone"
                           ? "bg-indigo-100/70 dark:bg-indigo-900/40"
-                          : ""
+                          : "border-y-2 border-indigo-500 bg-indigo-100/20 dark:bg-indigo-400/10"
                       }`
                     : "text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-slate-800/70"
                 }`}
+                data-testid={
+                  layoutMode === "pc" && isSelected
+                    ? "space-navigator-selection"
+                    : undefined
+                }
                 onClick={() => {
                   if (didDragRef.current) {
                     didDragRef.current = false;
@@ -398,10 +376,7 @@ export function SpaceNavigatorPicker({
                   {entry.statusSegments.map((segment) => (
                     <span
                       key={segment.kind}
-                      className="rounded px-1 py-0.5 text-[10px] font-bold text-white"
-                      style={{
-                        backgroundColor: NAVIGATOR_STATUS_COLORS[segment.kind],
-                      }}
+                      className={`rounded px-1 py-0.5 text-[10px] font-bold text-white ${NAVIGATOR_STATUS_CLASS_NAMES[segment.kind]}`}
                       title={`${statusAbbreviations[segment.kind]} ${segment.count}件`}
                     >
                       {statusAbbreviations[segment.kind]}

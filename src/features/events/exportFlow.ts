@@ -14,7 +14,12 @@ import type {
   MapViewportSettingsStore,
   RouteSettingsStore,
 } from "../../types/map";
-import { exportToXlsx } from "../../utils/exportImport";
+import {
+  buildEventWorkbookExportSnapshot,
+  buildEventWorkbookFileName,
+} from "../../xlsx/domain/eventWorkbook";
+import type { XlsxExecutionPort } from "../../xlsx/port/XlsxExecutionPort";
+import type { XlsxProgressListener } from "../../xlsx/port/XlsxExecutionPort";
 
 type ExportStores = {
   executeModeItems: Record<string, ExecuteModeItems>;
@@ -34,23 +39,18 @@ export function hasExportableItems(
   return !!items && items.length > 0;
 }
 
-function buildExportFilename(
-  eventName: string,
-  format: ExportOptions["format"],
-): string {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
-  const suffix = format === "full" ? "full" : "simple";
-  return `${eventName}_${timestamp}_${suffix}.xlsx`;
-}
-
 export async function buildEventExportFile(
+  executionPort: XlsxExecutionPort,
+  signal: AbortSignal,
   eventName: string,
   items: ShoppingItem[],
   options: ExportOptions,
   metadata: EventMetadata | undefined,
   stores: ExportStores,
-): Promise<{ blob: Blob; filename: string }> {
-  const blob = await exportToXlsx(eventName, items, options, {
+  now: Date = new Date(),
+  onProgress?: XlsxProgressListener,
+): Promise<{ bytes: Uint8Array; filename: string }> {
+  const snapshot = buildEventWorkbookExportSnapshot(eventName, items, options, {
     metadata,
     executeModeItems: stores.executeModeItems,
     dayModes: stores.dayModes,
@@ -62,9 +62,14 @@ export async function buildEventExportFile(
     hallRouteSettings: stores.hallRouteSettings,
     blockDetectionSettings: stores.blockDetectionSettings,
   });
+  const bytes = await executionPort.exportWorkbook(
+    snapshot,
+    signal,
+    onProgress,
+  );
 
   return {
-    blob,
-    filename: buildExportFilename(eventName, options.format),
+    bytes,
+    filename: buildEventWorkbookFileName(eventName, options.format, now),
   };
 }

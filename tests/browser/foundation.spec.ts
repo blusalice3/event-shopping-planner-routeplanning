@@ -1,0 +1,379 @@
+import { expect, test, type Page } from "@playwright/test";
+import axe from "axe-core";
+import { readFileSync } from "node:fs";
+
+type CspPolicy = {
+  readonly directives: Record<string, string[]>;
+  readonly securityHeaders: Record<string, string>;
+};
+
+const cspPolicy = JSON.parse(
+  readFileSync(
+    new URL("../../config/csp-policy.json", import.meta.url),
+    "utf8",
+  ),
+) as CspPolicy;
+const expectedContentSecurityPolicy = Object.entries(cspPolicy.directives)
+  .map(([directive, values]) => `${directive} ${values.join(" ")}`)
+  .join("; ");
+
+const applicationOrigin = new URL(
+  process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:4173",
+).origin;
+
+type ReleaseIdentity = {
+  schemaVersion: 1;
+  sourceSha: string;
+  buildId: string;
+  variantId: string;
+  releaseRole: "standard" | "containment";
+  requiredDbCompatibilityFingerprint: string;
+  pwaLifecycle: "prompt-close-all-v1";
+  roleEntryUrl: string;
+  roleEntrySha256: string;
+  serviceWorkerUrl: string;
+  serviceWorkerSha256: string;
+  outerAgentUrl: string;
+  outerAgentSha256: string;
+};
+
+type ReleaseCapabilities = {
+  kind: "event-shopping-planner-release-capabilities";
+  version: 1;
+  buildId: string;
+  sourceSha: string;
+  releaseChannel: "release-a";
+  legacyLocalStorageCleanup: "forced-off";
+};
+
+type RuntimePageIdentity = {
+  buildId: string | null;
+  sourceSha: string | null;
+  variantId: string | null;
+  releaseRole: string | null;
+  controllerScriptUrl: string | null;
+};
+
+const readRuntimePageIdentity = async (
+  page: Page,
+): Promise<RuntimePageIdentity> =>
+  page.evaluate(() => {
+    const meta = (name: string): string | null =>
+      document
+        .querySelector<HTMLMetaElement>(`meta[name="${name}"]`)
+        ?.content.trim() ?? null;
+    return {
+      buildId: meta("event-shopping-planner-build-id"),
+      sourceSha: meta("event-shopping-planner-source-sha"),
+      variantId: meta("event-shopping-planner-variant-id"),
+      releaseRole: meta("event-shopping-planner-release-role"),
+      controllerScriptUrl:
+        navigator.serviceWorker.controller?.scriptURL ?? null,
+    };
+  });
+
+const waitForApplication = async (page: Page) => {
+  const response = await page.goto("/");
+  expect(response).not.toBeNull();
+  await expect(page.locator("#loading-screen")).toHaveClass(/hidden/);
+  await expect(page.locator("#loading-screen")).toBeHidden();
+  await expect(page.locator("#root")).not.toBeEmpty();
+  return response!;
+};
+
+const waitForFiniteAnimations = async (page: Page) => {
+  await page.waitForFunction(() =>
+    document.getAnimations().every((animation) => {
+      const iterations = animation.effect?.getTiming().iterations;
+      return (
+        iterations === Infinity ||
+        (animation.playState !== "pending" && animation.playState !== "running")
+      );
+    }),
+  );
+};
+
+test("loads the source-bound PWA without remote runtime dependencies", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const violations: Array<{
+      blockedURI: string;
+      effectiveDirective: string;
+      sourceFile: string;
+    }> = [];
+    Object.defineProperty(globalThis, "__foundationCspViolations", {
+      configurable: false,
+      enumerable: false,
+      value: violations,
+      writable: false,
+    });
+    document.addEventListener("securitypolicyviolation", (event) => {
+      violations.push({
+        blockedURI: event.blockedURI,
+        effectiveDirective: event.effectiveDirective,
+        sourceFile: event.sourceFile,
+      });
+    });
+  });
+  const remoteRequests = new Set<string>();
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      url.origin !== applicationOrigin
+    ) {
+      remoteRequests.add(url.origin);
+    }
+  });
+
+  const documentResponse = await waitForApplication(page);
+  const responseHeaders = documentResponse.headers();
+  expect(responseHeaders["content-security-policy"]).toBe(
+    expectedContentSecurityPolicy,
+  );
+  for (const [headerName, expectedValue] of Object.entries(
+    cspPolicy.securityHeaders,
+  )) {
+    expect(responseHeaders[headerName.toLowerCase()]).toBe(expectedValue);
+  }
+
+  const inlineSurface = await page.evaluate(() => ({
+    inlineScripts: document.querySelectorAll("script:not([src])").length,
+    inlineStyles: document.querySelectorAll("style, [style]").length,
+    themePrepaintSource:
+      document
+        .querySelector<HTMLScriptElement>('script[src="/theme-prepaint.js"]')
+        ?.getAttribute("src") ?? null,
+  }));
+  expect(inlineSurface).toEqual({
+    inlineScripts: 0,
+    inlineStyles: 0,
+    themePrepaintSource: "/theme-prepaint.js",
+  });
+
+  const identity = await page.evaluate(async () => {
+    const response = await fetch("/release-identity.json", {
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`identity HTTP ${response.status}`);
+    return (await response.json()) as ReleaseIdentity;
+  });
+  expect(identity).toMatchObject({
+    schemaVersion: 1,
+    releaseRole: "standard",
+    pwaLifecycle: "prompt-close-all-v1",
+    roleEntryUrl: "/assets/release-role.js",
+    serviceWorkerUrl: "/sw.js",
+    outerAgentUrl: "/assets/outer-recovery-agent.js",
+  });
+  expect(identity.sourceSha).toBe(identity.buildId);
+  expect(identity.sourceSha).toMatch(/^[0-9a-f]{40}$/);
+  expect(identity.variantId).toMatch(/^[0-9a-f]{64}$/);
+  expect(identity.requiredDbCompatibilityFingerprint).toMatch(/^[0-9a-f]{64}$/);
+  for (const digest of [
+    identity.roleEntrySha256,
+    identity.serviceWorkerSha256,
+    identity.outerAgentSha256,
+  ]) {
+    expect(digest).toMatch(/^[0-9a-f]{64}$/);
+  }
+
+  const [versionedIdentity, capabilities] = await page.evaluate(
+    async ({ versionedIdentityUrl, capabilityUrl }) => {
+      const [identityResponse, capabilityResponse] = await Promise.all([
+        fetch(versionedIdentityUrl, { cache: "no-store" }),
+        fetch(capabilityUrl, { cache: "no-store" }),
+      ]);
+      if (!identityResponse.ok || !capabilityResponse.ok) {
+        throw new Error(
+          `versioned identity/capability HTTP ${identityResponse.status}/${capabilityResponse.status}`,
+        );
+      }
+      return [
+        (await identityResponse.json()) as ReleaseIdentity,
+        (await capabilityResponse.json()) as ReleaseCapabilities,
+      ] as const;
+    },
+    {
+      versionedIdentityUrl: `/release-identity.${identity.sourceSha}.${identity.variantId}.json`,
+      capabilityUrl: "/release-capabilities.json",
+    },
+  );
+  expect(versionedIdentity).toEqual(identity);
+  expect(capabilities).toMatchObject({
+    kind: "event-shopping-planner-release-capabilities",
+    version: 1,
+    buildId: identity.sourceSha,
+    sourceSha: identity.sourceSha,
+    releaseChannel: "release-a",
+    legacyLocalStorageCleanup: "forced-off",
+  });
+  expect([...remoteRequests]).toEqual([]);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (
+            globalThis as typeof globalThis & {
+              __foundationCspViolations?: unknown[];
+            }
+          ).__foundationCspViolations ?? [],
+      ),
+    )
+    .toEqual([]);
+});
+
+test("keeps the controlled application available during an offline reload", async ({
+  context,
+  page,
+}) => {
+  await waitForApplication(page);
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.ready;
+  });
+  await page.reload();
+  await expect
+    .poll(() =>
+      page.evaluate(() => Boolean(navigator.serviceWorker.controller)),
+    )
+    .toBe(true);
+  const onlineIdentity = await readRuntimePageIdentity(page);
+  expect(onlineIdentity).toEqual({
+    buildId: expect.stringMatching(/^[0-9a-f]{40}$/),
+    sourceSha: expect.stringMatching(/^[0-9a-f]{40}$/),
+    variantId: expect.stringMatching(/^[0-9a-f]{64}$/),
+    releaseRole: "standard",
+    controllerScriptUrl: new URL("/sw.js", applicationOrigin).href,
+  });
+  expect(onlineIdentity.sourceSha).toBe(onlineIdentity.buildId);
+
+  await context.setOffline(true);
+  try {
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.locator("#loading-screen")).toHaveClass(/hidden/);
+    await expect(page.locator("#loading-screen")).toBeHidden();
+    await expect(page.locator("#root")).not.toBeEmpty();
+    await expect
+      .poll(() =>
+        page.evaluate(() => Boolean(navigator.serviceWorker.controller)),
+      )
+      .toBe(true);
+    expect(await readRuntimePageIdentity(page)).toEqual(onlineIdentity);
+
+    const offlineCapabilities = await page.evaluate(async () => {
+      const response = await fetch("/release-capabilities.json");
+      if (!response.ok) {
+        throw new Error(`offline capabilities HTTP ${response.status}`);
+      }
+      return (await response.json()) as ReleaseCapabilities;
+    });
+    expect({
+      buildId: offlineCapabilities.buildId,
+      sourceSha: offlineCapabilities.sourceSha,
+      releaseChannel: offlineCapabilities.releaseChannel,
+      legacyLocalStorageCleanup: offlineCapabilities.legacyLocalStorageCleanup,
+    }).toEqual({
+      buildId: onlineIdentity.buildId,
+      sourceSha: onlineIdentity.sourceSha,
+      releaseChannel: "release-a",
+      legacyLocalStorageCleanup: "forced-off",
+    });
+  } finally {
+    await context.setOffline(false);
+  }
+});
+
+test("@a11y has no moderate, serious, or critical automated accessibility violations", async ({
+  page,
+}) => {
+  await page.addInitScript({ content: axe.source });
+  await waitForApplication(page);
+  const attentionOpacitySamples = await page.evaluate(async () => {
+    const probe = document.createElement("div");
+    probe.className =
+      "animate-attention-outline attention-outline-red bg-red-600 text-white";
+    probe.textContent = "attention animation contrast probe";
+    document.body.append(probe);
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+    const samples = [getComputedStyle(probe).opacity];
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    samples.push(getComputedStyle(probe).opacity);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    samples.push(getComputedStyle(probe).opacity);
+    probe.remove();
+    return samples;
+  });
+  expect(attentionOpacitySamples).toEqual(["1", "1", "1"]);
+  const themeCases = [
+    { colorScheme: "light", dataTheme: "light" },
+    { colorScheme: "light", dataTheme: "dark" },
+    { colorScheme: "light", dataTheme: "system" },
+    { colorScheme: "dark", dataTheme: "system" },
+  ] as const;
+  const violations = [];
+
+  for (const themeCase of themeCases) {
+    await page.emulateMedia({ colorScheme: themeCase.colorScheme });
+    const useDarkTheme = await page.evaluate(({ colorScheme, dataTheme }) => {
+      const useDarkTheme =
+        dataTheme === "dark" ||
+        (dataTheme === "system" && colorScheme === "dark");
+      document.documentElement.setAttribute("data-theme", dataTheme);
+      document.documentElement.classList.toggle("dark", useDarkTheme);
+      return useDarkTheme;
+    }, themeCase);
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-theme",
+      themeCase.dataTheme,
+    );
+    expect(
+      await page
+        .locator("html")
+        .evaluate((element) => element.classList.contains("dark")),
+    ).toBe(useDarkTheme);
+    await waitForFiniteAnimations(page);
+    const themeViolations = await page.evaluate(async () => {
+      const axeApi = (
+        globalThis as typeof globalThis & {
+          axe: {
+            run(
+              context: Document,
+              options: {
+                resultTypes: string[];
+              },
+            ): Promise<{
+              violations: Array<{
+                id: string;
+                impact: string | null;
+                nodes: Array<{ target: string[] }>;
+              }>;
+            }>;
+          };
+        }
+      ).axe;
+      const result = await axeApi.run(document, {
+        resultTypes: ["violations"],
+      });
+      return result.violations
+        .filter(({ impact }) =>
+          ["moderate", "serious", "critical"].includes(impact ?? ""),
+        )
+        .map(({ id, impact, nodes }) => ({
+          id,
+          impact,
+          targets: nodes.map(({ target }) => target.join(" ")),
+        }));
+    }, themeCase);
+    violations.push(
+      ...themeViolations.map((violation) => ({
+        ...violation,
+        theme: themeCase.dataTheme,
+      })),
+    );
+  }
+
+  expect(violations).toEqual([]);
+});

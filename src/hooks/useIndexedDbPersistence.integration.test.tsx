@@ -4,10 +4,23 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { IDBFactory } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "../utils/indexedDB";
+import { createIndexedDbPersistenceCommandAdapter } from "../persistence/adapters/indexedDbPersistenceCommandAdapter";
 import {
-  useIndexedDbPersistence,
+  useIndexedDbPersistence as useIndexedDbPersistenceImplementation,
   type PersistedStateValues,
 } from "./useIndexedDbPersistence";
+
+const persistenceCommands = createIndexedDbPersistenceCommandAdapter();
+type ImplementationHookParams = Parameters<
+  typeof useIndexedDbPersistenceImplementation
+>[0];
+const useIndexedDbPersistence = (
+  params: Omit<ImplementationHookParams, "persistenceCommands">,
+) =>
+  useIndexedDbPersistenceImplementation({
+    ...params,
+    persistenceCommands,
+  });
 
 type HookParams = Parameters<typeof useIndexedDbPersistence>[0];
 type PersistedSetters = HookParams["setters"];

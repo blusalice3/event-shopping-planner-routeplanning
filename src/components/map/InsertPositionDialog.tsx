@@ -1,5 +1,6 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useId, useMemo, useRef } from "react";
 import { ShoppingItem } from "../../types/item";
+import { acquireBodyScrollLock } from "../../utils/bodyScrollLock";
 
 export type InsertPosition =
   | { type: "before"; referenceItemId: string }
@@ -34,17 +35,31 @@ const extractNumeric = (number: string): number => {
 
 const indexToLetter = (i: number): string => String.fromCharCode(65 + i);
 
+const FOCUSABLE_SELECTOR = [
+  "button:not([disabled])",
+  "[href]",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(", ");
+
+const getFocusableElements = (container: HTMLElement): HTMLElement[] =>
+  Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR));
+
 const InsertMarker: React.FC<{
   letter: string;
   onSelect: () => void;
 }> = ({ letter, onSelect }) => (
   <button
+    type="button"
     onClick={onSelect}
+    aria-label={`挿入位置 ${letter} を選択`}
     className="w-full group flex items-center gap-1 py-0.5 px-1 my-0.5 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-colors"
   >
     <div className="flex-1 flex items-center gap-1.5">
       <div className="h-px flex-1 bg-green-300 dark:bg-green-600 group-hover:bg-green-500 dark:group-hover:bg-green-400 transition-colors" />
-      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-500 dark:bg-green-600 text-white text-xs font-bold shadow-sm group-hover:bg-green-600 dark:group-hover:bg-green-500 group-hover:scale-110 transition-all">
+      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-700 dark:bg-green-700 text-white text-xs font-bold shadow-sm group-hover:bg-green-800 dark:group-hover:bg-green-800 group-hover:scale-110 transition-all">
         {letter}
       </span>
       <div className="h-px flex-1 bg-green-300 dark:bg-green-600 group-hover:bg-green-500 dark:group-hover:bg-green-400 transition-colors" />
@@ -161,6 +176,7 @@ const PreviewMode: React.FC<{
 
       {hasHallDefinition && (
         <button
+          type="button"
           onClick={() => onSelect({ type: "hallEnd" })}
           className="w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors text-left flex items-center gap-2"
         >
@@ -168,6 +184,7 @@ const PreviewMode: React.FC<{
         </button>
       )}
       <button
+        type="button"
         onClick={() => onSelect({ type: "listEnd" })}
         className="w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors text-left flex items-center gap-2"
       >
@@ -186,6 +203,79 @@ const InsertPositionDialog: React.FC<InsertPositionDialogProps> = ({
   onSelect,
   onCancel,
 }) => {
+  const idPrefix = useId();
+  const titleId = `${idPrefix}-title`;
+  const descriptionId = `${idPrefix}-description`;
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    openerRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const releaseBodyScrollLock = acquireBodyScrollLock({
+      lockOverscroll: true,
+      lockTouchAction: true,
+    });
+    const dialog = dialogRef.current;
+    const initialFocusTarget = dialog
+      ? (getFocusableElements(dialog)[0] ?? dialog)
+      : null;
+    initialFocusTarget?.focus();
+
+    return () => {
+      releaseBodyScrollLock();
+      const opener = openerRef.current;
+      openerRef.current = null;
+      if (opener?.isConnected) opener.focus();
+    };
+  }, [isOpen]);
+
+  const handleDialogKeyDown = (
+    event: React.KeyboardEvent<HTMLDivElement>,
+  ): void => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onCancel();
+      return;
+    }
+
+    if (event.key !== "Tab") return;
+
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const focusableElements = getFocusableElements(dialog);
+    if (focusableElements.length === 0) {
+      event.preventDefault();
+      dialog.focus();
+      return;
+    }
+
+    const firstFocusable = focusableElements[0];
+    const lastFocusable = focusableElements[focusableElements.length - 1];
+    const activeElement = document.activeElement;
+    const activeElementIndex = focusableElements.findIndex(
+      (element) => element === activeElement,
+    );
+
+    if (event.shiftKey) {
+      if (activeElementIndex <= 0) {
+        event.preventDefault();
+        lastFocusable.focus();
+      }
+      return;
+    }
+
+    if (activeElementIndex === -1 || activeElement === lastFocusable) {
+      event.preventDefault();
+      firstFocusable.focus();
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -195,15 +285,26 @@ const InsertPositionDialog: React.FC<InsertPositionDialogProps> = ({
         if (event.target === event.currentTarget) onCancel();
       }}
     >
-      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-[340px] max-h-[80vh] flex flex-col overflow-hidden">
-        <div className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-4 py-3">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        tabIndex={-1}
+        onKeyDown={handleDialogKeyDown}
+        className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-[340px] max-h-[80vh] flex flex-col overflow-hidden"
+      >
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-3">
           <div className="flex items-center justify-between">
-            <div className="text-sm font-bold">追加位置を選択</div>
-            <span className="text-[10px] opacity-70 bg-white/20 px-1.5 py-0.5 rounded">
+            <h2 id={titleId} className="text-sm font-bold">
+              追加位置を選択
+            </h2>
+            <span className="text-[10px] bg-blue-800 text-white px-1.5 py-0.5 rounded">
               プレビュー
             </span>
           </div>
-          <div className="text-xs opacity-90 mt-1">
+          <div id={descriptionId} className="text-xs text-white mt-1">
             {addingItem.block}-{addingItem.number}
             {addingItem.circle ? ` (${addingItem.circle})` : ""}
           </div>
@@ -219,6 +320,7 @@ const InsertPositionDialog: React.FC<InsertPositionDialogProps> = ({
 
         <div className="border-t border-slate-200 dark:border-slate-600 p-2">
           <button
+            type="button"
             onClick={onCancel}
             className="w-full px-3 py-2 text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
           >

@@ -1,6 +1,6 @@
 import React from "react";
 import { useOptionalSpaceNavigator } from "../SpaceNavigatorContext";
-import { NAVIGATOR_STATUS_COLORS } from "./SpaceNavigatorLegend";
+import { NAVIGATOR_STATUS_CLASS_NAMES } from "./SpaceNavigatorLegend";
 
 export function SpaceNavigatorSettingsPanel() {
   const navigator = useOptionalSpaceNavigator();
@@ -76,12 +76,8 @@ export function SpaceNavigatorSettingsPanel() {
             表示見本
           </p>
           <div className="flex h-4 overflow-hidden rounded border border-slate-300 dark:border-slate-600">
-            {Object.values(NAVIGATOR_STATUS_COLORS).map((color) => (
-              <span
-                key={color}
-                className="flex-1"
-                style={{ backgroundColor: color }}
-              />
+            {Object.values(NAVIGATOR_STATUS_CLASS_NAMES).map((className) => (
+              <span key={className} className={`flex-1 ${className}`} />
             ))}
           </div>
         </div>

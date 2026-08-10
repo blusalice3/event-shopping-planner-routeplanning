@@ -4,8 +4,11 @@ import App from "./App";
 import { SpaceNavigatorProvider } from "./features/space-navigation/SpaceNavigatorContext";
 import { SpaceNavigatorHost } from "./features/space-navigation/components/SpaceNavigatorHost";
 import { installPersistenceReleaseAMetricsBackend } from "./utils/persistenceReleaseAMetricsBackend";
+import { appRuntime } from "./app/composition/appRuntime";
+import { installRoleUpdateBlockerBridge } from "./pwa/updateBlockerRegistry";
 
 installPersistenceReleaseAMetricsBackend();
+installRoleUpdateBlockerBridge();
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {
@@ -15,7 +18,9 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <SpaceNavigatorProvider>
+    <SpaceNavigatorProvider
+      settingsPersistence={appRuntime.persistenceCommands}
+    >
       <App />
       <SpaceNavigatorHost />
     </SpaceNavigatorProvider>

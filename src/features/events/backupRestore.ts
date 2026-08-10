@@ -1,4 +1,4 @@
-import type { AppData } from "../../utils/indexedDB";
+import type { AppData } from "../../app/ports/PersistenceCommandPort";
 
 const APP_DATA_SECTIONS = [
   "eventLists",

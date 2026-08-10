@@ -1,0 +1,301 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://event-shopping-planner.invalid/schemas/performance-inherited-closure-v1.json",
+  "title": "Accepted historical performance evidence closure",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "closure", "closureSha256"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "closure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "closureId",
+        "createdAtUtc",
+        "namespace",
+        "p8Source",
+        "policyBindings",
+        "requiredGates",
+        "gates",
+        "scenarios"
+      ],
+      "properties": {
+        "kind": { "const": "performance-inherited-closure/v1" },
+        "closureId": {
+          "type": "string",
+          "pattern": "^perf-closure-[a-z0-9][a-z0-9._-]{7,111}$"
+        },
+        "createdAtUtc": { "type": "string", "format": "date-time" },
+        "namespace": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{2,62}$"
+        },
+        "p8Source": { "$ref": "#/$defs/p8Source" },
+        "policyBindings": { "$ref": "#/$defs/policyBindings" },
+        "requiredGates": {
+          "type": "array",
+          "prefixItems": [
+            { "const": "P0-TOOLCHAIN" },
+            { "const": "P3-XLSX" },
+            { "const": "P5-DUAL" },
+            { "const": "P5-LIST" }
+          ],
+          "items": false,
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "gates": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "allOf": [
+                { "$ref": "#/$defs/gateEntry" },
+                { "properties": { "gate": { "const": "P0-TOOLCHAIN" } } }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/gateEntry" },
+                { "properties": { "gate": { "const": "P3-XLSX" } } }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/gateEntry" },
+                { "properties": { "gate": { "const": "P5-DUAL" } } }
+              ]
+            },
+            {
+              "allOf": [
+                { "$ref": "#/$defs/gateEntry" },
+                { "properties": { "gate": { "const": "P5-LIST" } } }
+              ]
+            }
+          ],
+          "items": false,
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "scenarios": {
+          "type": "array",
+          "minItems": 17,
+          "maxItems": 17,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/scenario" }
+        }
+      }
+    },
+    "closureSha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sourceSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "sha256"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "pattern": "^release-state://[a-z0-9][a-z0-9-]{2,62}/(?:evidence|events/[1-9][0-9]*)/[0-9a-f]{64}$"
+        },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "p8Source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gitCommitSha", "sourceClosureSha256", "treeState"],
+      "properties": {
+        "gitCommitSha": { "$ref": "#/$defs/sourceSha" },
+        "sourceClosureSha256": { "$ref": "#/$defs/sha256" },
+        "treeState": { "const": "clean" }
+      }
+    },
+    "policyBindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "uiScenariosSha256",
+        "performanceBudgetContractSha256",
+        "xlsxLimitsSha256"
+      ],
+      "properties": {
+        "uiScenariosSha256": { "$ref": "#/$defs/sha256" },
+        "performanceBudgetContractSha256": { "$ref": "#/$defs/sha256" },
+        "xlsxLimitsSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "releaseVariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["releaseRole", "xlsxExecution", "listEngine", "listDefault"],
+      "properties": {
+        "releaseRole": { "const": "standard" },
+        "xlsxExecution": { "enum": ["main", "worker"] },
+        "listEngine": { "enum": ["full", "dual"] },
+        "listDefault": { "enum": ["full", "auto"] }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gitCommitSha",
+        "sourceClosureSha256",
+        "treeState",
+        "artifactSha256",
+        "releaseVariant"
+      ],
+      "properties": {
+        "gitCommitSha": { "$ref": "#/$defs/sourceSha" },
+        "sourceClosureSha256": { "$ref": "#/$defs/sha256" },
+        "treeState": { "const": "clean" },
+        "artifactSha256": { "$ref": "#/$defs/sha256" },
+        "releaseVariant": { "$ref": "#/$defs/releaseVariant" }
+      }
+    },
+    "performanceEvidenceSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reference",
+        "objectSha256",
+        "contentSha256",
+        "evidenceId",
+        "collectedAtUtc"
+      ],
+      "properties": {
+        "reference": { "$ref": "#/$defs/reference" },
+        "objectSha256": { "$ref": "#/$defs/sha256" },
+        "contentSha256": { "$ref": "#/$defs/sha256" },
+        "evidenceId": {
+          "type": "string",
+          "pattern": "^perf-[a-z0-9][a-z0-9._-]{7,127}$"
+        },
+        "collectedAtUtc": { "type": "string", "format": "date-time" }
+      }
+    },
+    "acceptedEventSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "operationId", "observedThrough", "sequence"],
+      "properties": {
+        "reference": { "$ref": "#/$defs/reference" },
+        "operationId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "observedThrough": { "type": "string", "format": "date-time" },
+        "sequence": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "archive",
+        "archiveAvailability",
+        "manifest",
+        "packageIndex",
+        "variantId",
+        "dimensions"
+      ],
+      "properties": {
+        "archive": { "$ref": "#/$defs/reference" },
+        "archiveAvailability": { "$ref": "#/$defs/reference" },
+        "manifest": { "$ref": "#/$defs/reference" },
+        "packageIndex": { "$ref": "#/$defs/reference" },
+        "variantId": { "$ref": "#/$defs/sha256" },
+        "dimensions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "releaseRole",
+            "pwaLifecycle",
+            "cssDelivery",
+            "cspMode",
+            "xlsxExecution",
+            "listEngine",
+            "listDefault",
+            "persistenceArchitecture"
+          ],
+          "properties": {
+            "releaseRole": { "const": "standard" },
+            "pwaLifecycle": { "type": "string", "minLength": 1 },
+            "cssDelivery": { "type": "string", "minLength": 1 },
+            "cspMode": { "type": "string", "minLength": 1 },
+            "xlsxExecution": { "enum": ["main", "worker"] },
+            "listEngine": { "enum": ["full", "dual"] },
+            "listDefault": { "enum": ["full", "auto"] },
+            "persistenceArchitecture": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "gateEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gate",
+        "performanceEvidence",
+        "acceptedEvent",
+        "acceptanceSubject",
+        "source",
+        "artifact",
+        "scenarioIds"
+      ],
+      "properties": {
+        "gate": {
+          "enum": ["P0-TOOLCHAIN", "P3-XLSX", "P5-DUAL", "P5-LIST"]
+        },
+        "performanceEvidence": {
+          "$ref": "#/$defs/performanceEvidenceSummary"
+        },
+        "acceptedEvent": { "$ref": "#/$defs/acceptedEventSummary" },
+        "acceptanceSubject": { "$ref": "#/$defs/reference" },
+        "source": { "$ref": "#/$defs/source" },
+        "artifact": { "$ref": "#/$defs/artifact" },
+        "scenarioIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+          }
+        }
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "gate",
+        "fixtureSha256",
+        "performanceEvidenceObjectSha256",
+        "performanceEvidenceContentSha256",
+        "scenarioEvidenceSha256"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "gate": {
+          "enum": ["P0-TOOLCHAIN", "P3-XLSX", "P5-DUAL", "P5-LIST"]
+        },
+        "fixtureSha256": { "$ref": "#/$defs/sha256" },
+        "performanceEvidenceObjectSha256": { "$ref": "#/$defs/sha256" },
+        "performanceEvidenceContentSha256": { "$ref": "#/$defs/sha256" },
+        "scenarioEvidenceSha256": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  }
+}

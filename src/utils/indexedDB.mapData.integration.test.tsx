@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ShoppingItem } from "../types/item";
 import type { CellBorders, DayMapData, MapDataStore } from "../types/map";
 import { toImportedEventData } from "../features/events/fileImport";
-import { exportToXlsx, importFromXlsx } from "./exportImport";
+import {
+  exportToXlsx,
+  importFromXlsx,
+} from "../xlsx/engine/eventWorkbookEngine";
 import { db } from "./indexedDB";
 
 const emptyBorders: CellBorders = {
@@ -47,23 +50,6 @@ async function openRawDatabase(): Promise<IDBDatabase> {
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
   });
-}
-
-async function writeRawMapEntry(key: string, value: unknown): Promise<void> {
-  const database = await openRawDatabase();
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(db.STORES.MAP_DATA, "readwrite");
-      const request = transaction
-        .objectStore(db.STORES.MAP_DATA)
-        .put(value, key);
-      request.onerror = () => reject(request.error);
-      transaction.oncomplete = () => resolve();
-      transaction.onabort = () => reject(transaction.error ?? request.error);
-    });
-  } finally {
-    database.close();
-  }
 }
 
 async function replaceWithLegacyMapData(value: unknown): Promise<void> {

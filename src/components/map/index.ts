@@ -8,14 +8,3 @@ export { default as SimpleHallDefinitionPanel } from "./SimpleHallDefinitionPane
 export { default as HallOrderPanel } from "./HallOrderPanel";
 export { isPointInPolygon } from "./HallDefinitionPanel";
 export { default as MapImportDialog } from "./MapImportDialog";
-export {
-  BlockDetectionSettingsRollbackError,
-  loadBlockDetectionSettings,
-  loadBlockDetectionSettingsStore,
-  readBlockDetectionSettingsStoreForBackup,
-  removeBlockDetectionSettingsForEvent,
-  renameBlockDetectionSettingsForEvent,
-  replaceBlockDetectionSettingsForEvent,
-  runWithBlockDetectionSettingsRestore,
-  saveBlockDetectionSettings,
-} from "../../utils/blockDetectionSettingsStorage";
