@@ -1308,6 +1308,11 @@ try {
     const cspOperatorRole = "foundation_disposable_csp_operator";
     await client.query(`create role ${cspOperatorRole} nologin`);
     try {
+      // PostgreSQL 17 gives CREATEROLE users SET FALSE on roles they create.
+      await client.query(
+        `grant ${cspOperatorRole} to current_user
+          with admin false, inherit false, set true`,
+      );
       await client.query(
         `grant execute on function public.read_csp_violation_aggregates(
           timestamptz,

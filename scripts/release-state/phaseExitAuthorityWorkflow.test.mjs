@@ -27,6 +27,7 @@ const [release, quality, retention, publisher, artifactAuthority, packageText] =
     ].map((relativePath) => readFile(path.join(root, relativePath), "utf8")),
   );
 const releaseWorkflow = yaml.load(release);
+const qualityWorkflow = yaml.load(quality);
 const packageJson = JSON.parse(packageText);
 
 test("release accepts only a closed three-input protected dispatch", () => {
@@ -60,6 +61,13 @@ test("release accepts only a closed three-input protected dispatch", () => {
     release,
     /phase authority inputs are forbidden for this operation/u,
   );
+});
+
+test("rollback rehearsal fetches its pinned historical baseline", () => {
+  const checkout = qualityWorkflow.jobs["release-a-rollback"].steps.find(
+    (step) => step.uses === "actions/checkout@v4",
+  );
+  assert.equal(checkout?.with?.["fetch-depth"], 0);
 });
 
 test("every closed dispatch operation reaches an executable operation-scoped path", () => {
