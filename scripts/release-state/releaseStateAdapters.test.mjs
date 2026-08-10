@@ -73,11 +73,14 @@ const approvalPolicy = {
   workflowRef:
     "blusalice3/event-shopping-planner-routeplanning/.github/workflows/release.yml@refs/heads/main",
   protectedEnvironment: "foundation-release-state",
+  humanOperatorModel: "single-human-single-github-account/v1",
   roles: {
     releaseOwner: { reviewerTeam: "team-release" },
     dataSafetyReviewer: { reviewerTeam: "team-data" },
     operationsReviewer: { reviewerTeam: "team-operations" },
   },
+  distinctApprovalIds: true,
+  distinctProviderReviewerIds: false,
 };
 const sourceSha = "0123456789abcdef0123456789abcdef01234567";
 const nowMs = Date.parse("2026-08-01T00:05:00.000Z");
@@ -295,7 +298,70 @@ test("rejects forged, expired, or signature-tampered OIDC evidence", () => {
   assert.ok(payload.length > 0);
 });
 
-test("requires exactly one authoritative reviewer-team membership", async () => {
+test("projects one authoritative reviewer into every configured approval role", async () => {
+  const results = await fetchGitHubProtectedEnvironmentApprovals({
+    policy: approvalPolicy,
+    githubToken: "github-token-fixture-value",
+    operationId,
+    subjectSha256,
+    expectedRunId: oidcClaims.run_id,
+    fetchImpl: async (input) => {
+      const url = String(input);
+      if (url.endsWith(`/actions/runs/${oidcClaims.run_id}/approvals`)) {
+        return githubApprovalFetch(url);
+      }
+      return githubApiResponse(url, 200, {
+        state: "active",
+        role: "member",
+      });
+    },
+  });
+  assert.deepEqual(
+    results.map(({ receipt }) => receipt.role),
+    ["releaseOwner", "dataSafetyReviewer", "operationsReviewer"],
+  );
+  assert.equal(
+    new Set(results.map(({ receipt }) => receipt.providerReviewerId)).size,
+    1,
+  );
+  assert.equal(
+    new Set(results.map(({ receipt }) => receipt.approvalId)).size,
+    3,
+  );
+  assert.deepEqual(
+    results.map(({ receipt }) => receipt.providerReviewerTeamIds),
+    [["team-release"], ["team-data"], ["team-operations"]],
+  );
+  const resolved = results.map((result) =>
+    resolveFixtureApproval(oidcClaims, result),
+  );
+  assert.equal(
+    assertRequiredApprovalSet(resolved, [
+      "releaseOwner",
+      "dataSafetyReviewer",
+      "operationsReviewer",
+    ]),
+    true,
+  );
+
+  await assert.rejects(
+    fetchGitHubProtectedEnvironmentApprovals({
+      policy: approvalPolicy,
+      githubToken: "github-token-fixture-value",
+      operationId,
+      subjectSha256,
+      expectedRunId: oidcClaims.run_id,
+      fetchImpl: async (input) => {
+        const url = String(input);
+        if (url.endsWith(`/actions/runs/${oidcClaims.run_id}/approvals`)) {
+          return githubApprovalFetch(url);
+        }
+        return githubApiResponse(url, 404, { message: "Not Found" });
+      },
+    }),
+    /no configured approval role/,
+  );
+
   await assert.rejects(
     fetchGitHubProtectedEnvironmentApprovals({
       policy: approvalPolicy,
@@ -309,23 +375,61 @@ test("requires exactly one authoritative reviewer-team membership", async () => 
           return githubApprovalFetch(url);
         }
         return githubApiResponse(url, 200, {
-          state: "active",
+          state: "pending",
           role: "member",
         });
       },
     }),
-    /exactly one configured approval team/,
+    /team membership is invalid/,
   );
 });
 
-test("requires an exact, distinct approval role set", () => {
+test("rejects approval receipt bytes changed after API verification", async () => {
+  const [result] = await fetchGitHubProtectedEnvironmentApprovals({
+    policy: approvalPolicy,
+    githubToken: "github-token-fixture-value",
+    operationId,
+    subjectSha256,
+    expectedRunId: oidcClaims.run_id,
+    fetchImpl: githubApprovalFetch,
+  });
+  result.receiptBytes = Buffer.from(result.receiptBytes);
+  result.receiptBytes[result.receiptBytes.length - 2] ^= 1;
+  assert.throws(
+    () => resolveFixtureApproval(oidcClaims, result),
+    /not resolved from the GitHub API/,
+  );
+});
+
+test("requires exact role coverage and distinct role-bound approval IDs", () => {
   const base = {
     approvalId: "approval-1",
-    providerReviewerId: "reviewer-1",
+    providerReviewerId: "shared-reviewer",
     role: "releaseOwner",
     decision: "APPROVED",
     approvedAt: "2026-08-01T00:00:00.000Z",
   };
+  const approvals = [
+    base,
+    {
+      ...base,
+      approvalId: "approval-2",
+      role: "dataSafetyReviewer",
+    },
+    {
+      ...base,
+      approvalId: "approval-3",
+      role: "operationsReviewer",
+    },
+  ];
+  assert.equal(
+    assertRequiredApprovalSet(approvals, [
+      "releaseOwner",
+      "dataSafetyReviewer",
+      "operationsReviewer",
+    ]),
+    true,
+  );
   assert.throws(
     () =>
       assertRequiredApprovalSet(
@@ -334,12 +438,36 @@ test("requires an exact, distinct approval role set", () => {
           {
             ...base,
             approvalId: "approval-2",
-            providerReviewerId: "reviewer-2",
+            role: "dataSafetyReviewer",
+          },
+          {
+            ...base,
+            approvalId: "approval-3",
+            role: "dataSafetyReviewer",
           },
         ],
-        ["releaseOwner"],
+        ["releaseOwner", "dataSafetyReviewer", "operationsReviewer"],
       ),
-    /exactly the required roles/,
+    /Required approval role is absent: operationsReviewer/,
+  );
+  assert.throws(
+    () =>
+      assertRequiredApprovalSet(
+        approvals.map((approval) => ({ ...approval, approvalId: "duplicate" })),
+        ["releaseOwner", "dataSafetyReviewer", "operationsReviewer"],
+      ),
+    /Approval IDs are not distinct/,
+  );
+  assert.throws(
+    () =>
+      assertRequiredApprovalSet(
+        approvals.map((approval) => ({
+          ...approval,
+          providerReviewerId: "",
+        })),
+        ["releaseOwner", "dataSafetyReviewer", "operationsReviewer"],
+      ),
+    /Approval identities are invalid/,
   );
 });
 

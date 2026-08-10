@@ -1,4 +1,5 @@
 import { sha256Bytes } from "../lib/canonical-json.mjs";
+import { assertConfiguredApprovalRolePolicy } from "../lib/approval-policy.mjs";
 import { assertProviderPolicyConfigured } from "./collect-vercel-observation.mjs";
 
 export const FOUNDATION_P0A_AUTHORITIES_POLICY_KIND =
@@ -35,12 +36,9 @@ const sortedDistinct = (values, label) => {
 };
 
 const assertConfiguredApproval = (policy) => {
-  const teams = Object.values(policy?.roles ?? {}).map(
-    (entry) => entry?.reviewerTeam,
-  );
+  assertConfiguredApprovalRolePolicy(policy, "Foundation P0A approval policy");
   if (
     !isRecord(policy) ||
-    policy.bindingStatus !== "configured" ||
     !Array.isArray(policy.blockerCodes) ||
     policy.blockerCodes.length !== 0 ||
     typeof policy.repository !== "string" ||
@@ -48,9 +46,7 @@ const assertConfiguredApproval = (policy) => {
       "/.github/workflows/release.yml@refs/heads/main",
     ) ||
     typeof policy.protectedEnvironment !== "string" ||
-    teams.length !== 3 ||
-    teams.some((team) => !SAFE_OWNER.test(team ?? "")) ||
-    new Set(teams).size !== teams.length
+    policy.protectedEnvironment.length === 0
   ) {
     throw new Error("Foundation P0A approval policy is not configured");
   }

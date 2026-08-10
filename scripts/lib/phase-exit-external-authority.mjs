@@ -5,6 +5,7 @@ import {
   sha256Bytes,
   sha256Json,
 } from "./canonical-json.mjs";
+import { assertConfiguredApprovalRolePolicy } from "./approval-policy.mjs";
 import { assertReviewedPerformanceArtifactForAcceptedGate } from "./performance-evidence-identity.mjs";
 import {
   REMOTE_DB_OBSERVATION_MEDIA_TYPE,
@@ -878,16 +879,13 @@ const assertConfiguredPolicies = ({
   storePolicy,
   databaseContract,
 }) => {
-  const reviewerTeams = Object.fromEntries(
-    Object.entries(approvalPolicy.roles ?? {}).map(([role, value]) => [
-      role,
-      value?.reviewerTeam,
-    ]),
+  const reviewerTeams = assertConfiguredApprovalRolePolicy(
+    approvalPolicy,
+    "External binding approval policy",
   );
   if (
     providerPolicy.bindingStatus !== "configured" ||
     (providerPolicy.blockerCodes ?? []).length !== 0 ||
-    approvalPolicy.bindingStatus !== "configured" ||
     (approvalPolicy.blockerCodes ?? []).length !== 0 ||
     storePolicy.bindingStatus !== "configured" ||
     (storePolicy.blockerCodes ?? []).length !== 0 ||
@@ -896,12 +894,7 @@ const assertConfiguredPolicies = ({
     ) ||
     !["unobserved", "observed"].includes(
       databaseContract.remote?.observationStatus,
-    ) ||
-    Object.keys(reviewerTeams).length !== 3 ||
-    Object.values(reviewerTeams).some(
-      (value) => typeof value !== "string" || value.length === 0,
-    ) ||
-    new Set(Object.values(reviewerTeams)).size !== 3
+    )
   ) {
     throw new Error("External binding policies are not fully configured");
   }

@@ -265,8 +265,10 @@ test("advances null-change P6 and P8 gates without collapsing equal floors", () 
 });
 const approvalPolicy = {
   bindingStatus: "configured",
+  blockerCodes: [],
   trustedIssuer: "https://token.actions.githubusercontent.com",
   protectedEnvironment: "foundation-release-state",
+  humanOperatorModel: "single-human-single-github-account/v1",
   repository: "example/event-shopping-planner",
   workflowRef:
     "example/event-shopping-planner/.github/workflows/release.yml@refs/heads/main",
@@ -275,6 +277,8 @@ const approvalPolicy = {
     dataSafetyReviewer: { reviewerTeam: "data-safety-reviewers" },
     operationsReviewer: { reviewerTeam: "operations-reviewers" },
   },
+  distinctApprovalIds: true,
+  distinctProviderReviewerIds: false,
   oidcMaxTokenAgeSeconds: 600,
   oidcClockSkewSeconds: 60,
 };
@@ -1867,7 +1871,7 @@ const acceptanceCollector = async ({
     ["operationsReviewer", 3],
   ]) {
     const approvalId = `acceptance-${index}`;
-    const providerReviewerId = `acceptance-reviewer-${index}`;
+    const providerReviewerId = "shared-acceptance-reviewer";
     const receipt = await putJson(store, {
       schemaVersion: 1,
       kind: "github-protected-environment-approval/v1",

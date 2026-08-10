@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { assertConfiguredApprovalRolePolicy } from "./lib/approval-policy.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const run = (...arguments_) =>
@@ -12,6 +14,61 @@ const run = (...arguments_) =>
     windowsHide: true,
   });
 const output = (result) => `${result.stdout}\n${result.stderr}`;
+
+test("approval policy fixes one human account across all operator roles", () => {
+  const policy = JSON.parse(
+    readFileSync(path.join(root, "config/approval-policy.json"), "utf8"),
+  );
+  assert.equal(policy.distinctApprovalIds, true);
+  assert.equal(policy.distinctProviderReviewerIds, false);
+  assert.equal(
+    policy.humanOperatorModel,
+    "single-human-single-github-account/v1",
+  );
+});
+
+test("configured approval policy fixes exact roles, teams, and identity flags", () => {
+  const basePolicy = JSON.parse(
+    readFileSync(path.join(root, "config/approval-policy.json"), "utf8"),
+  );
+  const configuredPolicy = {
+    ...basePolicy,
+    bindingStatus: "configured",
+    blockerCodes: [],
+    roles: {
+      releaseOwner: { reviewerTeam: "release-owners" },
+      dataSafetyReviewer: { reviewerTeam: "data-safety-reviewers" },
+      operationsReviewer: { reviewerTeam: "operations-reviewers" },
+    },
+  };
+  assert.deepEqual(assertConfiguredApprovalRolePolicy(configuredPolicy), {
+    releaseOwner: "release-owners",
+    dataSafetyReviewer: "data-safety-reviewers",
+    operationsReviewer: "operations-reviewers",
+  });
+  for (const invalidPolicy of [
+    { ...configuredPolicy, distinctApprovalIds: false },
+    { ...configuredPolicy, distinctProviderReviewerIds: true },
+    { ...configuredPolicy, humanOperatorModel: "multi-human-required/v1" },
+    { ...configuredPolicy, blockerCodes: ["still-blocked"] },
+    {
+      ...configuredPolicy,
+      roles: {
+        ...configuredPolicy.roles,
+        operationsReviewer: { reviewerTeam: "release-owners" },
+      },
+    },
+    {
+      ...configuredPolicy,
+      roles: { ...configuredPolicy.roles, unexpectedRole: {} },
+    },
+  ]) {
+    assert.throws(
+      () => assertConfiguredApprovalRolePolicy(invalidPolicy),
+      /role binding is not configured/,
+    );
+  }
+});
 
 test("foundation readiness includes baseline, retention, startup, and external prerequisite authorities", () => {
   const result = run("scripts/verify-foundation-policy.mjs", "--json");

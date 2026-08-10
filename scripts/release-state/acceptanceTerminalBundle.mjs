@@ -3,6 +3,7 @@ import {
   sha256Bytes,
   sha256Json,
 } from "../lib/canonical-json.mjs";
+import { assertConfiguredApprovalRolePolicy } from "../lib/approval-policy.mjs";
 import {
   ACCEPTANCE_PERFORMANCE_REQUIREMENTS,
   assertReviewedPerformanceArtifactForAcceptedGate,
@@ -164,9 +165,9 @@ const approvalReceiptMatches = ({
   receipt.protectedEnvironment === approval.protectedEnvironment &&
   receipt.approvedAt === approval.approvedAt &&
   Array.isArray(receipt.providerReviewerTeamIds) &&
-  receipt.providerReviewerTeamIds.includes(
-    approvalPolicy.roles[approval.role].reviewerTeam,
-  ) &&
+  receipt.providerReviewerTeamIds.length === 1 &&
+  receipt.providerReviewerTeamIds[0] ===
+    approvalPolicy.roles[approval.role].reviewerTeam &&
   issuer?.schemaVersion === 1 &&
   issuer.kind === "github-actions-oidc-verification/v1" &&
   issuer.issuer === approval.trustedIssuer &&
@@ -196,20 +197,15 @@ export const loadAcceptanceFinalBundle = ({
       "Acceptance terminal bundle differs from its reviewed SHA-256",
     );
   }
-  const reviewerTeams = ACCEPTANCE_ROLES.map(
-    (role) => approvalPolicy?.roles?.[role]?.reviewerTeam,
+  assertConfiguredApprovalRolePolicy(
+    approvalPolicy,
+    "Acceptance approval policy",
   );
   if (
-    approvalPolicy?.bindingStatus !== "configured" ||
     typeof approvalPolicy.repository !== "string" ||
     typeof approvalPolicy.workflowRef !== "string" ||
     typeof approvalPolicy.trustedIssuer !== "string" ||
-    typeof approvalPolicy.protectedEnvironment !== "string" ||
-    reviewerTeams.some(
-      (reviewerTeam) =>
-        typeof reviewerTeam !== "string" || reviewerTeam.length === 0,
-    ) ||
-    new Set(reviewerTeams).size !== reviewerTeams.length
+    typeof approvalPolicy.protectedEnvironment !== "string"
   ) {
     throw new Error("Acceptance approval policy is not configured");
   }

@@ -1,4 +1,5 @@
 import { canonicalJsonBytes } from "./canonical-json.mjs";
+import { assertConfiguredApprovalRolePolicy } from "./approval-policy.mjs";
 import { assertReviewedPerformanceArtifactForAcceptedGate } from "./performance-evidence-identity.mjs";
 import { PERFORMANCE_INHERITED_GATES } from "./performance-inherited-closure.mjs";
 import { assertRequiredApprovalSet } from "../release-state/approvalResolver.mjs";
@@ -55,11 +56,11 @@ const MEDIA_TYPES = Object.freeze({
 });
 
 const assertConfiguredApprovalPolicy = (policy) => {
-  const reviewerTeams = ACCEPTANCE_ROLES.map(
-    (role) => policy?.roles?.[role]?.reviewerTeam,
+  assertConfiguredApprovalRolePolicy(
+    policy,
+    "Performance closure approval policy",
   );
   if (
-    policy?.bindingStatus !== "configured" ||
     typeof policy.repository !== "string" ||
     policy.repository.length === 0 ||
     typeof policy.workflowRef !== "string" ||
@@ -67,12 +68,7 @@ const assertConfiguredApprovalPolicy = (policy) => {
     typeof policy.trustedIssuer !== "string" ||
     policy.trustedIssuer.length === 0 ||
     typeof policy.protectedEnvironment !== "string" ||
-    policy.protectedEnvironment.length === 0 ||
-    reviewerTeams.some(
-      (reviewerTeam) =>
-        typeof reviewerTeam !== "string" || reviewerTeam.length === 0,
-    ) ||
-    new Set(reviewerTeams).size !== reviewerTeams.length
+    policy.protectedEnvironment.length === 0
   ) {
     throw new Error("Performance closure approval policy is not configured");
   }
@@ -234,7 +230,8 @@ const assertApprovalReceiptChain = ({
     receipt.protectedEnvironment !== approval.protectedEnvironment ||
     receipt.approvedAt !== approval.approvedAt ||
     !Array.isArray(receipt.providerReviewerTeamIds) ||
-    !receipt.providerReviewerTeamIds.includes(expectedTeam) ||
+    receipt.providerReviewerTeamIds.length !== 1 ||
+    receipt.providerReviewerTeamIds[0] !== expectedTeam ||
     issuer?.schemaVersion !== 1 ||
     issuer.kind !== "github-actions-oidc-verification/v1" ||
     issuer.issuer !== approval.trustedIssuer ||

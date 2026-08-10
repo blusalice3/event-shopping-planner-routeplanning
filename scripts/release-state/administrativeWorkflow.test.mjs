@@ -98,6 +98,11 @@ test("connects every administrative transition through a separate subject run", 
   );
   const execute = executor.indexOf("release:administrative -- execute");
   assert.ok(hashCheck >= 0 && execute > hashCheck);
+  assert.match(
+    executor,
+    /APPROVAL_GITHUB_TOKEN: \$\{\{ secrets\.FOUNDATION_APPROVAL_GITHUB_TOKEN \}\}/,
+  );
+  assert.doesNotMatch(executor, /^\s+GITHUB_TOKEN:/mu);
   assert.match(executor, /--subject-sha256 \$env:REQUESTED_SUBJECT_SHA256/);
   for (const operation of [
     "produce-state-initialization-subject",

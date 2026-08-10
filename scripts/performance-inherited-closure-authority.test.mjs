@@ -17,16 +17,20 @@ const sourceSha = "a".repeat(40);
 const timestamp = "2026-08-09T00:00:00.000Z";
 const approvalPolicy = {
   bindingStatus: "configured",
+  blockerCodes: [],
   repository: "example/event-shopping-planner",
   workflowRef:
     "example/event-shopping-planner/.github/workflows/release.yml@refs/heads/main",
   trustedIssuer: "https://token.actions.githubusercontent.com",
   protectedEnvironment: "foundation-release-state",
+  humanOperatorModel: "single-human-single-github-account/v1",
   roles: {
     releaseOwner: { reviewerTeam: "release-owners" },
     dataSafetyReviewer: { reviewerTeam: "data-safety-reviewers" },
     operationsReviewer: { reviewerTeam: "operations-reviewers" },
   },
+  distinctApprovalIds: true,
+  distinctProviderReviewerIds: false,
 };
 
 const buildFixture = ({
@@ -223,7 +227,7 @@ const buildFixture = ({
       "operationsReviewer",
     ].map((role, roleIndex) => {
       const approvalId = `${gate.toLowerCase()}-approval-${roleIndex}`;
-      const providerReviewerId = `${gate.toLowerCase()}-reviewer-${roleIndex}`;
+      const providerReviewerId = `${gate.toLowerCase()}-shared-reviewer`;
       const receipt = put(
         {
           schemaVersion: 1,

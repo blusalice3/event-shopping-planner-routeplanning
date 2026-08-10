@@ -32,6 +32,11 @@ import {
 
 export const PROMOTION_SUBJECT_KIND = "promotion-preparation-subject/v1";
 const PRE_PROMOTION_ROLES = ["releaseOwner", "dataSafetyReviewer"];
+const POLICY_ACTIVATION_ROLES = [
+  "releaseOwner",
+  "dataSafetyReviewer",
+  "operationsReviewer",
+];
 const SUBJECT_KEYS = [
   "companionBinding",
   "emergencyRecoveryBinding",
@@ -277,7 +282,7 @@ const putReceiptEvidence = async ({
   };
 };
 
-export const collectAndStorePrePromotionApprovals = async (
+const collectAndStoreApprovals = async (
   {
     store,
     namespace,
@@ -292,6 +297,7 @@ export const collectAndStorePrePromotionApprovals = async (
     fetchImpl = fetch,
     nowMs = Date.now(),
   },
+  requiredRoles,
   {
     requestOidcToken = requestGitHubOidcToken,
     verifyOidcToken = verifyGitHubOidcTokenFromIssuer,
@@ -364,22 +370,29 @@ export const collectAndStorePrePromotionApprovals = async (
       operationId,
       subjectSha256,
     });
-    if (PRE_PROMOTION_ROLES.includes(reference.role)) {
+    if (requiredRoles.includes(reference.role)) {
       resolved.push(reference);
     }
   }
   resolved.sort(
     (left, right) =>
-      PRE_PROMOTION_ROLES.indexOf(left.role) -
-      PRE_PROMOTION_ROLES.indexOf(right.role),
+      requiredRoles.indexOf(left.role) - requiredRoles.indexOf(right.role),
   );
-  assertRequiredApprovalSet(resolved, PRE_PROMOTION_ROLES);
+  assertRequiredApprovalSet(resolved, requiredRoles);
   return {
     approvalRefs: resolved,
     issuerReceiptReference,
     verifiedAt: verifiedOidc.receipt.verifiedAt,
   };
 };
+
+export const collectAndStorePrePromotionApprovals = (options, dependencies) =>
+  collectAndStoreApprovals(options, PRE_PROMOTION_ROLES, dependencies);
+
+export const collectAndStorePolicyActivationApprovals = (
+  options,
+  dependencies,
+) => collectAndStoreApprovals(options, POLICY_ACTIVATION_ROLES, dependencies);
 
 export const derivePromotionAppendId = ({
   namespace,

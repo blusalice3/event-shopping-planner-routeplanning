@@ -1035,7 +1035,7 @@ test("executes DB activation once with two reviewed approvals and replays the sa
     issuerReceiptSha256: reference("f").sha256,
     workflowRunId: "12345",
     protectedEnvironment: "foundation-release-state",
-    providerReviewerId: `reviewer-${suffix}`,
+    providerReviewerId: "shared-db-reviewer",
     role,
     decision: "APPROVED",
     approvedAt: "2026-08-09T00:00:00.000Z",

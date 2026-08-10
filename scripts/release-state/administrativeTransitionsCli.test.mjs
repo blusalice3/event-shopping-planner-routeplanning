@@ -157,6 +157,7 @@ const env = {
   ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example.test",
   ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-token",
   GITHUB_TOKEN: "github-token",
+  APPROVAL_GITHUB_TOKEN: "approval-github-token",
   GITHUB_REPOSITORY: "example/event-shopping-planner",
 };
 

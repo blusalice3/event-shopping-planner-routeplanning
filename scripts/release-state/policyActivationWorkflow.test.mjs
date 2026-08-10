@@ -72,6 +72,11 @@ test("connects every policy gate through QA, closure, reviewed subject, and CAS"
     "release:lifecycle -- $activationCommand",
   );
   assert.ok(hashCheck >= 0 && execution > hashCheck);
+  assert.match(
+    activation,
+    /APPROVAL_GITHUB_TOKEN: \$\{\{ secrets\.FOUNDATION_APPROVAL_GITHUB_TOKEN \}\}/,
+  );
+  assert.doesNotMatch(activation, /^\s+GITHUB_TOKEN:/mu);
   assert.match(activation, /'activate-policy-floor'/);
   assert.match(activation, /'activate-policy'/);
 });

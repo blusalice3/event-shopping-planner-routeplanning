@@ -21,6 +21,10 @@ checked-in `config/db-compatibility-contract.json` の正しい現在値は
 - Node 24.19.0 / npm 11.19.0、dependency、architecture、coverage、audit、build/browser gateを固定した。
 - P0A external binding/bootstrap recovery、P0C non-promotable artifact/control-store drill、remote DB、
   retention、backup/restore、startup WAF、physical performanceを protected authority producerへ接続した。
+- Formal approvalは三つのdistinct role/teamとrole-bound approval IDを維持しつつ、同一GitHub
+  provider reviewerが三役を兼任できる。authoritative environment reviewを各team membershipへ展開する。
+- `humanOperatorModel=single-human-single-github-account/v1`をpolicy/verifierへ固定し、baseline選定/review、
+  installed PWA実施/review、historical audit/reviewを含む全human roleで同じaccountを受理する。
 - production request graph、CSP report-only observation、deployed CSP 7-flowを live bindingから再集計する。
 - Phase 1のwaiting Worker検出は初回`flush=false`で全client snapshotを表示し、明示的な
   「保存して更新準備」操作後だけ`flush=true`を送る。空応答、blocker残存、保存失敗、未応答client、
@@ -36,7 +40,7 @@ checked-in `config/db-compatibility-contract.json` の正しい現在値は
   production bridge上の実`event-autosave` blocker/flushとIndexedDB保存、close前controller不変、全client
   解放後のnatural activationを検証する。prompt-close証跡はclosed verifierでunknown/missing fieldと
   改ざんを拒否する。prompt UIを持たないhistorical rollbackは旧natural activation経路へ分離する。
-- P1の正式authorityは、fresh 24時間観測と三役approvalを経た二つのdistinct-source prompt standardを同じ
+- P1の正式authorityは、fresh 24時間観測と三役分のapproval（同一reviewerによる兼任可）を経た二つのdistinct-source prompt standardを同じ
   `P1-PWA` floorで順に受理し、先行runのprotected `collect-pwa-multiclient-drill`でstrict signed receiptを採取する。
   続いて`collect-managed-device-live-stage`をdistinctな3 runでcurrent → rollback → currentと実行し、stage間の
   二つの`rollback-activated`がinventoryを原子的に入れ替える。composite readerはsource/device、current/rollback
@@ -60,7 +64,7 @@ checked-in `config/db-compatibility-contract.json` の正しい現在値は
 | 0C / `P0-ARTIFACT`  | 実装済み             |        未達 | configured disposable provider/PostgreSQL drill                              |
 | 0D / `P0-DATA`      | 実装済み             |        未達 | production migration/fingerprint、retention、backup/restore、WAF、state init |
 | 0E / `P0-PROMOTE`   | 実装済み             |        未達 | normal production promotion/assignment chain                                 |
-| 0E / `P0-RELEASE`   | 実装済み             |        未達 | 30 samples、24時間観測、三者承認、acceptance                                 |
+| 0E / `P0-RELEASE`   | 実装済み             |        未達 | 30 samples、24時間観測、三役承認（兼任可）、acceptance                       |
 | 1 / `P1-PWA`        | 実装済み             |        未達 | prompt 2-source acceptance、strict receipt、live往復3-stage、attestation     |
 | 2A / `P2A-LOCAL`    | 実装済み             |        未達 | production request graph observation                                         |
 | 2B / `P2B-REPORT`   | 実装済み             |        未達 | deployed report-only header/sink/DB/WAF observation                          |
@@ -74,7 +78,7 @@ checked-in `config/db-compatibility-contract.json` の正しい現在値は
 
 ## Local regression
 
-固定 toolchainで記録した統合結果は Foundation 785/785、Release State 279/279、Unit 1127/1127、
+固定 toolchainで記録した統合結果は Foundation 790/790、Release State 281/281、Unit 1127/1127、
 Integration 393/393、Worker 67/67、API 17/17、Coverage lines 90.03% / branches 81.72%である。
 Release A build/verifierとChromium 22/22もclean commitから成功している。
 これは external observationやproduction acceptanceの代替ではない。最終合流では再実行 logを優先する。

@@ -219,6 +219,16 @@ test("publishes one source file for a separately reviewed producer run", () => {
       workflow.indexOf("Download reviewed pre-promotion evidence source"),
   );
 
+  const promotion = stepBody(
+    "Prepare, promote, stage, validate, and record the exact subject",
+    "Upload promotion recovery chain",
+  );
+  assert.match(
+    promotion,
+    /APPROVAL_GITHUB_TOKEN: \$\{\{ secrets\.FOUNDATION_APPROVAL_GITHUB_TOKEN \}\}/,
+  );
+  assert.doesNotMatch(promotion, /^\s+GITHUB_TOKEN:/mu);
+
   for (const preservedOperation of [
     "produce-own-gate-performance-evidence",
     "produce-acceptance-requirements",

@@ -288,7 +288,11 @@ test("binds reviewed performance bytes conditionally into preparation and accept
     "Upload acceptance result",
   );
 
-  assert.match(producer, /GITHUB_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
+  assert.match(
+    producer,
+    /APPROVAL_GITHUB_TOKEN: \$\{\{ secrets\.FOUNDATION_APPROVAL_GITHUB_TOKEN \}\}/,
+  );
+  assert.doesNotMatch(producer, /^\s+GITHUB_TOKEN:/mu);
   assert.match(producer, /--collector-receipt \$collectorReceiptPath/);
   assert.match(
     producer,

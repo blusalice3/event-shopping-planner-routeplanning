@@ -189,7 +189,6 @@ const assertApprovalSet = ({
     throw new Error("Prepared promotion requires exactly two approvals");
   }
   const approvalIds = new Set();
-  const reviewerIds = new Set();
   for (let index = 0; index < approvals.length; index += 1) {
     const approval = approvals[index];
     assertExactKeys(
@@ -229,7 +228,6 @@ const assertApprovalSet = ({
     }
     assertIsoTimestamp(approval.approvedAt, "Prepared approval time");
     approvalIds.add(approval.approvalId);
-    reviewerIds.add(approval.providerReviewerId);
     assertEvidenceReferencePresent(event, approval, "Prepared approval");
     assertEvidenceReferencePresent(
       event,
@@ -242,7 +240,6 @@ const assertApprovalSet = ({
   }
   if (
     approvalIds.size !== approvals.length ||
-    reviewerIds.size !== approvals.length ||
     !sameCanonicalValue(approvals, event.approvalRefs) ||
     !sameCanonicalValue(approvals, operation.approvalRefs)
   ) {

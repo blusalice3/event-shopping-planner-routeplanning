@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { assertReleasePackageIndex } from "./artifact-contract.mjs";
+import { assertConfiguredApprovalRolePolicy } from "./approval-policy.mjs";
 import {
   canonicalJsonBytes,
   parseJsonStrict,
@@ -370,14 +371,11 @@ export const resolveHistoricalFoundationBaseline = (baseline) => {
 };
 
 const configuredApprovalProjection = (policy) => {
-  const roles = policy?.roles;
-  const reviewerTeams = {
-    dataSafetyReviewer: roles?.dataSafetyReviewer?.reviewerTeam,
-    operationsReviewer: roles?.operationsReviewer?.reviewerTeam,
-    releaseOwner: roles?.releaseOwner?.reviewerTeam,
-  };
+  const reviewerTeams = assertConfiguredApprovalRolePolicy(
+    policy,
+    "Foundation approval policy",
+  );
   if (
-    policy?.bindingStatus !== "configured" ||
     !Array.isArray(policy.blockerCodes) ||
     policy.blockerCodes.length !== 0 ||
     policy.trustedIssuer !== "https://token.actions.githubusercontent.com" ||
@@ -389,11 +387,7 @@ const configuredApprovalProjection = (policy) => {
     typeof policy.oidcAudience !== "string" ||
     policy.oidcAudience.length === 0 ||
     !Number.isSafeInteger(policy.oidcClockSkewSeconds) ||
-    !Number.isSafeInteger(policy.oidcMaxTokenAgeSeconds) ||
-    Object.values(reviewerTeams).some(
-      (team) => typeof team !== "string" || team.length === 0,
-    ) ||
-    new Set(Object.values(reviewerTeams)).size !== 3
+    !Number.isSafeInteger(policy.oidcMaxTokenAgeSeconds)
   ) {
     throw new Error("Foundation approval policy is not configured");
   }

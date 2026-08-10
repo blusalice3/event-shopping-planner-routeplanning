@@ -264,7 +264,7 @@ export const runAdministrativeTransitionsCli = async (
             env,
             "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
           ),
-          githubToken: requireEnvironment(env, "GITHUB_TOKEN"),
+          githubToken: requireEnvironment(env, "APPROVAL_GITHUB_TOKEN"),
         },
         {
           isSourceAncestor: gitIsAncestor,

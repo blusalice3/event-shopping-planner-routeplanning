@@ -1679,7 +1679,7 @@ jobs:
         env:
           RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
           RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPROVAL_GITHUB_TOKEN: ${{ secrets.FOUNDATION_APPROVAL_GITHUB_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -2312,7 +2312,7 @@ jobs:
         env:
           RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
           RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPROVAL_GITHUB_TOKEN: ${{ secrets.FOUNDATION_APPROVAL_GITHUB_TOKEN }}
           REQUIRED_PERFORMANCE_KIND: ${{ steps.acceptance_requirements.outputs.performance_kind }}
         run: |
           $inputPath = Join-Path $env:RUNNER_TEMP 'acceptance-input'
@@ -2896,7 +2896,7 @@ jobs:
         env:
           RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
           RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPROVAL_GITHUB_TOKEN: ${{ secrets.FOUNDATION_APPROVAL_GITHUB_TOKEN }}
         run: |
           $subjectPath = Join-Path $env:RUNNER_TEMP 'policy-activation-subject-input/policy-activation-subject.json'
           $actualSubjectHash = (Get-FileHash -LiteralPath $subjectPath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -3068,7 +3068,7 @@ jobs:
         env:
           RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
           RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPROVAL_GITHUB_TOKEN: ${{ secrets.FOUNDATION_APPROVAL_GITHUB_TOKEN }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -3275,7 +3275,7 @@ jobs:
         env:
           RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
           RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPROVAL_GITHUB_TOKEN: ${{ secrets.FOUNDATION_APPROVAL_GITHUB_TOKEN }}
         run: |
           $subjectPath = Join-Path $env:RUNNER_TEMP 'administrative-subject-input/administrative-subject.json'
           $actualSubjectHash = (Get-FileHash -LiteralPath $subjectPath -Algorithm SHA256).Hash.ToLowerInvariant()

@@ -121,7 +121,10 @@
 - unknown `/api` path を JSON 404 にする dedicated handler はない。
 - migration は raw table と aggregate view の `service_role` 読取権限を残す。
 - v1 evidence verifier は 24 時間の observation、minimum sample、source-bound evidence、
-  三つの distinct approval role を要求する。
+  三つの必須approval roleを要求する。baselineの`selectedBy/reviewedBy`、実機試験の
+  `executedBy/reviewedBy`、auditの`auditedBy/reviewedBy`、三つのapproval roleは、すべて同一人物・
+  同一GitHub accountでよい。role/action別の記録、時刻順序、evidence reference、role-bound
+  approval IDは省略せず、distinct run/hashの条件を維持する。
 
 ### 3.7 再現済み品質基準
 
@@ -344,6 +347,13 @@ compatibility は旧 package の許可 action と identity set を維持また�
 
 ## 5. 全体不変条件
 
+本planのhuman operator modelは`single-human-single-github-account/v1`とする。collector実施者、
+baseline選定者、audit実施者、実機実施者、reviewer、publisher、三つのapprover roleは一つの実在する
+GitHub accountが担当でき、人物identityのdistinct性をFormal Exit条件にしない。reviewは対象evidenceを
+immutable化した後の別actionとして記録し、producer/reviewer/executorに必要な別workflow run、時刻順序、
+exact hashは維持する。Vercel/PAT/device key、DB owner/executor/observer/backupなどのservice identityと
+credentialはhuman accountではなく、同じ一人が管理しても権限・secretを統合しない。
+
 1. tracked file を変更する前後で clean/dirty state と差分 owner を確認する。
 2. build は clean `sourceSha`、lockfile、exact toolchain、allowlist 済み public env だけを
    入力にする。
@@ -362,7 +372,8 @@ compatibility は旧 package の許可 action と identity set を維持また�
 12. provider alias 変更と Release State append の間で失敗し得るため、検証済み reconcile
     手順を必須にし、「分散 atomic」とは表現しない。
 13. production standard の `release-accepted` は source-hardened identity、fresh v1
-    evidence、24 時間以上の observation、三者承認なしに append しない。containment は
+    evidence、24 時間以上の observation、三役分の承認なしに append しない。同一provider
+    reviewerによる三役兼任は許可する。containment は
     frozen v1でrole帰属を証明できないためacceptedにしない。
 14. P0 の metrics-disabled bootstrap containment は一時 active にできるが、accepted に
     できない。
@@ -774,8 +785,8 @@ batch 5,000 rows、1 run 最大 12 batches、lock timeout 1,000 ms、statement t
 
 `scripts/provider/verify-provider-policy.mjs`はprovider APIからproject/configuration、
 domain auto-assignment、Git auto-deploy、WAF/rate rule、log retentionをread-only取得して
-policyとの差分をblocking evidenceにする。provider controlの変更はprotected runbookの
-二者操作で行い、before/after API receiptを保存する。
+policyとの差分をblocking evidenceにする。provider controlの変更は一人のoperatorがprotected
+runbookで実行・再確認できるが、変更actionとreview actionを分け、before/after API receiptを保存する。
 `scripts/verify-metrics-retention.mjs`はcron definition、last-success、deleted row count、
 timeout、dry-run、CSP retention、backup ownerを検証する。
 `.github/workflows/metrics-retention.yml`は毎時42分にこのread-only verifierを実行し、
@@ -789,7 +800,7 @@ GitHub protected environment `foundation-release-state` のsecret
 `RELEASE_STATE_DATABASE_URL`だけをrelease workflowへ渡し、TLS `verify-full`、allowlist済み
 host/database/roleを`config/release-state-store.json`で検証する。credentialは90日ごと、
 reviewer/incident変更時は即時rotateし、DB owner、release executor、backup operatorを
-別roleにする。同configはPostgreSQL major 17、UTC、migration checksum、connect/statement
+別のservice role/credentialにする。同じhuman operatorが管理できるがcredentialを共用しない。同configはPostgreSQL major 17、UTC、migration checksum、connect/statement
 timeout、production CA fingerprint、local container image digestを固定する。
 
 planned source:
@@ -845,7 +856,8 @@ bytes を書けない。schema v1ではstate eventとevidence objectをproject l
 導入する場合はreference tableと別schema/planを先に追加する。event chain、approval、
 provider evidence、QA bundleのauthoritative timestampはstoreのcommit receiptを使用する。
 
-`config/approval-policy.json`はtrusted issuer
+`config/approval-policy.json`はhuman operator model
+`single-human-single-github-account/v1`、trusted issuer
 `https://token.actions.githubusercontent.com`、repository、workflow ref、protected
 environment、role→reviewer team mappingを固定する。`ApprovalReference`は
 `config/release-state.schema.json#/$defs/approvalReference`を正本とし、次を持つ。
@@ -872,9 +884,11 @@ type ApprovalReference = {
 resolverはGitHub protected environment review APIのauthoritative receiptとworkflow OIDC
 claimsを取得してimmutable storeへ保存し、issuer/repository/workflow/environment/reviewer
 team、target operation/package/event hash、decisionを検証する。roleとreviewer identityは
-receiptから導出し、入力JSONの自己申告を信用しない。required role間の
-`providerReviewerId`、approval IDはdistinctとし、pre-promotionは`releaseOwner`と
-`dataSafetyReviewer`、standard acceptanceは三roleを要求する。
+receiptから導出し、入力JSONの自己申告を信用しない。三つのrole teamとrole-bound approval
+IDはdistinctに保つ一方、`providerReviewerId`はrequired role間で重複可とする。同じGitHub
+ユーザーが複数のconfigured teamでactive memberなら、一つのenvironment reviewからteam/role別の
+receiptを生成する。pre-promotionは`releaseOwner`と`dataSafetyReviewer`、standard acceptanceは
+三roleを要求する。
 
 `config/release-state.schema.json`は次の具体型とclosed enumを正本にする。
 
@@ -1058,7 +1072,8 @@ packageだけを許可し、新bindingへ対応するrecovery pointerと`activeP
 deadlineを設定する。
 
 `db-contract-activated` は初期化後の将来の forward-only migration だけに使用し、remote
-fingerprint、二者承認、直前/直後 contract を束縛して `currentDbCompatibility` を更新する。
+fingerprint、二役分の承認（同一provider reviewerによる兼任可）、直前/直後 contract を束縛して
+`currentDbCompatibility` を更新する。
 新 contract と exact 一致しない active package を残す transition は拒否する。
 
 provider alias 変更後に append が失敗した場合は pending operation を保持し、provider の
@@ -1066,10 +1081,14 @@ provider alias 変更後に append が失敗した場合は pending operation �
 `state-reconciled`、またはverified rollbackのいずれかをappendする。手動でsnapshotを
 編集しない。
 
-既存 `release-a-evidence/v1` と verifier は凍結する。追加
+既存 `release-a-evidence/v1` のfield shape、hash chain、観測・sample条件は凍結する。2026-08-10の
+single-account amendmentでは、approver identityに加えてbaseline selector/reviewer、実機
+executor/reviewer、historical auditor/reviewerの人物identity一意性を解除する。各role/action field、
+三roleの欠落、時刻と順序、source、evidence referenceの検証は維持する。追加
 `release-evidence-bundle/v1` は v1 JSON、artifact/provider/DB/policy/approval/state event の
 hash chain を包むだけで、v1 条件を弱めない。production standardのすべての
-`release-accepted`はexact sourceのfresh v1、24時間以上、minimum sample、三者承認を
+`release-accepted`はexact sourceのfresh v1、24時間以上、minimum sample、三役分の承認
+（同一provider reviewerによる兼任可）を
 要求する。既存metrics rowはvariant ID/provider deployment IDを持たず、same-sourceの
 old standard clientとcontainmentを確実に区別できない。したがってcontainmentは
 source-hardened/legacy bootstrapのどちらも`release-accepted`にせず、time-bounded incident
@@ -1082,12 +1101,12 @@ containmentを切り替えた前後のsampleを一つのwindowへ混在させな
 
 evidence stage は次の意味で統一する。
 
-| stage                        | 用途                                              | production acceptance |
-| ---------------------------- | ------------------------------------------------- | --------------------- |
-| `pre-promotion`              | package、QA、DB、policy、二者承認                 | 不可                  |
-| `post-assignment-validation` | production alias 後の body/route/env 再検証       | 不可                  |
-| `incident-activation`        | rollback/containment の即時安全証跡               | 不可                  |
-| `acceptance-final`           | standardのfresh v1、24h、三者承認、terminal state | standardのみ可        |
+| stage                        | 用途                                            | production acceptance |
+| ---------------------------- | ----------------------------------------------- | --------------------- |
+| `pre-promotion`              | package、QA、DB、policy、二役分の承認（兼任可） | 不可                  |
+| `post-assignment-validation` | production alias 後の body/route/env 再検証     | 不可                  |
+| `incident-activation`        | rollback/containment の即時安全証跡             | 不可                  |
+| `acceptance-final`           | fresh v1、24h、三役分の承認（兼任可）、terminal | standardのみ可        |
 
 ### 6.6 PWA recovery と natural activation
 
@@ -1431,7 +1450,7 @@ candidate を作る。
 ## 8. 実装 phase
 
 共通 production 手順は §9.2 を一度だけ正本とする。phase 本文のstandard「受理」はすべて、
-source change の production 配布、fresh v1、24 時間 observation、三者承認、
+source change の production 配布、fresh v1、24 時間 observation、三役分の承認（兼任可）、
 `release-accepted` を含む。tool/document/test-only change を配布しない場合は observation を
 要求しない。
 
@@ -1487,8 +1506,11 @@ exit `P0-TOOLCHAIN`:
 
 - §6.2/6.3/6.5 の schema、builder、deterministic archive、provider evidence、Postgres store、
   reducer、reconcile、approval resolver を実装する。
-- protected environment/OIDC receiptのvalid、wrong repo/workflow/environment、self-claimed
-  reviewer、duplicate reviewer、receipt tamper fixtureを検証する。
+- protected environment/OIDC receiptのvalid、wrong repo/workflow/environment、unmapped reviewer、
+  duplicate role/role-bound approval ID、receipt tamper fixtureを検証する。同一provider reviewerが
+  distinct teamの各roleを兼任するfixtureはvalidとして検証する。
+- `release-a-evidence/v1`は同じ実在loginをbaseline selector/reviewer、全installed PWA
+  executor/reviewer、historical auditor/reviewer、三つのapproverへ設定したfixtureをvalidとして検証する。
 - `api/not-found.mjs` と exact `/api`/unknown `/api/**` route を導入する。
 - `config/provider-policy.json`、
   `contracts/persistence-release-a-startup-bursts-v1.json`、
@@ -1570,10 +1592,10 @@ exit `P0-DATA`:
 
 - current active policy/DB contractから standard と source-hardened containment companion を
   buildし、それぞれ別のimmutable deployment URLで全gateを通す。
-- `bootstrapRecovery`をemergency recoveryとして束縛した二者承認後にstandardだけを
+- `bootstrapRecovery`をemergency recoveryとして束縛した二役分の承認（兼任可）後にstandardだけを
   production aliasへpromoteし、post-assignment validationを行う。
 - fresh exact-source v1 observationを開始する。
-- 24時間以上、minimum sample、三者承認、terminal bundle 後に standardを受理する。
+- 24時間以上、minimum sample、三役分の承認（同一provider reviewerによる兼任可）、terminal bundle 後に standardを受理する。
 - bootstrapがactiveならsource-hardened standardへrecoveryし、`containmentIncident`/
   `standardRecovery`をclearする。
 
@@ -1926,7 +1948,7 @@ PWA/CSS/CSP/DB/persistence safetyを下げない。
 
 phase が static policy を変える場合は、先に proposed policy と非production QA packageで
 schema、monotonicity、predecessor compatibility、rollback/containment drillを完了する。
-三者approval付き`policy-activated` eventの後にだけ、そのhashを持つcanonical production
+三役分のapproval（同一provider reviewerによる兼任可）付き`policy-activated` eventの後にだけ、そのhashを持つcanonical production
 candidateを作る。受理後にsafety floorを引き上げる別policy activationは、直前packageの
 eligibilityを縮小できるが、active/accepted bindingをineligibleのまま残してはならない。
 
@@ -1940,7 +1962,7 @@ eligibilityを縮小できるが、active/accepted bindingをineligibleのまま
 6. current Release StateをCAS再読取し、eligibility、predecessor policy、emergency
    recovery bindingを再計算する。
 7. standard target、companion、emergency recovery、package/provider evidenceをsubjectにした
-   二者approvalを解決する。
+   二役分のapproval（同一provider reviewerによる兼任可）を解決する。
 8. exact deployment IDを持つ`promotion-prepared`をappendする。
 9. standardだけを`vercel promote`し、owned production domain set全体のimmutable
    assignment-receipt evidenceを保存して
@@ -1948,7 +1970,7 @@ eligibilityを縮小できるが、active/accepted bindingをineligibleのまま
 10. 全production domainを再probeし、receiptを参照する別のassignment-validation
     evidenceを保存して`assignment-validated`をappendする。
 11. fresh exact-source v1 observationを開始し、24時間以上とminimum sampleを満たす。
-12. 三者approval、acceptance-final bundle、current state CASを検証する。
+12. 三役分のapproval（同一provider reviewerによる兼任可）、acceptance-final bundle、current state CASを検証する。
 13. standardの`release-accepted`をappendし、accepted/companion/inventory/pendingを
     再検証する。
 
@@ -1975,7 +1997,7 @@ eligibilityを縮小できるが、active/accepted bindingをineligibleのまま
   `bootstrapRecovery`を第一候補にする。P0 companionはincident scopeがshared graphを
   含まないと証明できる場合だけ使う。
 - current minimum safety、DB fingerprint、policy projection、provider bindingを再検証する。
-- 即時activationはincident evidenceと三者のうちpolicy指定の緊急approvalを要求する。
+- 即時activationはincident evidenceと三roleのうちpolicy指定の緊急approvalを要求する。
 - alias変更はstandard promotionと同じassignment-receipt/validation evidenceを保存し、
   append失敗時は`state-reconciled`手順を使う。
 - `containment-activated`はprovider aliasと`activeProduction`を更新するが、
@@ -2018,7 +2040,7 @@ package redeploy:
 - standardはeligible rollback inventory bindingとそのmatching companion、containmentは
   current companionまたは`bootstrapRecovery`をoriginにし、target standard/containmentと
   verified companionを持つ`redeploy-standard`/`redeploy-containment` pending operationを
-  二者approval付き`promotion-prepared` eventでappendする。
+  二役分のapproval（同一provider reviewerによる兼任可）付き`promotion-prepared` eventでappendする。
 - 新deploymentだけをpromoteし、owned production domain set全体のassignment receiptと
   post-assignment validationを別evidence/eventとして保存する。一部domainの成功では進まない。
 - final CASで`package-redeploy-activated`をappendする。standardは元accepted event/floorを
@@ -2040,7 +2062,7 @@ package redeploy:
 - unknown `/api`がHTMLを返す、metrics response contract違反
 - waiting/active Worker mismatch後のApp/data mutation
 - archive非再現、manifest外file、path collision
-- v1 evidence、approval distinctness、24時間windowの不足
+- v1 evidence、必須approval roleまたはrole-bound approval ID、24時間windowの不足
 - Release State CAS/immutable store/reconcileの失敗
 - reachable production critical/highにwaiver/mitigationがない
 - U+FFFD、意図しないBOM/EOL、代表日本語の破損
@@ -2053,8 +2075,8 @@ package redeploy:
 | `P0-TOOLCHAIN` | exact runtime/lock/peer/audit                    | command/quality graph安定      |
 | `P0-ARTIFACT`  | package/policy/provider/state drills             | immutable prebuilt release可能 |
 | `P0-DATA`      | DB/API/retention/v1 bundle                       | privilegeとevidence安全        |
-| `P0-PROMOTE`   | pair candidate、bootstrap recovery、二者approval | alias後のbinding exact         |
-| `P0-RELEASE`   | fresh v1、24h、三者approval                      | initial standard受理           |
+| `P0-PROMOTE`   | pair candidate、recovery、二役approval（兼任可） | alias後のbinding exact         |
+| `P0-RELEASE`   | fresh v1、24h、三役approval（兼任可）            | initial standard受理           |
 | `P1-PWA`       | outer agent、multi-client、reopen drill          | prompt-close-all受理           |
 | `P2A-LOCAL`    | local CSS、offline/visual                        | CDN/runtime CSS 0              |
 | `P2B-REPORT`   | CSP inventory/report                             | first-party violation 0        |
@@ -2092,8 +2114,8 @@ package redeploy:
 | `scripts/verify-release-a-build.mjs`                                    | Release A hard-off / 0〜1                               |
 | `scripts/verify-release-a-browser.mjs`                                  | browser compatibility / 0C                              |
 | `scripts/rehearse-release-a-rollback.ps1`                               | same-profile rollback contract / 0C〜8                  |
-| `scripts/verify-release-a-evidence.mjs`                                 | frozen v1 verifier / 0D〜8                              |
-| `docs/release-a-evidence.template.json`                                 | frozen v1 template / 0D〜8                              |
+| `scripts/verify-release-a-evidence.mjs`                                 | v1 shape + single-account verifier / 0D〜8              |
+| `docs/release-a-evidence.template.json`                                 | v1 shape template / 0D〜8                               |
 | `README.md`                                                             | developer/product contract / 0〜8                       |
 | `docs/persistence-recovery-runbook.md`                                  | Release A/cleanup operation / 1、7                      |
 | `docs/Resilient Persistence & Safe Migration Plan.md`                   | persistence contract / 1、7                             |
@@ -2196,7 +2218,8 @@ machine-readable policy/schemaが実装とverifierの入力であり、Markdown�
 - provider deploy/promotion/rollback/package redeploy/reconcileはimmutable prebuilt
   packageとRelease State eventだけから再実行でき、owned production domain set全体の
   assignment/validation evidenceを持つ。
-- every accepted standard sourceはfresh exact-source v1、24時間以上、三者approval、
+- every accepted standard sourceはfresh exact-source v1、24時間以上、三役分のapproval
+  （同一provider reviewerによる兼任可）、
   acceptance-final bundleを持つ。
 - current policyでprovider rollback/package redeployがeligibleな旧accepted standard、
   またはcurrent accepted standardに束縛したverified companionの少なくとも一方があり、

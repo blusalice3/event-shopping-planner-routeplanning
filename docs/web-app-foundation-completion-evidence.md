@@ -59,6 +59,13 @@ collector と reviewed authority が成立した後だけ許される terminal s
 artifact digest、ZIP bytes、ZIP 内 exact single file、source/run/attempt、authority ごとの意味論を
 再検証し、Release State store へ create-only put/readback した reference だけを受理する。
 
+Formal approvalは`releaseOwner`、`dataSafetyReviewer`、`operationsReviewer`の三roleと、
+roleごとのdistinct Team/approval IDを維持する。同一GitHub provider reviewerは三つのTeamすべてで
+active memberなら兼任でき、一つのauthoritative Environment reviewから三つのrole-bound receiptを
+生成できる。role欠落、approval ID重複、operation/subject/run/OIDC不一致は引き続き拒否する。
+さらに`single-human-single-github-account/v1`として、baseline selector/reviewer、installed PWA
+executor/reviewer、historical auditor/reviewer、publisherを同じaccountが担当する完全な正例をverifierで受理する。
+
 ### P0A / P0C / backup / managed device
 
 - P0A は configured provider、application DB read-only binding、未初期化 control store、approval/OIDC
@@ -69,7 +76,7 @@ artifact digest、ZIP bytes、ZIP 内 exact single file、source/run/attempt、a
   `40001` / `42501`、cleanup を閉じる。
 - backup/restore は provider API の backup/PITR/restore status、nonproduction restore、DB TLS
   connectivity、integrity、RPO/RTO、privilege/所有権、実 DML/DDL `42501` denial、cleanup を閉じる。
-- P1 managed deviceは、fresh 24時間観測と三役approvalを独立に完了した二つのdistinct-source prompt standardを
+- P1 managed deviceは、fresh 24時間観測と三役分のapproval（同一reviewerによる兼任可）を独立に完了した二つのdistinct-source prompt standardを
   same `P1-PWA` floorで受理した後、Windows 11 managed self-hosted runner上でprotected strict signed
   prompt-close receiptを先行runとして採取する。その後、二つのreviewed archive recoveryを挟み、current →
   rollback → currentの3 reviewed stageをdistinct runで実行する。compositeはsource/device、current/rollback
@@ -109,7 +116,7 @@ artifact digest、ZIP bytes、ZIP 内 exact single file、source/run/attempt、a
   後続の`collect-managed-device-live-stage` 3 runとimmutable compositeへ束縛する。bundle inputはcallerが
   作った成否やhashではなく、strict run ID/attemptと3 stageのexact run ID/attempt selectorだけを受理する。
 - 二つ目のprompt standardは`candidate_gate=P1-PWA`をbuild/acceptance chainで維持するsource-only replacementで、
-  exact floorとdistinct source/build/binding/provider deploymentを必須にする。24時間観測、全sample、三役approvalを
+  exact floorとdistinct source/build/binding/provider deploymentを必須にする。24時間観測、全sample、三役分のapproval（兼任可）を
   再利用・省略せず、最初のstandardがsole eligible rollbackになった後だけstrict collectorへ進む。終端
   `P8-CLEAN`ではsame-floor replacementを許可しない。
 
@@ -128,7 +135,8 @@ artifact digest、ZIP bytes、ZIP 内 exact single file、source/run/attempt、a
 
 `workflow_dispatch` の入力は `source_sha`、`operation`、`request_json` の3件だけである。
 現行 registry の50 operationは operation別 closed schemaで正規化され、unknown/unused/missing field、
-wrong predecessor、同一 run による自己 review を checkout 後の早い段階で拒否する。operation 数は
+wrong predecessor、同一 run 内でのproducer/review action兼用をcheckout後の早い段階で拒否する。同じaccountが
+distinct prior/review runを順番に担当することは許可する。operation 数は
 testが registryから導出し、workflowの silent-success branchがないことを検査する。
 
 ## Gate 別の正式状態
@@ -140,7 +148,7 @@ testが registryから導出し、workflowの silent-success branchがないこ�
 | `P0-ARTIFACT`  | provider/control-store disposable drill               | 未達。configured provider/PostgreSQL drill 未実行                |
 | `P0-DATA`      | remote DB、retention、backup/restore、WAF、state init | 未達。production authority 未構成・未観測                        |
 | `P0-PROMOTE`   | normal promotion/assignment chain                     | 未達。production assignment 未実行                               |
-| `P0-RELEASE`   | accepted gate、physical performance                   | 未達。30 samples、24時間観測、三者承認 未実行                    |
+| `P0-RELEASE`   | accepted gate、physical performance                   | 未達。30 samples、24時間観測、三役承認（兼任可）未実行           |
 | `P1-PWA`       | accepted gate、strict receipt + managed 3-stage PWA   | 未達。2-source acceptance、strict、live往復、attestation未実行   |
 | `P2A-LOCAL`    | accepted gate、production request graph               | 未達。deployed origin 未観測                                     |
 | `P2B-REPORT`   | accepted gate、CSP report observation                 | 未達。production sink/DB/WAF 未観測                              |
@@ -158,8 +166,8 @@ Node 24.19.0 / npm 11.19.0 の固定 PATH で次を確認した。
 
 | Suite                     |      結果 |
 | ------------------------- | --------: |
-| Foundation                |   785/785 |
-| Release State             |   279/279 |
+| Foundation                |   790/790 |
+| Release State             |   281/281 |
 | Unit                      | 1127/1127 |
 | Integration               |   393/393 |
 | Worker                    |     67/67 |

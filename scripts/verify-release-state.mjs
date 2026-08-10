@@ -8,6 +8,7 @@ import {
   sha256Bytes,
   sha256Json,
 } from "./lib/canonical-json.mjs";
+import { assertConfiguredApprovalRolePolicy } from "./lib/approval-policy.mjs";
 import {
   hashReleaseEvent,
   replayReleaseEvents,
@@ -165,6 +166,8 @@ if (
   approvalPolicy.oidcClockSkewSeconds !== 60 ||
   approvalPolicy.oidcMaxTokenAgeSeconds !== 600 ||
   approvalPolicy.protectedEnvironment !== "foundation-release-state" ||
+  approvalPolicy.humanOperatorModel !==
+    "single-human-single-github-account/v1" ||
   !approvalPolicy.workflowRef?.endsWith(
     "/.github/workflows/release.yml@refs/heads/main",
   )
@@ -172,18 +175,10 @@ if (
   throw new Error("Release State approval policy is invalid");
 }
 if (approvalPolicy.bindingStatus === "configured") {
-  const reviewerTeams = Object.values(approvalPolicy.roles ?? {}).map(
-    (role) => role.reviewerTeam,
+  assertConfiguredApprovalRolePolicy(
+    approvalPolicy,
+    "Release State approval policy",
   );
-  if (
-    reviewerTeams.length !== 3 ||
-    reviewerTeams.some(
-      (team) => typeof team !== "string" || team.length === 0,
-    ) ||
-    new Set(reviewerTeams).size !== reviewerTeams.length
-  ) {
-    throw new Error("Approval reviewer teams must be configured and distinct");
-  }
 }
 if (storePolicy.bindingStatus === "configured") {
   if (

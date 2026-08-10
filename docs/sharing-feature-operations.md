@@ -60,7 +60,7 @@ client gateを閉じても旧clientが動く可能性があるため、incident�
 要件:
 
 - stagingとproductionは別Supabase project、別frontend設定、別secretを使う。
-- deploy前にproject URL、environment名、gate状態を二者確認する。
+- deploy前に一人のoperatorがproject URL、environment名、gate状態を順番に二回確認し、確認記録を残す。
 - local reset、負荷fixture、破壊的試験をremote projectで実行しない。
 - production schemaをstaging代わりに使わない。
 

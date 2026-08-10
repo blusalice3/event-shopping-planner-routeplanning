@@ -300,7 +300,7 @@ export const runArchiveRecoveryExecutionCli = async (
           environment,
           "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
         ),
-        githubToken: requireEnvironment(environment, "GITHUB_TOKEN"),
+        githubToken: requireEnvironment(environment, "APPROVAL_GITHUB_TOKEN"),
       });
     }
     const written = await writeOutput(outputPath, result);

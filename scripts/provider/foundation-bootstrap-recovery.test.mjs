@@ -163,11 +163,11 @@ const configuredPolicies = () => {
 
   const approvalPolicy = structuredClone(baseApproval);
   approvalPolicy.bindingStatus = "configured";
-  approvalPolicy.roles.releaseOwner.reviewerTeam = "github-team:release";
+  approvalPolicy.roles.releaseOwner.reviewerTeam = "github-team-release";
   approvalPolicy.roles.dataSafetyReviewer.reviewerTeam =
-    "github-team:data-safety";
+    "github-team-data-safety";
   approvalPolicy.roles.operationsReviewer.reviewerTeam =
-    "github-team:operations";
+    "github-team-operations";
   approvalPolicy.blockerCodes = [];
 
   const artifactDrillPolicy = structuredClone(baseArtifactDrill);

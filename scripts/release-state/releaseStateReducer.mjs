@@ -134,7 +134,7 @@ const assertCompanionPair = (standard, companion) => {
   );
 };
 
-const assertDistinctApprovals = (approvals, roles, operationId) => {
+const assertRequiredRoleApprovals = (approvals, roles, operationId) => {
   const matching = approvals.filter((approval) =>
     roles.includes(approval.role),
   );
@@ -145,14 +145,19 @@ const assertDistinctApprovals = (approvals, roles, operationId) => {
     `Missing required approval roles: ${roles.join(", ")}`,
   );
   invariant(
+    matching.every(
+      (approval) =>
+        typeof approval.approvalId === "string" &&
+        approval.approvalId.length > 0 &&
+        typeof approval.providerReviewerId === "string" &&
+        approval.providerReviewerId.length > 0,
+    ),
+    "Approval identities must be non-empty strings",
+  );
+  invariant(
     new Set(matching.map((approval) => approval.approvalId)).size ===
       matching.length,
     "Approval IDs must be distinct",
-  );
-  invariant(
-    new Set(matching.map((approval) => approval.providerReviewerId)).size ===
-      matching.length,
-    "Provider reviewers must be distinct",
   );
   invariant(
     matching.every(
@@ -630,7 +635,7 @@ const applyPolicyActivated = (snapshot, event) => {
     minimumSafetyFloors: payload.minimumSafetyFloors,
     currentDbCompatibility: snapshot.currentDbCompatibility,
   });
-  assertDistinctApprovals(
+  assertRequiredRoleApprovals(
     event.approvalRefs,
     ["releaseOwner", "dataSafetyReviewer", "operationsReviewer"],
     event.operationId,
@@ -692,7 +697,7 @@ const applyDbContractActivated = (snapshot, event) => {
       ),
     "DB contract activation does not bind a new predecessor contract",
   );
-  assertDistinctApprovals(
+  assertRequiredRoleApprovals(
     event.approvalRefs,
     ["releaseOwner", "dataSafetyReviewer"],
     event.operationId,
@@ -727,7 +732,7 @@ const applyPromotionPrepared = (snapshot, event) => {
     "A release operation is already pending",
   );
   const operation = event.payload.pendingOperation;
-  assertDistinctApprovals(
+  assertRequiredRoleApprovals(
     event.approvalRefs,
     ["releaseOwner", "dataSafetyReviewer"],
     event.operationId,
@@ -837,7 +842,7 @@ const assertRecoveryTerminalAuthority = (snapshot, event) => {
     sameValue(event.approvalRefs, snapshot.pendingOperation.approvalRefs),
     "Recovery terminal approvals differ from the prepared operation",
   );
-  assertDistinctApprovals(
+  assertRequiredRoleApprovals(
     event.approvalRefs,
     ["releaseOwner", "dataSafetyReviewer"],
     event.operationId,
@@ -1036,7 +1041,7 @@ const applyReleaseAccepted = (snapshot, event) => {
     snapshot.pendingAcceptance.operationId === event.operationId,
     "Acceptance operation ID mismatch",
   );
-  assertDistinctApprovals(
+  assertRequiredRoleApprovals(
     event.approvalRefs,
     ["releaseOwner", "dataSafetyReviewer", "operationsReviewer"],
     event.operationId,

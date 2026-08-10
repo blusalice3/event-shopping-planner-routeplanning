@@ -4,11 +4,12 @@ import {
   sha256Bytes,
   sha256Json,
 } from "../lib/canonical-json.mjs";
+import { assertConfiguredApprovalRolePolicy } from "../lib/approval-policy.mjs";
 
 export const GITHUB_API_VERSION = "2026-03-10";
 const GITHUB_API_ORIGIN = "https://api.github.com";
 const MAX_RESPONSE_BYTES = 512 * 1024;
-const verifiedApprovals = new WeakSet();
+const verifiedApprovals = new WeakMap();
 
 const isRecord = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -54,22 +55,12 @@ const fetchGithubJson = async ({
 };
 
 const assertPolicy = (policy) => {
-  const teams = Object.values(policy.roles ?? {}).map(
-    (role) => role?.reviewerTeam,
-  );
+  assertConfiguredApprovalRolePolicy(policy, "GitHub approval policy");
   if (
-    policy.bindingStatus !== "configured" ||
     typeof policy.repository !== "string" ||
     !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(policy.repository) ||
     typeof policy.protectedEnvironment !== "string" ||
-    policy.protectedEnvironment.length === 0 ||
-    teams.length !== 3 ||
-    teams.some(
-      (team) =>
-        typeof team !== "string" ||
-        !/^[a-z0-9](?:[a-z0-9-]{0,98}[a-z0-9])?$/.test(team),
-    ) ||
-    new Set(teams).size !== teams.length
+    policy.protectedEnvironment.length === 0
   ) {
     throw new Error("GitHub approval policy is not fully configured");
   }
@@ -94,7 +85,7 @@ const reviewMatchesEnvironment = (review, environment) =>
   typeof review.user.node_id === "string" &&
   review.user.node_id.length > 0;
 
-const resolveReviewerRole = async ({
+const resolveReviewerRoles = async ({
   policy,
   owner,
   review,
@@ -126,12 +117,10 @@ const resolveReviewerRole = async ({
       reviewerTeam: rolePolicy.reviewerTeam,
     });
   }
-  if (memberships.length !== 1) {
-    throw new Error(
-      "GitHub reviewer must belong to exactly one configured approval team",
-    );
+  if (memberships.length === 0) {
+    throw new Error("GitHub reviewer has no configured approval role");
   }
-  return memberships[0];
+  return memberships;
 };
 
 export const fetchGitHubProtectedEnvironmentApprovals = async ({
@@ -179,46 +168,48 @@ export const fetchGitHubProtectedEnvironmentApprovals = async ({
 
   const results = [];
   for (const review of candidates) {
-    const membership = await resolveReviewerRole({
+    const memberships = await resolveReviewerRoles({
       policy,
       owner,
       review,
       githubToken,
       fetchImpl,
     });
-    const providerReviewerId = String(review.user.id);
-    const approvalId = sha256Json({
-      schemaVersion: 1,
-      workflowRunId: expectedRunId,
-      protectedEnvironment: policy.protectedEnvironment,
-      providerReviewerId,
-      providerReviewerNodeId: review.user.node_id,
-      role: membership.role,
-      providerResponseSha256: reviewResult.responseSha256,
-    });
-    const receipt = {
-      schemaVersion: 1,
-      kind: "github-protected-environment-approval/v1",
-      approvalId,
-      operationId,
-      subjectSha256,
-      decision: "APPROVED",
-      providerReviewerId,
-      providerReviewerLogin: review.user.login,
-      providerReviewerNodeId: review.user.node_id,
-      providerReviewerTeamIds: [membership.reviewerTeam],
-      role: membership.role,
-      workflowRunId: expectedRunId,
-      protectedEnvironment: policy.protectedEnvironment,
-      providerResponseSha256: reviewResult.responseSha256,
-      approvedAt: new Date(approvedAtMilliseconds).toISOString(),
-    };
-    const result = {
-      receipt,
-      receiptBytes: canonicalJsonBytes(receipt),
-    };
-    verifiedApprovals.add(result);
-    results.push(result);
+    for (const membership of memberships) {
+      const providerReviewerId = String(review.user.id);
+      const approvalId = sha256Json({
+        schemaVersion: 1,
+        workflowRunId: expectedRunId,
+        protectedEnvironment: policy.protectedEnvironment,
+        providerReviewerId,
+        providerReviewerNodeId: review.user.node_id,
+        role: membership.role,
+        providerResponseSha256: reviewResult.responseSha256,
+      });
+      const receipt = {
+        schemaVersion: 1,
+        kind: "github-protected-environment-approval/v1",
+        approvalId,
+        operationId,
+        subjectSha256,
+        decision: "APPROVED",
+        providerReviewerId,
+        providerReviewerLogin: review.user.login,
+        providerReviewerNodeId: review.user.node_id,
+        providerReviewerTeamIds: [membership.reviewerTeam],
+        role: membership.role,
+        workflowRunId: expectedRunId,
+        protectedEnvironment: policy.protectedEnvironment,
+        providerResponseSha256: reviewResult.responseSha256,
+        approvedAt: new Date(approvedAtMilliseconds).toISOString(),
+      };
+      const result = {
+        receipt,
+        receiptBytes: canonicalJsonBytes(receipt),
+      };
+      verifiedApprovals.set(result, sha256Bytes(result.receiptBytes));
+      results.push(result);
+    }
   }
   if (
     new Set(results.map(({ receipt }) => receipt.approvalId)).size !==
@@ -230,7 +221,14 @@ export const fetchGitHubProtectedEnvironmentApprovals = async ({
 };
 
 export const assertVerifiedGitHubApprovalResult = (result) => {
-  if (!isRecord(result) || !verifiedApprovals.has(result)) {
+  const expectedReceiptSha256 = isRecord(result)
+    ? verifiedApprovals.get(result)
+    : undefined;
+  if (
+    typeof expectedReceiptSha256 !== "string" ||
+    !Buffer.isBuffer(result.receiptBytes) ||
+    sha256Bytes(result.receiptBytes) !== expectedReceiptSha256
+  ) {
     throw new Error("Approval receipt was not resolved from the GitHub API");
   }
   return result;

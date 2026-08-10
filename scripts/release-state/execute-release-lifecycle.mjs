@@ -611,7 +611,7 @@ export const runReleaseLifecycleCli = async (
           environment,
           "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
         ),
-        githubToken: requireEnvironment(environment, "GITHUB_TOKEN"),
+        githubToken: requireEnvironment(environment, "APPROVAL_GITHUB_TOKEN"),
       });
     } else if (
       ["activate-policy", "activate-policy-floor"].includes(parsed.command)
@@ -634,7 +634,7 @@ export const runReleaseLifecycleCli = async (
           environment,
           "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
         ),
-        githubToken: requireEnvironment(environment, "GITHUB_TOKEN"),
+        githubToken: requireEnvironment(environment, "APPROVAL_GITHUB_TOKEN"),
       });
     } else {
       result = await acceptRelease({

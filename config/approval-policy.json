@@ -8,6 +8,7 @@
   "repository": "blusalice3/event-shopping-planner-routeplanning",
   "workflowRef": "blusalice3/event-shopping-planner-routeplanning/.github/workflows/release.yml@refs/heads/main",
   "protectedEnvironment": "foundation-release-state",
+  "humanOperatorModel": "single-human-single-github-account/v1",
   "roles": {
     "releaseOwner": {
       "reviewerTeam": null
@@ -20,7 +21,7 @@
     }
   },
   "distinctApprovalIds": true,
-  "distinctProviderReviewerIds": true,
+  "distinctProviderReviewerIds": false,
   "blockerCodes": [
     "release-owner-team-unconfigured",
     "data-safety-team-unconfigured",

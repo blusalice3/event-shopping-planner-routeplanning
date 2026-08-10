@@ -217,7 +217,7 @@ test("stores approvals and CAS-appends a recovery pending operation", async () =
     trustedIssuer: "https://token.actions.githubusercontent.com",
     workflowRunId: "100",
     protectedEnvironment: "foundation-release-state",
-    providerReviewerId: `reviewer-${role}`,
+    providerReviewerId: "shared-recovery-reviewer",
     role,
     decision: "APPROVED",
     approvedAt: committedAt,

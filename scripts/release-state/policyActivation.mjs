@@ -16,7 +16,7 @@ import {
 } from "./policyCompatibility.mjs";
 import { validateP8FloorActivationClosure } from "./p8FloorActivationClosure.mjs";
 import { NORMAL_POLICY_ACTIVATION_GATES } from "./phaseGates.mjs";
-import { collectAndStorePrePromotionApprovals } from "./promotionPreparation.mjs";
+import { collectAndStorePolicyActivationApprovals } from "./promotionPreparation.mjs";
 import {
   createReleaseEvent,
   hashReleaseEvent,
@@ -1022,7 +1022,7 @@ export const activateReleasePolicy = async (
   options,
   {
     readState = readCurrentReleaseState,
-    collectApprovals = collectAndStorePrePromotionApprovals,
+    collectApprovals = collectAndStorePolicyActivationApprovals,
     deriveSubjectImpl = derivePolicyActivationSubject,
     now = Date.now,
   } = {},

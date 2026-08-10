@@ -62,6 +62,11 @@ test("separates archive recovery subject production from reviewed mutation", () 
     "release:execute-archive-recovery -- prepare",
   );
   assert.ok(hashCheck >= 0 && prepare > hashCheck);
+  assert.match(
+    executor,
+    /APPROVAL_GITHUB_TOKEN: \$\{\{ secrets\.FOUNDATION_APPROVAL_GITHUB_TOKEN \}\}/,
+  );
+  assert.doesNotMatch(executor, /^\s+GITHUB_TOKEN:/mu);
   assert.match(executor, /--subject-sha256 \$env:REQUESTED_SUBJECT_SHA256/);
   assert.match(executor, /release:promote-prepared/);
   assert.match(executor, /record-assignment/);

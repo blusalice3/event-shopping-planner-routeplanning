@@ -504,7 +504,7 @@ test("CAS-appends the complete 16-gate chain through semantic release history an
       issuerReceiptSha256: issuerReceipt.sha256,
       workflowRunId: String(90_000 + approvalCounter),
       protectedEnvironment: "foundation-release-state",
-      providerReviewerId: `reviewer-${approvalCounter}`,
+      providerReviewerId: "shared-formal-exit-reviewer",
       role,
       decision: "APPROVED",
       approvedAt: issuedAt,

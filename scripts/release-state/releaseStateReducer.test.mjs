@@ -634,7 +634,7 @@ test("allows only a distinct source binding to replace an accepted standard at t
   );
 });
 
-test("rejects containment acceptance and duplicate reviewers", () => {
+test("accepts one reviewer filling both required promotion roles", () => {
   let snapshot = initializeState();
   const operationId = "invalid-approval";
   const standard = binding("standard", "1");
@@ -668,9 +668,55 @@ test("rejects containment acceptance and duplicate reviewers", () => {
     },
     [first, second],
   );
+  const prepared = reduceReleaseState(snapshot, event);
+  assert.equal(prepared.pendingOperation?.operationId, operationId);
+  assert.deepEqual(
+    prepared.pendingOperation?.approvalRefs.map(
+      ({ providerReviewerId }) => providerReviewerId,
+    ),
+    [first.providerReviewerId, first.providerReviewerId],
+  );
+
+  const duplicateApprovalId = {
+    ...second,
+    approvalId: first.approvalId,
+  };
+  const duplicateEvent = appendEvent(
+    snapshot,
+    "promotion-prepared",
+    operationId,
+    {
+      pendingOperation: {
+        ...event.payload.pendingOperation,
+        approvalRefs: [first, duplicateApprovalId],
+      },
+    },
+    [first, duplicateApprovalId],
+  );
   assert.throws(
-    () => reduceReleaseState(snapshot, event),
-    /reviewers must be distinct/,
+    () => reduceReleaseState(snapshot, duplicateEvent),
+    /Approval IDs must be distinct/,
+  );
+
+  const missingReviewer = {
+    ...second,
+    providerReviewerId: "",
+  };
+  const missingReviewerEvent = appendEvent(
+    snapshot,
+    "promotion-prepared",
+    operationId,
+    {
+      pendingOperation: {
+        ...event.payload.pendingOperation,
+        approvalRefs: [first, missingReviewer],
+      },
+    },
+    [first, missingReviewer],
+  );
+  assert.throws(
+    () => reduceReleaseState(snapshot, missingReviewerEvent),
+    /Approval identities must be non-empty strings/,
   );
 });
 

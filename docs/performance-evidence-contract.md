@@ -161,6 +161,8 @@ producerは別の先行workflow runで採取され、review済みSHA-256が指�
 30 samples、functional assertions、machine/Chromium、clean source closure、release variant、artifact
 archiveをcanonical builder/verifierで再検証する。同一run、file-only envelope、P8 closureの流用は拒否する。
 raw `evidenceId`に束縛されたcollector workflow run IDもreview済みrun IDとexact一致しなければならない。
+collector実施者と後続reviewerは同じGitHub accountでよいが、先行run、後続review action、exact hashの
+順序と分離は維持する。
 さらにGitHub Run APIからcollector runのraw responseとcanonical projectionを取得してimmutable storeへ
 保存・readbackし、`completed/success`、run attempt、head SHA、workflow path、artifact名/hashを検証する。
 OIDC collector identityとworkflow run authorityの両方が一致しなければproducer receiptを生成しない。
@@ -214,9 +216,10 @@ eventから再解決して`performance-inherited-closure/v1`へ合成する。
 
 production CLIはaccepted eventやsubjectのfile入力を受け付けない。PostgreSQL Release State
 storeのcurrent headまでを全replayし、4 eventの実record、standard acceptance subject、performance
-envelope、package index、artifact manifest、archive availability、3 approvalとOIDC receipt、live
+envelope、package index、artifact manifest、archive availability、三役分のrole-bound approvalとOIDC receipt、live
 archive bytesをimmutable referenceから再読込する。eventがoff-chain、object/media type/hashが不一致、
-reviewer重複、archive欠落/tamper、source/variant/gateが不一致ならclosureを生成しない。
+必須role欠落、role-bound approval ID重複、archive欠落/tamper、source/variant/gateが不一致ならclosureを生成しない。
+同一provider reviewerによる三役兼任は許可する。
 各own-gate artifactのembedded producer receiptも再検証し、accepted event/subjectのgate、expected
 state、source、package archive、acceptance workflow runより前のproducer run、output hashと一致しない
 旧3-keyまたは自己申告receiptはclosureへ継承しない。

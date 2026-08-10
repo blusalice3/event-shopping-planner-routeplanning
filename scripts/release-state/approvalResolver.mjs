@@ -55,14 +55,15 @@ const assertExactReceiptBinding = ({
       ([, rolePolicy]) =>
         typeof rolePolicy.reviewerTeam === "string" &&
         rolePolicy.reviewerTeam.length > 0 &&
-        receipt.providerReviewerTeamIds.includes(rolePolicy.reviewerTeam),
+        receipt.providerReviewerTeamIds.length === 1 &&
+        receipt.providerReviewerTeamIds[0] === rolePolicy.reviewerTeam,
     )
     .map(([role]) => role);
   if (matchingRoles.length !== 1) {
     throw new Error("Approval reviewer is not a member of the configured team");
   }
   const [resolvedRole] = matchingRoles;
-  if (receipt.role !== undefined && receipt.role !== resolvedRole) {
+  if (receipt.role !== resolvedRole) {
     throw new Error(
       "Approval role self-claim differs from authoritative membership",
     );
@@ -148,28 +149,41 @@ export const assertRequiredApprovalSet = (approvals, requiredRoles) => {
     throw new Error("Approval set must contain exactly the required roles");
   }
   if (
+    approvals.some(
+      (approval) =>
+        approval === null ||
+        typeof approval !== "object" ||
+        typeof approval.approvalId !== "string" ||
+        approval.approvalId.length === 0 ||
+        typeof approval.providerReviewerId !== "string" ||
+        approval.providerReviewerId.length === 0,
+    )
+  ) {
+    throw new Error("Approval identities are invalid");
+  }
+  if (
     new Set(approvals.map((approval) => approval.approvalId)).size !==
     approvals.length
   ) {
     throw new Error("Approval IDs are not distinct");
   }
-  if (
-    new Set(approvals.map((approval) => approval.providerReviewerId)).size !==
-    approvals.length
-  ) {
-    throw new Error("Approval reviewers are not distinct");
+  for (const role of requiredRoles) {
+    if (!approvals.some((approval) => approval.role === role)) {
+      throw new Error(`Required approval role is absent: ${role}`);
+    }
   }
   for (const role of requiredRoles) {
+    const matching = approvals.filter((approval) => approval.role === role);
+    if (matching.length !== 1) {
+      throw new Error(`Required approval role repeats: ${role}`);
+    }
+    const [approval] = matching;
     if (
-      approvals.filter(
-        (approval) =>
-          approval.role === role &&
-          approval.decision === "APPROVED" &&
-          typeof approval.approvedAt === "string" &&
-          Number.isFinite(new Date(approval.approvedAt).getTime()),
-      ).length !== 1
+      approval.decision !== "APPROVED" ||
+      typeof approval.approvedAt !== "string" ||
+      !Number.isFinite(new Date(approval.approvedAt).getTime())
     ) {
-      throw new Error(`Required approval role is absent: ${role}`);
+      throw new Error(`Required approval role is invalid: ${role}`);
     }
   }
   return true;

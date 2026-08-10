@@ -15,6 +15,7 @@ import {
   hashReleaseEvent,
   reduceReleaseState,
 } from "./releaseStateReducer.mjs";
+import { collectAndStorePolicyActivationApprovals } from "./promotionPreparation.mjs";
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -418,7 +419,7 @@ const approval = (role, character) => ({
   issuerReceiptSha256: reference("1").sha256,
   workflowRunId: "12345",
   protectedEnvironment: "foundation-release-state",
-  providerReviewerId: `reviewer-${role}`,
+  providerReviewerId: "shared-policy-reviewer",
   role,
   decision: "APPROVED",
   approvedAt: "2026-08-03T00:00:00.000Z",
@@ -428,6 +429,88 @@ const approvals = [
   approval("dataSafetyReviewer", "7"),
   approval("operationsReviewer", "8"),
 ];
+
+test("default policy activation collector retains all three approval roles", async () => {
+  const store = {
+    async putEvidence({ bytes, mediaType }) {
+      const value = Buffer.from(bytes);
+      const digest = sha256Bytes(value);
+      return {
+        uri: `release-state://${namespace}/evidence/${digest}`,
+        sha256: digest,
+        byteLength: value.length,
+        mediaType,
+        replayed: false,
+      };
+    },
+  };
+  const issuerReceipt = {
+    verifiedAt: "2026-08-03T00:00:00.000Z",
+    claims: { sourceSha: executorSourceSha, runId: "12345" },
+  };
+  const candidates = approvals.map((resolvedApproval, index) => ({
+    receiptBytes: canonicalJsonBytes({ index }),
+    resolvedApproval,
+  }));
+  const dependencies = {
+    requestOidcToken: async () => "oidc-token",
+    verifyOidcToken: async () => ({
+      receipt: issuerReceipt,
+      receiptBytes: canonicalJsonBytes(issuerReceipt),
+    }),
+    fetchApprovals: async () => candidates,
+    resolveApproval: ({ verifiedApprovalResult }) =>
+      verifiedApprovalResult.resolvedApproval,
+  };
+  const options = {
+    store,
+    namespace,
+    policy: { oidcAudience: "urn:test:approval" },
+    operationId,
+    subjectSha256,
+    expectedSourceSha: executorSourceSha,
+    expectedRunId: "12345",
+    oidcRequestUrl: "https://oidc.example.test",
+    oidcRequestToken: "request-token",
+    githubToken: "github-token",
+  };
+  const result = await collectAndStorePolicyActivationApprovals(
+    options,
+    dependencies,
+  );
+  assert.deepEqual(
+    result.approvalRefs.map(({ role }) => role),
+    ["releaseOwner", "dataSafetyReviewer", "operationsReviewer"],
+  );
+  assert.equal(
+    new Set(
+      result.approvalRefs.map(({ providerReviewerId }) => providerReviewerId),
+    ).size,
+    1,
+  );
+  assert.equal(
+    new Set(result.approvalRefs.map(({ approvalId }) => approvalId)).size,
+    3,
+  );
+
+  await assert.rejects(
+    collectAndStorePolicyActivationApprovals(options, {
+      ...dependencies,
+      fetchApprovals: async () => candidates.slice(0, 2),
+    }),
+    /exactly the required roles/,
+  );
+  await assert.rejects(
+    collectAndStorePolicyActivationApprovals(options, {
+      ...dependencies,
+      resolveApproval: ({ verifiedApprovalResult }) => ({
+        ...verifiedApprovalResult.resolvedApproval,
+        approvalId: approvals[0].approvalId,
+      }),
+    }),
+    /Approval IDs are not distinct/,
+  );
+});
 
 const makeActivationHarness = () => {
   let current = {

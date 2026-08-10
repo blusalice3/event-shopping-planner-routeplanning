@@ -292,14 +292,14 @@ export const verifyReleaseAEvidenceBundle = async ({
   const distinctApprovalIds = new Set(
     approvalObjects.map((approval) => approval.approvalId),
   );
-  const distinctReviewers = new Set(
-    approvalObjects.map((approval) => approval.providerReviewerId),
-  );
   if (
     distinctApprovalIds.size !== approvalObjects.length ||
-    distinctReviewers.size !== approvalObjects.length ||
     approvalObjects.some(
       (approval) =>
+        typeof approval.approvalId !== "string" ||
+        approval.approvalId.length === 0 ||
+        typeof approval.providerReviewerId !== "string" ||
+        approval.providerReviewerId.length === 0 ||
         approval.operationId !== releaseStateEvent.operationId ||
         approval.decision !== "APPROVED" ||
         approval.trustedIssuer !==
@@ -308,7 +308,7 @@ export const verifyReleaseAEvidenceBundle = async ({
         !Number.isFinite(new Date(approval.approvedAt).getTime()),
     )
   ) {
-    throw new Error("Bundle approvals are not distinct");
+    throw new Error("Bundle approval identities or bindings are invalid");
   }
   if (assignmentEvidence !== null) {
     const assignments = assignmentEvidence.assignments;

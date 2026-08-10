@@ -4,7 +4,7 @@
 
 この runbook は Web Foundation の immutable artifact を build、検証、prebuilt deploy、
 promotion、rollback、reconcile する手順を固定する。production alias、Release State、
-database、provider のいずれかを変更する操作は protected workflow と二者以上の review
+database、provider のいずれかを変更する操作は protected workflow と必須roleを満たすreview記録
 なしに実行しない。
 
 `dist/`、branch 名、Git tag、provider alias は release artifact の正本ではない。正本は
@@ -21,7 +21,8 @@ Release State event である。
 - `config/provider-policy.json` の provider/team/project/domain/WAF/log-retention が未設定
 - `config/db-compatibility-contract.json` の remote observation と migration 適用が未完了
 - `config/release-state-store.json` の host/database/executor/CA/backup owner が未設定
-- `config/approval-policy.json` の三つの reviewer team が未設定
+- `config/approval-policy.json` の Organization repository と三つの reviewer team が未設定
+- Team membership確認用の`FOUNDATION_APPROVAL_GITHUB_TOKEN`が未設定
 - `config/foundation-baseline.json` の `bootstrapBaselineSourceSha` と raw-dist manifest hash が未設定
 - `config/metrics-retention-policy.json` の backup owner、remote cron、last-success observation が未設定
 - startup burst API の production WAF/rate 値と provider log retention が未観測
@@ -29,6 +30,64 @@ Release State event である。
 fixture の artifact verifier が通っても production eligible を意味しない。
 `verify-foundation-policy.mjs --require-production-ready` と production binding を要求する builder が
 上記を fail-closed で拒否する状態が正しい。blocker 件数や code を手作業で別管理しない。
+
+## 1人・1 GitHub accountの運用設定
+
+Formal Exitは`releaseOwner`、`dataSafetyReviewer`、`operationsReviewer`の三役を維持するが、
+同一GitHubユーザーが複数roleを兼任してよい。監査用のrole-bound approval IDと三つのreviewer
+teamはdistinctのまま維持し、`providerReviewerId`だけ重複を許可する。一回のauthoritative
+GitHub Environment承認は、そのユーザーについてGitHub APIで確認できた各team membershipから、
+必要な二役または三役のreceiptへ決定論的に展開される。
+
+human operator modelは`single-human-single-github-account/v1`である。collector、baseline選定、audit、
+実機試験、review、publish、三つのapproval roleを同じ実在GitHub accountが担当できる。role/action fieldと
+review記録は省略せず、同じloginを正直に記録する。架空の別人accountを作らない。別run、時刻順序、
+immutable artifact/hash、OIDC、CASは維持する。DB/provider/deviceのservice credentialは同じ一人が管理できるが、
+権限境界とsecretは統合しない。
+
+設定手順:
+
+1. repositoryのSettingsでEnvironmentの`Required reviewers`を利用できるplanか確認する。
+   GitHub Free/Pro/Teamではpublic repositoryだけが対象であり、private/internal repositoryで項目を
+   利用できない場合は、対応planへ変更するまでFormal Exitを開始しない。
+2. repositoryのownerがGitHub Organizationであることを確認する。個人account所有なら、Organizationを
+   作成してrepositoryを移管する。移管後はlocal repositoryの`origin`、GitHub/Vercel連携、protected
+   `main`を新repositoryに合わせ、以降の設定を移管先で行う。protected `main`はPull Requestと必須status
+   checksを維持するが、required approving reviewsを0にし、Code Owner reviewを必須にしない。
+3. GitHub Organizationに`release-owners`、`data-safety-reviewers`、
+   `operations-reviewers`など三つのdistinct Teamを作る。
+4. 兼任する同じGitHubユーザーを三つすべてのTeamへ追加し、membershipが`Active`であることを確認する。
+5. 三つのTeamそれぞれへ移管後repositoryのread以上のaccessを付与する。
+6. GitHubの`foundation-release-state` Environmentを作成し、三つのTeamをRequired reviewersへ登録する。
+   GitHub側は登録したuser/teamのうち一つの承認でjobを進めるため、本実装がその一回の承認を三役へ展開する。
+   管理者によるprotection ruleのbypassは無効にし、`Start all waiting jobs`を使わず必ず通常のreviewを残す。
+7. 一つのaccountがworkflow開始とEnvironment承認を行うため、Environmentの`Prevent self-review`を
+   必ずOFFにする。別automation/accountを前提にしない。
+8. fine-grained PAT作成画面で`Resource owner`を移管先Organization、`Repository access`を
+   `Only select repositories`の対象repositoryだけにする。Organization permissionは`Members: read`、
+   repository permissionは`Actions: read`だけを設定する。Organization側の承認やSSO authorizationが
+   必要なら、`Pending`ではなく利用可能になったことを確認する。有効期限は24時間観測と再試行期間を
+   十分に含める。
+9. PATを`foundation-release-state` Environment secretの
+   `FOUNDATION_APPROVAL_GITHUB_TOKEN`へ保存する。自動`GITHUB_TOKEN`ではOrganization membershipを
+   検証できない。token値をconfig、log、artifactへ書かず、期限前にrotationする。
+10. 実在する外部設定を確認した後、`config/approval-policy.json`の`repository`、`workflowRef`、
+    三roleのTeam slugを確定する。`humanOperatorModel: "single-human-single-github-account/v1"`、
+    `distinctApprovalIds: true`、`distinctProviderReviewerIds: false`を維持し、
+    `bindingStatus`を`configured`、`blockerCodes`を空配列にする。この最終configをPR経由でprotected
+    `main`へmergeし、そのmerge SHAを以降のsource SHAとして使う。
+11. protected jobが待機したら、対象repository、workflow、source SHA、operation、subject hashを確認し、
+    `Approve and deploy`を一回実行する。collectorが必要roleへ展開したことはartifactとRelease Stateで確認する。
+12. release、operation、subject hashが変わるたびに新しく承認する。以前のreceiptは再利用しない。
+
+このsingle-account modelは全human roleを対象にする。同じ人物が実施とreviewを行えるが、reviewは
+evidence確定後の別actionとして後の時刻を記録する。producer/reviewer run、DB credential、distinct
+source/build/deployment/profile、24時間観測、minimum sampleなどの非人物分離は変更しない。
+
+またapproval policyのhashが変わるため、手順10の最終binding/configをprotected `main`へmergeしたSHAで
+`collect-foundation-external-bindings`を再実行し、別runで
+`collect-foundation-bootstrap-recovery`も再実行する。続いて旧policy hashを参照する後続の
+bundle、closure、approvalをすべて再生成し、旧証跡を流用しない。
 
 ## 不変条件
 
@@ -92,6 +151,7 @@ protected environment から次の credential/binding を渡す。
 - `DB_COMPATIBILITY_OBSERVER_DATABASE_URL` (`sslmode=verify-full`、read-only observer)
 - `DB_COMPATIBILITY_OBSERVER_CA_PEM`
 - protected workflow の `GITHUB_TOKEN` / OIDC request binding
+- `FOUNDATION_APPROVAL_GITHUB_TOKEN`（Organization `Members: read`、repository `Actions: read`）
 
 builder は `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` と provider observation/policy の exact
 一致を検証する。token value は command line、log、artifact に出さない。
@@ -183,7 +243,8 @@ DB URL/CA、application DB observer URL/CA、GitHub OIDC request binding を設�
 caller の `passed`/`status`/boolean、手作業 JSON、存在しない SHA-256 は authority にならない。
 closure は1時間、provider observation は provider policy の freshness、recovery rehearsal は30日を
 超えたら失効する。失効時は provider observation/rehearsal を新しい protected prior run で再採取し、
-review 後に新しい closure を作る。同じ run で rehearsal と closure を自己承認しない。
+review 後に新しい closure を作る。同じ run で rehearsal と closure を閉じない。同じaccountが
+先行runのimmutable resultを確認し、後続runでclosureを作ってよい。
 
 ## Production remote DB observation
 
@@ -226,8 +287,8 @@ observer role、production CA hash、freshness）と `config/release-state-store
 configured freshness window（既定 300 秒）を producer、subject review、execute の途中で超えた場合は、
 window を延長したり古い subject を再利用したりしない。古い subject と production authority を不採用にし、
 新しい `collect-remote-db-observation` run を dispatchして provider/DB observation と production authority を
-再収集・reviewし、その新しい四値から新しい subject を生成して review後に実行する。reviewer は各 run の
-完了直後に immutable hash を確認し、期限切れならこの再収集手順へ戻る。
+再収集・reviewし、その新しい四値から新しい subject を生成して review後に実行する。同じoperator accountが
+各 run の完了直後に immutable hash を確認し、期限切れならこの再収集手順へ戻る。
 
 producer と subject consumer を同じ run にまとめない。caller supplied observation JSON、status、
 conclusion、任意の store URI、ローカルで生成した observation を代用しない。secret は workflow step の
@@ -255,13 +316,15 @@ checked-in bindingは未構成で、live observationは `0/14` のため、実�
 
 review/publishはgate単位に行う。
 
-1. exact sourceの必要collectorをそれぞれ別runで完了する。同じrunでproducerとreviewerを兼ねない。
+1. exact sourceの必要collectorをそれぞれ別runで完了する。同じrunでproducerとreview actionを兼ねないが、
+   同じaccountが各別runを順番に担当してよい。
 2. `produce-phase-exit-authority-bundle`をdispatchする。`request_json`には`target_gate`と、対象gateが
    必要とするexact run ID/attemptまたはremote DBの4 referenceだけを含める。
 3. producerはGitHub Run API → Artifact API digest → downloaded ZIP bytes → ZIP内exact single file →
    authority固有semantic verifierの順に照合する。API response、ZIP、file、closed receiptをimmutable
    storeへ保存・readbackしてから`phase-exit-authority-package.json`を生成する。
-4. package SHA-256、bundle SHA-256、review receipt SHA-256、run ID/attemptを別担当者がreviewする。
+4. 同じoperator accountがproducer完了後に、package SHA-256、bundle SHA-256、review receipt SHA-256、
+   run ID/attemptを別review actionとして確認する。
 5. 別runの`publish-phase-exit-authority-bundle`へ`target_gate`、producer run ID/attempt、package SHA-256、
    review receipt SHA-256を渡す。publisherは全上流とcurrent Release State subjectを再解決し、published
    bundle referenceをcreate-only保存・readbackする。
@@ -306,7 +369,8 @@ currentのcontroller/source遷移をstrict signed receiptへ記録する。
 このstrict runを開始する時点で、current accepted standardと唯一のeligible rollback standardはどちらも
 canonical stable/versioned capability・identityを持ち、`pwaLifecycle=prompt-close-all-v1`でなければならない。
 legacy auto-update artifactをformal strict receiptへ流用しない。まずprompt対応rollback predecessorを、fresh
-exact-source evidence、24時間以上のcontinuous observation、三役のdistinct approvalで`P1-PWA` standardとして
+exact-source evidence、24時間以上のcontinuous observation、三役分のrole-bound approval
+（同一provider reviewerによる兼任可）で`P1-PWA` standardとして
 acceptする。次にsource、build、binding、provider deployment ID/URLがすべて異なるprompt対応current candidateを、
 `candidate_gate=P1-PWA`を維持した独立のbuild/acceptance run群で同じfloorへacceptする。same-floor時のformal
 predecessorは`P1-PWA`自身ではなく`P0-RELEASE`であり、終端`P8-CLEAN`ではsame-floor replacementを禁止する。
@@ -593,7 +657,7 @@ evidence store に保存し、保存後の再読取まで一致した場合だ�
 5. subject bytes の SHA-256 を人が review し、その exact 値と subject run ID を
    `prepare-and-promote` dispatch input にする。
 6. protected environment/OIDC と GitHub API approval を検証し、
-   `releaseOwner` と `dataSafetyReviewer` の distinct receipt を保存して
+   `releaseOwner` と `dataSafetyReviewer` のrole-bound receipt（同一provider reviewer可）を保存して
    `promotion-prepared` を CAS append する。
 7. pinned `vercel promote` を一回だけ実行し、全 owned production domain の before/after
    assignment receipt を保存する。partial/unknown target、configuration drift、retry
@@ -633,19 +697,19 @@ evidence store に保存し、保存後の再読取まで一致した場合だ�
     performance bytes から canonical `continuous-production-probe.json` を生成する。P1 以降で legacy
     bootstrap を解除する場合は、companion 固有の recovery drill を実施し、reviewed
     `companion-recovery-drill-source.json` から `companion-recovery-drill.json` も生成する。同じ保護 run で
-    三役の実 approval receipt、candidate event、DB/policy/provider/assignment/continuous probe と optional
+    三役分の実approval receipt（同一provider reviewer可）、candidate event、DB/policy/provider/assignment/continuous probe と optional
     performance ref の全 object closure を持つ `acceptance-final` bundle を生成し、bundle/object-set の
     SHA-256 を別途 review する。source v2とfinal v1はそれぞれclosed JSON schemaで検証し、unknown field、
     source workflow authority、sample/chain commit、HTTP/provider receiptの欠落またはkeyword制約違反を拒否する。
 15. `accept-standard` は同じ必須`candidate_gate`を維持し、reviewed requirements、evidence、continuous probe、必要時の performance と
-    companion drill、terminal bundle/object-set、current head/provider identities、三役の distinct approval
+    companion drill、terminal bundle/object-set、current head/provider identities、三役分のrole-bound approval
     chain を再検証する。performance の full gate verifier は immutable evidence 保存前と CAS commit 直前の
     二回実行し、完全一致した candidate event だけを CAS appendして standard だけを
     `release-accepted` にする。
 
 三つのcandidate-aware acceptance operationは`candidate_gate`をexact一致で伝播し、requirementsの
 `acceptedGate`とterminal `release-accepted.payload.acceptedGate`も同値でなければならない。same-floor
-replacementでも24時間観測、全sample、三役approval、assignment validationを省略しない。
+replacementでも24時間観測、全sample、三役分のapproval（兼任可）、assignment validationを省略しない。
 
 collectorの下位CLIは`npm run release:acceptance-collector -- -- initialize|append|finalize`、final inputの
 下位CLIは`npm run release:acceptance-input -- -- continuous-probe|companion-recovery`である。productionでは

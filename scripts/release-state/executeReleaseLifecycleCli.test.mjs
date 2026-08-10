@@ -32,6 +32,7 @@ const environment = {
   ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example.test",
   ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-request-token",
   GITHUB_TOKEN: "g".repeat(20),
+  APPROVAL_GITHUB_TOKEN: "a".repeat(20),
 };
 const terminalCliArguments = [
   "--terminal-bundle",

@@ -190,7 +190,7 @@ const approval = ({ role, suffix }) => ({
   issuerReceiptSha256: reference("c").sha256,
   workflowRunId: "100",
   protectedEnvironment: "foundation-release-state",
-  providerReviewerId: `reviewer-${suffix}`,
+  providerReviewerId: "shared-promotion-reviewer",
   role,
   decision: "APPROVED",
   approvedAt: "2026-08-06T00:00:00.000Z",
@@ -566,6 +566,33 @@ test("validates prepared event hash and the exact protected source/run", () => {
         nowMilliseconds: FIXED_NOW,
       }),
     /approval binding is invalid/,
+  );
+  const duplicateApproval = structuredClone(prepared.result);
+  const duplicateApprovalId = duplicateApproval.approvalRefs[0].approvalId;
+  duplicateApproval.approvalRefs[1].approvalId = duplicateApprovalId;
+  duplicateApproval.event.approvalRefs[1].approvalId = duplicateApprovalId;
+  duplicateApproval.event.payload.pendingOperation.approvalRefs[1].approvalId =
+    duplicateApprovalId;
+  duplicateApproval.event.payloadSha256 = sha256Json(
+    duplicateApproval.event.payload,
+  );
+  const duplicateEventHash = sha256Bytes(
+    canonicalJsonBytes(duplicateApproval.event),
+  );
+  duplicateApproval.eventHash = duplicateEventHash;
+  duplicateApproval.eventUri =
+    `release-state://${NAMESPACE}/events/` +
+    `${duplicateApproval.event.sequence}/${duplicateEventHash}`;
+  duplicateApproval.head.eventHash = duplicateEventHash;
+  assert.throws(
+    () =>
+      validatePreparedPromotionResult({
+        preparedResultBytes: canonicalJsonBytes(duplicateApproval),
+        providerPolicy,
+        environment,
+        nowMilliseconds: FIXED_NOW,
+      }),
+    /approvals are ambiguous or differ/,
   );
   assert.throws(
     () =>

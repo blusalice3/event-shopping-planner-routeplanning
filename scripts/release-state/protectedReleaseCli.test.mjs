@@ -45,6 +45,7 @@ const environment = {
     "https://token.actions.githubusercontent.com/test",
   ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-request-token",
   GITHUB_TOKEN: "github-token",
+  APPROVAL_GITHUB_TOKEN: "approval-github-token",
 };
 
 const loadJson = async (filePath) => {

@@ -63,7 +63,8 @@ productionで利用するclient/SW証明provider、通常writerを含むquiescen
 | Support owner     | 利用者への退避案内、payloadを受領しない一次対応、incident escalation |
 | Observer          | privacy-safeなmetrics、alert、release evidenceの保管                 |
 
-同一人物が複数役割を兼ねても構いませんが、Release Bの有効化はRelease ownerとPersistence ownerの二者確認を必須とします。
+全役割を同一人物・同一GitHub accountが兼任できます。Release Bの有効化でもRelease ownerと
+Persistence ownerの二つのrole確認記録は残しますが、同じoperatorが順番に確認して構いません。
 
 ## 4. 用語と制御gate
 
@@ -166,6 +167,9 @@ verdict: NOT_DEPLOYED | DEPLOYED | UNKNOWN
 reviewer:
 evidence_links:
 ```
+
+`auditor`と`reviewer`は同じ実在accountで構いません。audit evidenceを固定した後にreview actionを行い、
+各fieldと時刻を省略しません。
 
 ## 6. legacy `syncQueue`の取扱い
 
@@ -355,7 +359,7 @@ canaryでは次を実施します。
 6. `unknown-source`や別SHAを対象buildの分母へ混ぜず、baselineと同じ定義で率を算出する
 7. raw event行ではなく集計viewのsnapshot/refだけをrelease evidenceへ残す
 
-baselineは`previous-production-build-matched-cohort-complete-24h/v1`に固定します。直前のproduction buildのfull SHA、canaryと一致するcohort/query定義、canary開始前に完了した24時間、選定者とreviewerを記録し、結果を見て別windowへ差し替えてはいけません。各production rateとstartup bucketの分母が20未満なら個別triageは行いますが、gate合格には使わず、同じ定義のまま観測を延長します。
+baselineは`previous-production-build-matched-cohort-complete-24h/v1`に固定します。直前のproduction buildのfull SHA、canaryと一致するcohort/query定義、canary開始前に完了した24時間、選定者とreviewerを記録し、結果を見て別windowへ差し替えてはいけません。選定者とreviewerは同じaccountで構いませんが、選定を記録した後にreviewを別actionとして記録します。各production rateとstartup bucketの分母が20未満なら個別triageは行いますが、gate合格には使わず、同じ定義のまま観測を延長します。
 
 `persistence_release_a_metrics_dashboard_24h`とcleanup viewはrolling 24時間です。一方、`persistence_release_a_metrics_dashboard_hourly_24h`はpartialな現在hourを除外し、直前の完了済みUTC hourを24個返します。別queryを使う場合もpartialな先頭・末尾を含めず、時刻範囲、重複、欠落をevidence validatorで検証します。24時間未満、hour bucket欠落またはsample 0、backend probe不通、対象SHA不一致、旧原本削除1件以上のどれかがあれば不合格です。
 
@@ -580,7 +584,7 @@ npm run test:release-a-browser
 
 各caseについて、release SHA、SW ID、browser version、profile種別、online状態、期待結果、実結果、実施者、時刻を記録します。screenshotや動画へ利用者payloadを映しません。
 
-app-window相当の自動試験を`installedPwaChecks`へ転記してはいけません。Windows 11 Chrome、Windows 11 Edge、Android Chromeの各caseは実際にinstallしたPWAでonline、offline、更新、旧原本不変を確認し、実施者とは別のreviewerが確認します。
+app-window相当の自動試験を`installedPwaChecks`へ転記してはいけません。Windows 11 Chrome、Windows 11 Edge、Android Chromeの各caseは実際にinstallしたPWAでonline、offline、更新、旧原本不変を確認します。実施者とreviewerは同じ実在accountで構いませんが、実機evidenceを固定した後にreviewし、`reviewedAt`を`executedAt`以後に記録します。
 
 ## 16. 文字コードとrelease evidence
 
@@ -619,7 +623,7 @@ templateは未実施を誤って合格させないため、そのままでは必
 - Windows 11 Chrome/EdgeとAndroid Chromeのactual installed PWA証跡
 - 未来時刻、未知field、重複JSON key、payload/raw/storage/revision/digest fieldがない
 - `d2389a0`の事実判定が`UNKNOWN`なら`TREAT_AS_DEPLOYED`で、専用E2EがPASS
-- release owner、data safety reviewer、operations reviewerの承認が全gate完了後である
+- release owner、data safety reviewer、operations reviewerの承認が全gate完了後である。同じaccountで三役を記録できる
 
 `d2389a0`専用E2Eは次でも単独確認できます。
 
