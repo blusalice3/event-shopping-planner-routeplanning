@@ -232,7 +232,7 @@ begin
     raise exception 'release state compare-and-swap failed'
       using errcode = '40001';
   end if;
-  computed_hash := encode(digest(canonical_event_bytes, 'sha256'), 'hex');
+  computed_hash := encode(pg_catalog.sha256(canonical_event_bytes), 'hex');
   committed_clock := clock_timestamp();
 
   insert into foundation_release.release_state_events (

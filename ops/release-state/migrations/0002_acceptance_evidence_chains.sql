@@ -74,15 +74,14 @@ begin
   end if;
 
   computed_chain_id := encode(
-    digest(
+    pg_catalog.sha256(
       convert_to(
         requested_namespace || E'\n'
           || requested_operation_id || E'\n'
           || requested_source_sha || E'\n'
           || requested_binding_id,
         'UTF8'
-      ),
-      'sha256'
+      )
     ),
     'hex'
   );
@@ -102,9 +101,9 @@ begin
     or requested_commit_bytes is null
     or octet_length(requested_commit_bytes) > 268435456
     or requested_sample_sha is distinct from
-      encode(digest(requested_sample_bytes, 'sha256'), 'hex')
+      encode(pg_catalog.sha256(requested_sample_bytes), 'hex')
     or requested_commit_sha is distinct from
-      encode(digest(requested_commit_bytes, 'sha256'), 'hex')
+      encode(pg_catalog.sha256(requested_commit_bytes), 'hex')
     or requested_sample_media_type is distinct from
       'application/vnd.event-shopping-planner.continuous-probe-sample+json;version=1'
     or requested_commit_media_type is distinct from
@@ -436,15 +435,14 @@ begin
       using errcode = '42501';
   end if;
   computed_chain_id := encode(
-    digest(
+    pg_catalog.sha256(
       convert_to(
         requested_namespace || E'\n'
           || requested_operation_id || E'\n'
           || requested_source_sha || E'\n'
           || requested_binding_id,
         'UTF8'
-      ),
-      'sha256'
+      )
     ),
     'hex'
   );

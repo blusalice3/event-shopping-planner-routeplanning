@@ -1,6 +1,5 @@
 begin;
 
-create extension if not exists pgcrypto;
 create schema if not exists foundation_release;
 
 create table if not exists foundation_release.release_state_heads (
@@ -297,7 +296,7 @@ begin
     raise exception 'release state compare-and-swap failed'
       using errcode = '40001';
   end if;
-  computed_hash := encode(digest(canonical_event_bytes, 'sha256'), 'hex');
+  computed_hash := encode(pg_catalog.sha256(canonical_event_bytes), 'hex');
   committed_clock := clock_timestamp();
 
   insert into foundation_release.release_state_events (
@@ -389,7 +388,7 @@ begin
   then
     raise exception 'release namespace executor denied' using errcode = '42501';
   end if;
-  computed_hash := encode(digest(requested_object_bytes, 'sha256'), 'hex');
+  computed_hash := encode(pg_catalog.sha256(requested_object_bytes), 'hex');
   if computed_hash <> expected_sha256 then
     raise exception 'evidence SHA-256 mismatch' using errcode = '22000';
   end if;

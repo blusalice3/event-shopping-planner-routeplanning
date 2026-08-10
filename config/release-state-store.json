@@ -20,18 +20,18 @@
   "migrations": [
     {
       "path": "ops/release-state/migrations/0001_release_state_store.sql",
-      "sha256": "5017b393af5120f96ccdd29bfcfd82be87969a34a930a331cc0682541af09365"
+      "sha256": "4ca7e6e4285e6590a911ed5115c629bf662db0499254a58cee564d46c120d6a8"
     },
     {
       "path": "ops/release-state/migrations/0002_acceptance_evidence_chains.sql",
-      "sha256": "2fdd3fc7ac461fc3c68036acc2cf24873726869982a102f5116eb244726bf1c4"
+      "sha256": "e790e8798b3deacab8e185883e01c84fa535e0cf9ef6c19279fa53c5c95e4804"
     },
     {
       "path": "ops/release-state/migrations/0003_phase_exit_attestations.sql",
-      "sha256": "f2456234be5c068c49ea2d28075112f9eb762ed865e5dccfc75ed03691660ab4"
+      "sha256": "3b9dbafd37e160db8daec3a08093542f64b04d7bc0823fac59ecbfc48cc951b7"
     }
   ],
-  "migrationSetSha256": "6c823b6333374606b58ac922b7f0dff12f2bdc593e68f4316630beb1f767c4e5",
+  "migrationSetSha256": "427ed4454cc8422ca1321a4ef2a9b45de3cbf7a19608d530fd4c10480bd506be",
   "blockerCodes": [
     "control-database-host-unconfigured",
     "control-database-name-unconfigured",

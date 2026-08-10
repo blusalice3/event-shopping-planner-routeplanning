@@ -90,6 +90,22 @@ if (
   );
 }
 const migrationTexts = migrationBytes.map((bytes) => bytes.toString("utf8"));
+const expectedMigrationHashFunctionCounts = [2, 4, 1];
+if (
+  migrationTexts.some(
+    (migrationText, index) =>
+      (migrationText.match(/pg_catalog\.sha256\s*\(/giu)?.length ?? 0) !==
+        expectedMigrationHashFunctionCounts[index] ||
+      /\bdigest\s*\(/iu.test(migrationText) ||
+      /create\s+extension(?:\s+if\s+not\s+exists)?\s+pgcrypto\b/iu.test(
+        migrationText,
+      ),
+  )
+) {
+  throw new Error(
+    "Release State migrations must use exactly seven PostgreSQL 17 built-in SHA-256 calls",
+  );
+}
 for (const requiredFragment of [
   "create table if not exists foundation_release.release_state_heads",
   "create or replace function foundation_release.compare_and_append",
