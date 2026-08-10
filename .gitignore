@@ -3,6 +3,10 @@ dist/
 coverage/
 .vite/
 
+# Supabase CLI internal state
+/supabase/.temp/
+/supabase/.branches/
+
 .env
 .env.*
 !.env.example

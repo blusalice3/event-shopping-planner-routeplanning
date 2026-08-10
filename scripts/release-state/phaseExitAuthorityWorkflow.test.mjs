@@ -15,17 +15,25 @@ const root = path.resolve(
   "..",
 );
 
-const [release, quality, retention, publisher, artifactAuthority, packageText] =
-  await Promise.all(
-    [
-      ".github/workflows/release.yml",
-      ".github/workflows/quality.yml",
-      ".github/workflows/metrics-retention.yml",
-      "scripts/release-state/publish-phase-exit-authority-bundle.mjs",
-      "scripts/release-state/reviewedWorkflowArtifactAuthority.mjs",
-      "package.json",
-    ].map((relativePath) => readFile(path.join(root, relativePath), "utf8")),
-  );
+const [
+  release,
+  quality,
+  retention,
+  publisher,
+  artifactAuthority,
+  packageText,
+  gitignore,
+] = await Promise.all(
+  [
+    ".github/workflows/release.yml",
+    ".github/workflows/quality.yml",
+    ".github/workflows/metrics-retention.yml",
+    "scripts/release-state/publish-phase-exit-authority-bundle.mjs",
+    "scripts/release-state/reviewedWorkflowArtifactAuthority.mjs",
+    "package.json",
+    ".gitignore",
+  ].map((relativePath) => readFile(path.join(root, relativePath), "utf8")),
+);
 const releaseWorkflow = yaml.load(release);
 const qualityWorkflow = yaml.load(quality);
 const packageJson = JSON.parse(packageText);
@@ -94,6 +102,32 @@ test("quality installs its pinned browser before foundation tests", () => {
       `${consumer} must run after the pinned browser install`,
     );
   }
+});
+
+test("quality keeps Supabase CLI state outside the clean build source", () => {
+  assert.match(gitignore, /^\/supabase\/\.temp\/$/mu);
+  assert.match(gitignore, /^\/supabase\/\.branches\/$/mu);
+  const steps = qualityWorkflow.jobs.quality.steps;
+  const cleanQaIndex = steps.findIndex(
+    (step) => step.name === "Assert clean QA build source",
+  );
+  const qaIndex = steps.findIndex(
+    (step) => step.name === "Non-production QA builds",
+  );
+  const cleanProductionIndex = steps.findIndex(
+    (step) => step.name === "Assert clean production build source",
+  );
+  const productionIndex = steps.findIndex(
+    (step) => step.name === "Release A build",
+  );
+  const cleanSourceCommand =
+    "git status --short --untracked-files=all\n" +
+    'test -z "$(git status --porcelain --untracked-files=all)"\n';
+  assert.equal(steps[cleanQaIndex]?.run, cleanSourceCommand);
+  assert.equal(steps[cleanProductionIndex]?.run, cleanSourceCommand);
+  assert.equal(qaIndex, cleanQaIndex + 1);
+  assert.equal(cleanProductionIndex, qaIndex + 1);
+  assert.equal(productionIndex, cleanProductionIndex + 1);
 });
 
 test("every closed dispatch operation reaches an executable operation-scoped path", () => {

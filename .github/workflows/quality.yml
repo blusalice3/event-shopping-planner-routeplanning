@@ -143,8 +143,18 @@ jobs:
       - name: Verify deterministic artifact fixtures
         run: npm run verify:artifact
 
+      - name: Assert clean QA build source
+        run: |
+          git status --short --untracked-files=all
+          test -z "$(git status --porcelain --untracked-files=all)"
+
       - name: Non-production QA builds
         run: npm run test:qa-builds
+
+      - name: Assert clean production build source
+        run: |
+          git status --short --untracked-files=all
+          test -z "$(git status --porcelain --untracked-files=all)"
 
       - name: Release A build
         run: npm run build:release-a
