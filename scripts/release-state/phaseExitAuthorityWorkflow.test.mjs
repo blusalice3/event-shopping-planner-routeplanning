@@ -70,6 +70,32 @@ test("rollback rehearsal fetches its pinned historical baseline", () => {
   assert.equal(checkout?.with?.["fetch-depth"], 0);
 });
 
+test("quality installs its pinned browser before foundation tests", () => {
+  const steps = qualityWorkflow.jobs.quality.steps;
+  const installSteps = steps.filter(
+    (step) => step.name === "Install pinned Playwright Chromium",
+  );
+  assert.equal(installSteps.length, 1);
+  assert.equal(
+    installSteps[0].run,
+    "npx playwright install --with-deps chromium",
+  );
+  const dependencyIndex = steps.findIndex((step) => step.name === "Install");
+  const installIndex = steps.indexOf(installSteps[0]);
+  assert.ok(dependencyIndex >= 0 && installIndex > dependencyIndex);
+  for (const consumer of [
+    "Foundation and artifact tests",
+    "Release A browser preflight",
+    "Browser",
+    "Accessibility",
+  ]) {
+    assert.ok(
+      steps.findIndex((step) => step.name === consumer) > installIndex,
+      `${consumer} must run after the pinned browser install`,
+    );
+  }
+});
+
 test("every closed dispatch operation reaches an executable operation-scoped path", () => {
   const jobs = Object.entries(releaseWorkflow.jobs);
   for (const operation of Object.keys(RELEASE_DISPATCH_OPERATION_SCHEMAS)) {

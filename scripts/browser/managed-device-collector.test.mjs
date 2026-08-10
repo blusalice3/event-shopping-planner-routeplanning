@@ -3,7 +3,6 @@ import { generateKeyPairSync } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import process from "node:process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -212,15 +211,18 @@ test("PowerShell adapter projects a closed child environment without workflow or
   const publicDistRoot = path.join(materializedRoot, "static");
   await mkdir(publicDistRoot);
   const environment = {
-    ...process.env,
     ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-secret",
+    APPDATA: "C:\\Users\\runner\\AppData\\Roaming",
     FOUNDATION_DEVICE_ATTESTATION_PRIVATE_KEY_PEM: privateKeyPem,
     FOUNDATION_DEVICE_ATTESTATION_PUBLIC_KEY_PEM: publicKeyPem,
     FOUNDATION_DEVICE_PROFILE_ROOT: "must-not-reach-child",
     FOUNDATION_DEVICE_RUNNER_GROUP: device.runnerGroup,
     FOUNDATION_DEVICE_RUNNER_LABELS: device.requiredLabels.join(","),
+    PATH: "C:\\Windows\\System32",
+    ProgramData: "C:\\ProgramData",
     RELEASE_STATE_DATABASE_URL: "postgres://must-not-reach-child",
     RUNNER_TEMP: tmpdir(),
+    SystemRoot: "C:\\Windows",
   };
   try {
     const receipt = await executeManagedDevicePowerShell(
@@ -238,6 +240,13 @@ test("PowerShell adapter projects a closed child environment without workflow or
         platform: "win32",
         resolvePowerShell: async () => "C:\\pwsh.exe",
         run: async (_executable, arguments_, options) => {
+          assert.equal(
+            options.env.APPDATA,
+            "C:\\Users\\runner\\AppData\\Roaming",
+          );
+          assert.equal(options.env.PATH, "C:\\Windows\\System32");
+          assert.equal(options.env.ProgramData, "C:\\ProgramData");
+          assert.equal(options.env.SystemRoot, "C:\\Windows");
           assert.equal(options.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN, undefined);
           assert.equal(options.env.RELEASE_STATE_DATABASE_URL, undefined);
           assert.equal(options.env.FOUNDATION_DEVICE_PROFILE_ROOT, undefined);

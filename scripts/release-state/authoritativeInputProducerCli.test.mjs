@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 import { canonicalJsonBytes, sha256Bytes } from "../lib/canonical-json.mjs";
 import {
@@ -7,6 +8,7 @@ import {
 } from "./produce-protected-input.mjs";
 
 const namespace = "producer-cli-test";
+const producerRoot = path.resolve("producer-test");
 const storePolicy = {
   databaseUrlEnvironmentName: "RELEASE_STATE_DATABASE_URL",
 };
@@ -167,7 +169,7 @@ const createHarness = () => {
     store,
     runtime: {
       env,
-      cwd: "C:\\producer-test",
+      cwd: producerRoot,
       stdout: {
         write(value) {
           stdout.push(value);
@@ -422,16 +424,32 @@ test("builds a nonpromotable policy QA pair from four reviewed artifact files", 
   assert.equal(received.buildRequirementsReference.sha256, "d".repeat(64));
   assert.ok(
     received.standardManifestBytes.equals(
-      Buffer.from("bytes:C:\\producer-test\\standard-manifest.json"),
+      Buffer.from(`bytes:${path.join(producerRoot, "standard-manifest.json")}`),
+    ),
+  );
+  assert.ok(
+    received.standardArchiveBytes.equals(
+      Buffer.from(`bytes:${path.join(producerRoot, "standard.zip")}`),
+    ),
+  );
+  assert.ok(
+    received.companionManifestBytes.equals(
+      Buffer.from(
+        `bytes:${path.join(producerRoot, "companion-manifest.json")}`,
+      ),
     ),
   );
   assert.ok(
     received.companionArchiveBytes.equals(
-      Buffer.from("bytes:C:\\producer-test\\companion.zip"),
+      Buffer.from(`bytes:${path.join(producerRoot, "companion.zip")}`),
     ),
   );
   assert.equal(result.indexSha256, sha256Bytes(indexBytes));
   assert.ok(harness.writes[0].bytes.equals(indexBytes));
+  assert.equal(
+    harness.writes[0].filePath,
+    path.join(producerRoot, "policy-qa-package.json"),
+  );
   assert.equal(harness.writes[0].options.flag, "wx");
   assert.match(harness.stdout.join(""), /nonpromotable policy activation QA/);
   assert.equal(harness.store.closed, true);
