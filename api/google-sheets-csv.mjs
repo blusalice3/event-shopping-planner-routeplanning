@@ -5,6 +5,12 @@ export const GOOGLE_SHEETS_RESPONSE_LIMIT_BYTES = 5_000_000;
 export const GOOGLE_SHEETS_TIMEOUT_MS = 5_000;
 
 const SPREADSHEET_ID_PATTERN = /^[A-Za-z0-9_-]{10,200}$/;
+const GID_PATTERN = /^\d{1,10}$/;
+const MAX_GID = 2_147_483_647;
+const HTMLVIEW_SHEET_PATTERN =
+  /items\.push\(\{\s*name:\s*"((?:\\[\s\S]|[^"\\])*)"\s*,\s*pageUrl:\s*"((?:\\[\s\S]|[^"\\])*)"\s*,\s*gid:\s*"(\d{1,10})"/gu;
+const GOOGLE_SHEETS_REDIRECT_HOST_PATTERN =
+  /^doc-[a-z0-9-]+-sheets\.googleusercontent\.com$/iu;
 
 const isValidSheetName = (value) =>
   value.length >= 1 &&
@@ -13,6 +19,56 @@ const isValidSheetName = (value) =>
     const codePoint = character.codePointAt(0);
     return codePoint > 0x1f && codePoint !== 0x7f;
   });
+
+const normalizeGid = (value) => {
+  if (typeof value !== "string" || !GID_PATTERN.test(value)) return null;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > MAX_GID) {
+    return null;
+  }
+  return String(parsed);
+};
+
+const decodeJavascriptString = (value) => {
+  let decoded = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (character !== "\\") {
+      decoded += character;
+      continue;
+    }
+
+    index += 1;
+    if (index >= value.length) return null;
+    const escaped = value[index];
+    const simpleEscapes = {
+      '"': '"',
+      "'": "'",
+      "\\": "\\",
+      "/": "/",
+      b: "\b",
+      f: "\f",
+      n: "\n",
+      r: "\r",
+      t: "\t",
+      v: "\v",
+    };
+    if (Object.hasOwn(simpleEscapes, escaped)) {
+      decoded += simpleEscapes[escaped];
+      continue;
+    }
+
+    const width = escaped === "x" ? 2 : escaped === "u" ? 4 : 0;
+    if (width === 0) return null;
+    const hexadecimal = value.slice(index + 1, index + 1 + width);
+    if (hexadecimal.length !== width || !/^[0-9a-f]+$/iu.test(hexadecimal)) {
+      return null;
+    }
+    decoded += String.fromCharCode(Number.parseInt(hexadecimal, 16));
+    index += width;
+  }
+  return decoded;
+};
 
 const getHeader = (request, name) => {
   if (typeof request.headers?.get === "function") {
@@ -108,7 +164,7 @@ const parseRequestPayload = (bytes) => {
     parsed === null ||
     Array.isArray(parsed) ||
     Object.keys(parsed).some(
-      (key) => key !== "spreadsheetId" && key !== "sheetName",
+      (key) => key !== "spreadsheetId" && key !== "sheetName" && key !== "gid",
     ) ||
     !SPREADSHEET_ID_PATTERN.test(parsed.spreadsheetId)
   ) {
@@ -121,13 +177,28 @@ const parseRequestPayload = (bytes) => {
   ) {
     return null;
   }
+  const gid = parsed.gid === undefined ? undefined : normalizeGid(parsed.gid);
+  if (parsed.gid !== undefined && gid === null) return null;
   return {
     spreadsheetId: parsed.spreadsheetId,
     sheetName: parsed.sheetName,
+    ...(gid !== undefined ? { gid } : {}),
   };
 };
 
-const readBoundedResponseBytes = async (response) => {
+const readBoundedResponseBytes = async (
+  response,
+  limit = GOOGLE_SHEETS_RESPONSE_LIMIT_BYTES,
+) => {
+  const declaredLengthHeader = response.headers.get("content-length");
+  if (declaredLengthHeader !== null) {
+    const declaredLength = Number(declaredLengthHeader);
+    if (Number.isFinite(declaredLength) && declaredLength > limit) {
+      const error = new Error("Google Sheets response exceeds the limit");
+      error.code = "RESPONSE_TOO_LARGE";
+      throw error;
+    }
+  }
   if (typeof response.body?.getReader !== "function") {
     const error = new Error("Google Sheets response is not stream-readable");
     error.code = "UPSTREAM_STREAM_UNAVAILABLE";
@@ -142,7 +213,7 @@ const readBoundedResponseBytes = async (response) => {
       if (done) break;
       const chunk = Buffer.from(value);
       length += chunk.byteLength;
-      if (length > GOOGLE_SHEETS_RESPONSE_LIMIT_BYTES) {
+      if (length > limit) {
         await reader.cancel("response limit exceeded").catch(() => undefined);
         const error = new Error("Google Sheets response exceeds the limit");
         error.code = "RESPONSE_TOO_LARGE";
@@ -156,29 +227,115 @@ const readBoundedResponseBytes = async (response) => {
   return Buffer.concat(chunks, length);
 };
 
-const fetchCsv = async (payload, fetchImpl) => {
-  const url = new URL(
-    `https://docs.google.com/spreadsheets/d/${payload.spreadsheetId}/gviz/tq`,
+const getMediaType = (response) =>
+  String(response.headers.get("content-type") ?? "")
+    .split(";", 1)[0]
+    .trim()
+    .toLowerCase();
+
+const resolveSheetGid = async (payload, fetchImpl, signal) => {
+  if (!payload.sheetName) return payload.gid;
+
+  const metadataUrl = new URL(
+    `https://docs.google.com/spreadsheets/d/${payload.spreadsheetId}/htmlview`,
   );
-  url.searchParams.set("tqx", "out:csv");
-  if (payload.sheetName) url.searchParams.set("sheet", payload.sheetName);
-  const upstream = await fetchImpl(url, {
+  const metadataResponse = await fetchImpl(metadataUrl, {
+    method: "GET",
+    headers: { Accept: "text/html" },
+    redirect: "error",
+    signal,
+  });
+  if (!metadataResponse.ok || getMediaType(metadataResponse) !== "text/html") {
+    throw new Error("Google Sheets metadata request failed");
+  }
+
+  const html = (await readBoundedResponseBytes(metadataResponse)).toString(
+    "utf8",
+  );
+  const matchingGids = new Set();
+  for (const match of html.matchAll(HTMLVIEW_SHEET_PATTERN)) {
+    const name = decodeJavascriptString(match[1]);
+    const pageUrlValue = decodeJavascriptString(match[2]);
+    const gid = normalizeGid(match[3]);
+    if (name !== payload.sheetName || !pageUrlValue || gid === null) continue;
+
+    let pageUrl;
+    try {
+      pageUrl = new URL(pageUrlValue);
+    } catch {
+      continue;
+    }
+    if (
+      pageUrl.protocol !== "https:" ||
+      pageUrl.hostname !== "docs.google.com" ||
+      pageUrl.port !== "" ||
+      pageUrl.username !== "" ||
+      pageUrl.password !== "" ||
+      pageUrl.pathname !==
+        `/spreadsheets/d/${payload.spreadsheetId}/htmlview/sheet` ||
+      normalizeGid(pageUrl.searchParams.get("gid")) !== gid
+    ) {
+      continue;
+    }
+    matchingGids.add(gid);
+  }
+
+  if (matchingGids.size !== 1) {
+    throw new Error("Google Sheets tab could not be resolved safely");
+  }
+  return matchingGids.values().next().value;
+};
+
+const isAllowedCsvRedirect = (url) =>
+  url.protocol === "https:" &&
+  url.port === "" &&
+  url.username === "" &&
+  url.password === "" &&
+  GOOGLE_SHEETS_REDIRECT_HOST_PATTERN.test(url.hostname) &&
+  url.pathname.startsWith("/export/");
+
+const fetchCsv = async (payload, fetchImpl) => {
+  const signal = AbortSignal.timeout(GOOGLE_SHEETS_TIMEOUT_MS);
+  const gid = await resolveSheetGid(payload, fetchImpl, signal);
+  const url = new URL(
+    `https://docs.google.com/spreadsheets/d/${payload.spreadsheetId}/export`,
+  );
+  url.searchParams.set("format", "csv");
+  if (gid !== undefined) url.searchParams.set("gid", gid);
+  const requestOptions = {
     method: "GET",
     headers: {
       Accept: "text/csv,text/plain;q=0.9",
     },
-    redirect: "error",
-    signal: AbortSignal.timeout(GOOGLE_SHEETS_TIMEOUT_MS),
-  });
+    redirect: "manual",
+    signal,
+  };
+  let upstream = await fetchImpl(url, requestOptions);
+  if ([301, 302, 303, 307, 308].includes(upstream.status)) {
+    const location = upstream.headers.get("location");
+    if (!location) throw new Error("Google Sheets redirect is missing");
+
+    let redirectUrl;
+    try {
+      redirectUrl = new URL(location, url);
+    } catch {
+      throw new Error("Google Sheets redirect is invalid");
+    }
+    if (!isAllowedCsvRedirect(redirectUrl)) {
+      throw new Error("Google Sheets redirect is not allowed");
+    }
+    if (upstream.body) {
+      await upstream.body.cancel().catch(() => undefined);
+    }
+    upstream = await fetchImpl(redirectUrl, {
+      ...requestOptions,
+      redirect: "error",
+    });
+  }
+
   if (!upstream.ok) throw new Error("Google Sheets rejected the request");
-  const declaredLength = Number(upstream.headers.get("content-length"));
-  if (
-    Number.isFinite(declaredLength) &&
-    declaredLength > GOOGLE_SHEETS_RESPONSE_LIMIT_BYTES
-  ) {
-    const error = new Error("Google Sheets response exceeds the limit");
-    error.code = "RESPONSE_TOO_LARGE";
-    throw error;
+  if (getMediaType(upstream) !== "text/csv") {
+    throw new Error("Google Sheets returned an unexpected response");
   }
   return readBoundedResponseBytes(upstream);
 };

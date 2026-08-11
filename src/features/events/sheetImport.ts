@@ -1,7 +1,27 @@
 import type { SheetItem } from "./updateDiff";
 import { normalizeImportedUrl } from "./pasteColumns";
 
-const SPREADSHEET_ID_REGEX = /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/;
+const SPREADSHEET_PATH_REGEX = /^\/spreadsheets\/d\/([a-zA-Z0-9-_]+)(?:\/|$)/;
+const GID_REGEX = /^\d{1,10}$/;
+const MAX_GID = 2_147_483_647;
+
+export interface GoogleSheetCsvRequest {
+  spreadsheetId: string;
+  sheetName?: string;
+  gid?: string;
+}
+
+function normalizeGid(value: string | null): string | undefined {
+  if (value === null) return undefined;
+  if (!GID_REGEX.test(value)) {
+    throw new Error("Invalid spreadsheet URL");
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > MAX_GID) {
+    throw new Error("Invalid spreadsheet URL");
+  }
+  return String(parsed);
+}
 
 function parseCsvLine(line: string): string[] {
   const cells: string[] = [];
@@ -37,14 +57,38 @@ function toPrice(value: string): number | null {
 export function buildGoogleSheetCsvRequest(
   spreadsheetUrl: string,
   sheetName?: string,
-): { spreadsheetId: string; sheetName?: string } {
-  const sheetIdMatch = spreadsheetUrl.match(SPREADSHEET_ID_REGEX);
-  if (!sheetIdMatch) {
+): GoogleSheetCsvRequest {
+  let url: URL;
+  try {
+    url = new URL(spreadsheetUrl.trim());
+  } catch {
     throw new Error("Invalid spreadsheet URL");
   }
+  if (
+    url.protocol !== "https:" ||
+    url.hostname.toLocaleLowerCase() !== "docs.google.com" ||
+    url.port !== "" ||
+    url.username !== "" ||
+    url.password !== ""
+  ) {
+    throw new Error("Invalid spreadsheet URL");
+  }
+
+  const sheetIdMatch = url.pathname.match(SPREADSHEET_PATH_REGEX);
+  if (!sheetIdMatch) throw new Error("Invalid spreadsheet URL");
+
+  const hashParameters = new URLSearchParams(url.hash.replace(/^#/, ""));
+  const queryGid = normalizeGid(url.searchParams.get("gid"));
+  const hashGid = normalizeGid(hashParameters.get("gid"));
+  if (queryGid && hashGid && queryGid !== hashGid) {
+    throw new Error("Invalid spreadsheet URL");
+  }
+  const gid = queryGid ?? hashGid;
+
   return {
     spreadsheetId: sheetIdMatch[1],
     ...(sheetName ? { sheetName } : {}),
+    ...(gid !== undefined ? { gid } : {}),
   };
 }
 
