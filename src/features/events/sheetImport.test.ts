@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchGoogleSheetCsv, parseEventItemsFromCsv } from "./sheetImport";
+import type { ShoppingItem } from "../../types/item";
+import {
+  buildGoogleSheetCsvRequest,
+  fetchGoogleSheetCsv,
+  parseEventItemsFromCsv,
+} from "./sheetImport";
+import { createEventUpdateDiff } from "./updateDiff";
 
 function csvRow(
   quantity: string,
@@ -58,6 +64,47 @@ describe("parseEventItemsFromCsv quantity", () => {
     expect(parsed[1].url).toBeUndefined();
     expect(parsed[2].url).toBeUndefined();
   });
+
+  it("全行CSVに含まれる手動非表示・フィルタ非表示相当の品目を削除しない", () => {
+    const header = Array.from({ length: 27 }, (_, index) => `列${index}`).join(
+      ",",
+    );
+    const parsed = parseEventItemsFromCsv(
+      [
+        header,
+        csvRow("1", "https://example.com/visible", "01a"),
+        csvRow("1", "https://example.com/manually-hidden", "02a"),
+        csvRow("1", "https://example.com/filter-hidden", "03a"),
+      ].join("\n"),
+    );
+    const currentItems: ShoppingItem[] = parsed.map((item, index) => ({
+      ...item,
+      id: `existing-${index + 1}`,
+      purchaseStatus: "None",
+      source: "spreadsheet",
+      protectionLevel: "none",
+    }));
+    const actuallyDeleted: ShoppingItem = {
+      ...currentItems[0],
+      id: "actually-deleted",
+      number: "04a",
+    };
+
+    const diff = createEventUpdateDiff(
+      [...currentItems, actuallyDeleted],
+      parsed,
+    );
+
+    expect(diff.itemsToDelete.map((item) => item.id)).toEqual([
+      "actually-deleted",
+    ]);
+    expect(diff.itemsToDelete).not.toContainEqual(
+      expect.objectContaining({ id: "existing-2" }),
+    );
+    expect(diff.itemsToDelete).not.toContainEqual(
+      expect.objectContaining({ id: "existing-3" }),
+    );
+  });
 });
 
 describe("fetchGoogleSheetCsv", () => {
@@ -71,7 +118,7 @@ describe("fetchGoogleSheetCsv", () => {
 
     await expect(
       fetchGoogleSheetCsv(
-        "https://docs.google.com/spreadsheets/d/abcdefghij123456/edit",
+        "https://docs.google.com/spreadsheets/d/abcdefghij123456/edit#gid=0042&fvid=99",
         "品目表",
       ),
     ).resolves.toBe("csv-body");
@@ -85,7 +132,57 @@ describe("fetchGoogleSheetCsv", () => {
       body: JSON.stringify({
         spreadsheetId: "abcdefghij123456",
         sheetName: "品目表",
+        gid: "42",
       }),
     });
+  });
+});
+
+describe("buildGoogleSheetCsvRequest", () => {
+  it("queryまたはfragmentのgidを正規化し、fvidは送信しない", () => {
+    expect(
+      buildGoogleSheetCsvRequest(
+        "https://docs.google.com/spreadsheets/d/abcdefghij123456/edit?gid=0007",
+        "品目表",
+      ),
+    ).toEqual({
+      spreadsheetId: "abcdefghij123456",
+      sheetName: "品目表",
+      gid: "7",
+    });
+    expect(
+      buildGoogleSheetCsvRequest(
+        "https://docs.google.com/spreadsheets/d/abcdefghij123456/edit#gid=0&fvid=123",
+      ),
+    ).toEqual({
+      spreadsheetId: "abcdefghij123456",
+      gid: "0",
+    });
+  });
+
+  it("gidなしURLはシート名からサーバー側で解決できる形を保つ", () => {
+    expect(
+      buildGoogleSheetCsvRequest(
+        "https://docs.google.com/spreadsheets/d/abcdefghij123456/edit?usp=sharing",
+        "品目表",
+      ),
+    ).toEqual({
+      spreadsheetId: "abcdefghij123456",
+      sheetName: "品目表",
+    });
+  });
+
+  it.each([
+    "http://docs.google.com/spreadsheets/d/abcdefghij123456/edit#gid=0",
+    "https://docs.google.com.evil.test/spreadsheets/d/abcdefghij123456/edit#gid=0",
+    "https://user@docs.google.com/spreadsheets/d/abcdefghij123456/edit#gid=0",
+    "https://docs.google.com/spreadsheets/d/abcdefghij123456/edit#gid=-1",
+    "https://docs.google.com/spreadsheets/d/abcdefghij123456/edit#gid=1.5",
+    "https://docs.google.com/spreadsheets/d/abcdefghij123456/edit#gid=2147483648",
+    "https://docs.google.com/spreadsheets/d/abcdefghij123456/edit?gid=1#gid=2",
+  ])("不正または曖昧なURLを拒否する: %s", (url) => {
+    expect(() => buildGoogleSheetCsvRequest(url, "品目表")).toThrow(
+      "Invalid spreadsheet URL",
+    );
   });
 });
