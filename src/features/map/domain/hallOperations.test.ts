@@ -3,6 +3,7 @@ import type { HallDefinition } from "../../../types/map";
 import type { ShoppingItem } from "../../../types/item";
 import {
   getCombinedHallRouteSettingsForDate,
+  getGlobalHallItemCount,
   mergeHallOrder,
   remapHallRouteSettings,
   reorderExecuteIdsByHallOrder,
@@ -131,6 +132,20 @@ describe("hallOperations regressions", () => {
       "b-normal",
       "a-normal",
     ]);
+  });
+
+  it("indexes item ids while preserving the first-match counting behavior", () => {
+    const first = makeItem("duplicate", "A");
+    const laterDuplicate = makeItem("duplicate", "B");
+
+    expect(
+      getGlobalHallItemCount({
+        groupId: "hall-a",
+        executeIds: ["duplicate", "duplicate", "missing"],
+        items: [first, laterDuplicate],
+        getItemHallId: (item) => (item.block === "A" ? "hall-a" : "hall-b"),
+      }),
+    ).toBe(2);
   });
 
   it("combines mapped and mapless route settings for a date", () => {

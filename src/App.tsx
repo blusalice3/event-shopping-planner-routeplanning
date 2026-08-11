@@ -479,6 +479,13 @@ const App: React.FC = () => {
     () => (activeEventName ? eventLists[activeEventName] || [] : []),
     [activeEventName, eventLists],
   );
+  const firstItemById = useMemo(() => {
+    const index = new Map<string, ShoppingItem>();
+    items.forEach((item) => {
+      if (!index.has(item.id)) index.set(item.id, item);
+    });
+    return index;
+  }, [items]);
 
   const eventDates = useMemo(() => extractEventDates(items), [items]);
   const activeEventDate = useMemo(
@@ -843,6 +850,7 @@ const App: React.FC = () => {
   } = useEventLifecycleCommands({
     persistenceCommands: appRuntime.persistenceCommands,
     flushPendingSave,
+    runExclusiveRestore,
     activeEventName,
     eventToRename,
     eventLists,
@@ -901,10 +909,10 @@ const App: React.FC = () => {
 
   const handleDeleteItemFromMap = useCallback(
     (itemId: string) => {
-      const item = items.find((i) => i.id === itemId);
+      const item = firstItemById.get(itemId);
       if (item) overlayCommands.item.openDelete(item);
     },
-    [items, overlayCommands.item],
+    [firstItemById, overlayCommands.item],
   );
 
   const handleClearNewItemDefaults = useCallback(() => {
@@ -1329,13 +1337,18 @@ const App: React.FC = () => {
     if (!dayMatch) return [];
     const dayName = dayMatch[1];
 
-    const dayItems = items.filter((item) => item.eventDate === dayName);
+    const dayItemsById = new Map<string, ShoppingItem>();
+    items.forEach((item) => {
+      if (item.eventDate === dayName && !dayItemsById.has(item.id)) {
+        dayItemsById.set(item.id, item);
+      }
+    });
     const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
 
-    return executeIds
-      .filter((id: string) => dayItems.some((item) => item.id === id))
-      .map((id: string) => dayItems.find((item) => item.id === id)!)
-      .filter(Boolean);
+    return executeIds.flatMap((id: string) => {
+      const item = dayItemsById.get(id);
+      return item ? [item] : [];
+    });
   }, [visitListPanelMapTab, activeEventName, items, executeModeItems]);
 
   const visitListHallOrder = useMemo(() => {
@@ -1367,12 +1380,12 @@ const App: React.FC = () => {
     if (!activeEventName || !activeEventDate) return false;
     const ids = executeModeItems[activeEventName]?.[activeEventDate] || [];
     return ids.some((id) => {
-      const it = items.find((i) => i.id === id);
+      const it = firstItemById.get(id);
       if (!it) return false;
       const p = it.priorityLevel || "none";
       return p === "priority" || p === "highest";
     });
-  }, [activeEventName, activeEventDate, executeModeItems, items]);
+  }, [activeEventName, activeEventDate, executeModeItems, firstItemById]);
 
   const globalHallOrderHalls = useMemo((): HallDefinition[] => {
     if (!activeEventName) return [];

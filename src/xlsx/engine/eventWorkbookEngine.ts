@@ -401,6 +401,7 @@ export async function exportToXlsx(
  */
 export async function importFromXlsx(
   file: File,
+  suppliedInput?: ArrayBuffer,
 ): Promise<EventWorkbookImportResult> {
   const result: EventWorkbookImportResult = {
     success: false,
@@ -410,7 +411,7 @@ export async function importFromXlsx(
   };
 
   try {
-    const arrayBuffer = await file.arrayBuffer();
+    const arrayBuffer = suppliedInput ?? (await file.arrayBuffer());
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(arrayBuffer);
 

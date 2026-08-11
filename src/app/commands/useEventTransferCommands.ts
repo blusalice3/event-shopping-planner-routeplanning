@@ -614,9 +614,10 @@ export const useEventTransferCommands = ({
           }
         }
 
-        const resolvedItems = result.items.filter(
-          (item) => !skippedItemIds.has(item.id),
-        );
+        const resolvedItems =
+          skippedItemIds.size === 0
+            ? result.items
+            : result.items.filter((item) => !skippedItemIds.has(item.id));
         if (resolvedItems.length === 0) {
           if (result.items.length > 0 && skippedItemIds.size > 0) {
             alert(

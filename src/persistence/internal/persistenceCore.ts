@@ -10,6 +10,7 @@ import { InvalidMapPayloadError } from "../../utils/mapDataPersistence";
 import {
   createPersistenceCheckpointKey,
   createPersistenceDigest,
+  createPersistenceIntegrityDescriptors,
   createPersistenceMetadataKey,
   createPersistenceRevision,
   createRuntimeFallbackPrefix,
@@ -1269,8 +1270,8 @@ export async function prepareMetadataForPayload(
   revision = createPersistenceRevision(persistenceWriterId),
 ): Promise<StoredPersistenceMetadata> {
   assertStructuredCloneable(data);
-  const payloadFingerprint = createSynchronousFingerprint(data);
-  const payloadDigest = await createPersistenceDigest(data);
+  const { digest: payloadDigest, fingerprint: payloadFingerprint } =
+    await createPersistenceIntegrityDescriptors(data);
   return createStoredMetadata(
     storeName,
     key,

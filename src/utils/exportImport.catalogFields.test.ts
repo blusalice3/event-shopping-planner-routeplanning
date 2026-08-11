@@ -120,6 +120,30 @@ const importRows = async ({
 };
 
 describe("event XLSX catalog fields", () => {
+  it("uses the transferred workbook buffer without rereading the File", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("アイテムデータ");
+    sheet.addRow(currentHeaders);
+    sheet.addRow(rowValues({ id: "transferred" }));
+    const buffer = await workbook.xlsx.writeBuffer();
+    const bytes = new Uint8Array(buffer);
+    const input = bytes.buffer.slice(
+      bytes.byteOffset,
+      bytes.byteOffset + bytes.byteLength,
+    ) as ArrayBuffer;
+    const file = {
+      name: "transferred.xlsx",
+      arrayBuffer: async () => {
+        throw new Error("The transferred workbook was read twice.");
+      },
+    } as unknown as File;
+
+    const result = await importFromXlsx(file, input);
+
+    expect(result.success).toBe(true);
+    expect(result.items.map(({ id }) => id)).toEqual(["transferred"]);
+  });
+
   it("exports version 2.2 with the two new columns at the end", async () => {
     const blob = await exportToXlsx(
       "形式確認",

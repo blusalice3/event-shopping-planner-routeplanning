@@ -312,8 +312,13 @@ export const getGlobalHallItemCount = ({
     targetPriority = "none";
   }
 
+  const itemsById = new Map<string, ShoppingItem>();
+  items.forEach((item) => {
+    if (!itemsById.has(item.id)) itemsById.set(item.id, item);
+  });
+
   return executeIds.filter((itemId) => {
-    const item = items.find((candidate) => candidate.id === itemId);
+    const item = itemsById.get(itemId);
     if (!item) return false;
     if ((item.priorityLevel || "none") !== targetPriority) return false;
     return getItemHallId(item, item.eventDate) === targetHallId;

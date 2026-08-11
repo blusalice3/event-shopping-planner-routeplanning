@@ -247,6 +247,7 @@ const TOP_SCROLL_TRIGGER_PX = 150;
 const BOTTOM_SCROLL_TRIGGER_PX = 100;
 const EMPTY_HALL_DEFINITIONS: HallDefinition[] = [];
 const EMPTY_HALL_ORDER: string[] = [];
+const EMPTY_DUPLICATE_CIRCLE_ITEM_IDS = new Set<string>();
 const DEFAULT_LIST_RENDERER_PREFERENCE_PORT =
   createLocalStorageListRendererPreferenceAdapter();
 const VIRTUAL_LIST_MINIMUM_ROW_COUNT = 80;
@@ -498,7 +499,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   rangeStart,
   rangeEnd,
   onToggleRangeSelection,
-  duplicateCircleItemIds = new Set(),
+  duplicateCircleItemIds = EMPTY_DUPLICATE_CIRCLE_ITEM_IDS,
   highlightedItemId = null,
   layoutMode = "pc",
   viewMode = "edit",
@@ -533,11 +534,34 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<"execute" | "candidate" | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const latestItemsRef = useRef(items);
+  const latestCardCrudCallbacksRef = useRef({
+    onDeleteRequest,
+    onEditRequest,
+    onUpdateItem,
+  });
+  useLayoutEffect(() => {
+    latestItemsRef.current = items;
+    latestCardCrudCallbacksRef.current = {
+      onDeleteRequest,
+      onEditRequest,
+      onUpdateItem,
+    };
+  }, [items, onDeleteRequest, onEditRequest, onUpdateItem]);
   const getLatestItemById = useCallback(
     (itemId: string): ShoppingItem | undefined =>
-      items.find((item) => item.id === itemId),
-    [items],
+      latestItemsRef.current.find((item) => item.id === itemId),
+    [],
   );
+  const handleCardUpdateItem = useCallback((item: ShoppingItem) => {
+    latestCardCrudCallbacksRef.current.onUpdateItem(item);
+  }, []);
+  const handleCardEditRequest = useCallback((item: ShoppingItem) => {
+    latestCardCrudCallbacksRef.current.onEditRequest(item);
+  }, []);
+  const handleCardDeleteRequest = useCallback((item: ShoppingItem) => {
+    latestCardCrudCallbacksRef.current.onDeleteRequest(item);
+  }, []);
   const [limitedBulkDialogContext, setLimitedBulkDialogContext] =
     useState<LimitedBulkDialogContext | null>(null);
   const [limitedMessage, setLimitedMessage] =
@@ -864,9 +888,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         clearLimitedPurchaseQuantityDeferredForItem(updatedItem.id);
       }
 
-      onUpdateItem(updatedItem);
+      handleCardUpdateItem(updatedItem);
     },
-    [clearLimitedPurchaseQuantityDeferredForItem, onUpdateItem],
+    [clearLimitedPurchaseQuantityDeferredForItem, handleCardUpdateItem],
   );
 
   const openPostEventDistributionCheck = useCallback(
@@ -1512,10 +1536,14 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     items,
     listRowGroups,
   ]);
-  const listControllerModelMembershipKey = JSON.stringify([
-    listControllerModel.itemIds,
-    listControllerModel.rows.map((row) => row.rowKey),
-  ]);
+  const listControllerModelMembershipKey = useMemo(
+    () =>
+      JSON.stringify([
+        listControllerModel.itemIds,
+        listControllerModel.rows.map((row) => row.rowKey),
+      ]),
+    [listControllerModel],
+  );
 
   const [listControllerState, dispatchListController] = useReducer(
     (
@@ -1954,6 +1982,53 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       ...resolvedRangeSummary,
     };
   }, [rangePresentation.grouping, resolvedRange, resolvedRangeSummary]);
+
+  const cardActionContextRef = useRef({
+    columnType,
+    onMoveItemDown,
+    onMoveItemUp,
+    onSelectItem,
+    openPostEventDistributionCheck,
+    rangePresentation,
+  });
+  useLayoutEffect(() => {
+    cardActionContextRef.current = {
+      columnType,
+      onMoveItemDown,
+      onMoveItemUp,
+      onSelectItem,
+      openPostEventDistributionCheck,
+      rangePresentation,
+    };
+  }, [
+    columnType,
+    onMoveItemDown,
+    onMoveItemUp,
+    onSelectItem,
+    openPostEventDistributionCheck,
+    rangePresentation,
+  ]);
+  const handleCardSelectItem = useCallback((itemId: string) => {
+    const { columnType, onSelectItem, rangePresentation } =
+      cardActionContextRef.current;
+    onSelectItem(itemId, columnType, rangePresentation);
+  }, []);
+  const handleCardMoveUp = useCallback((itemId: string) => {
+    const { columnType, onMoveItemUp } = cardActionContextRef.current;
+    onMoveItemUp?.(itemId, columnType);
+  }, []);
+  const handleCardMoveDown = useCallback((itemId: string) => {
+    const { columnType, onMoveItemDown } = cardActionContextRef.current;
+    onMoveItemDown?.(itemId, columnType);
+  }, []);
+  const handleCardPostEventDistributionCheckRequest = useCallback(
+    (soldOutItem: ShoppingItem) => {
+      cardActionContextRef.current.openPostEventDistributionCheck("single", [
+        soldOutItem,
+      ]);
+    },
+    [],
+  );
 
   const handleDragStart = (
     e: React.DragEvent<HTMLDivElement>,
@@ -3450,22 +3525,14 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         item={item}
                         onUpdate={updateItemWithDeferredCleanup}
                         isStriped={globalIndex % 2 !== 0}
-                        onEditRequest={onEditRequest}
-                        onDeleteRequest={onDeleteRequest}
+                        onEditRequest={handleCardEditRequest}
+                        onDeleteRequest={handleCardDeleteRequest}
                         isSelected={selectedItemIds.has(item.id)}
-                        onSelectItem={(itemId) =>
-                          onSelectItem(itemId, columnType, rangePresentation)
-                        }
+                        onSelectItem={handleCardSelectItem}
                         blockBackgroundColor={blockColorMap.get(item.id)}
-                        onMoveUp={
-                          onMoveItemUp
-                            ? () => onMoveItemUp(item.id, columnType)
-                            : undefined
-                        }
+                        onMoveUp={onMoveItemUp ? handleCardMoveUp : undefined}
                         onMoveDown={
-                          onMoveItemDown
-                            ? () => onMoveItemDown(item.id, columnType)
-                            : undefined
+                          onMoveItemDown ? handleCardMoveDown : undefined
                         }
                         canMoveUp={globalIndex > 0}
                         canMoveDown={globalIndex < items.length - 1}
@@ -3486,10 +3553,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         }
                         onPostEventDistributionCheckRequest={
                           viewMode === "execute" && columnType === "execute"
-                            ? (soldOutItem) =>
-                                openPostEventDistributionCheck("single", [
-                                  soldOutItem,
-                                ])
+                            ? handleCardPostEventDistributionCheckRequest
                             : undefined
                         }
                         purchaseStatusControlMode={purchaseStatusControlMode}
@@ -4220,25 +4284,15 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
                   <ShoppingItemCard
                     item={item}
-                    onUpdate={onUpdateItem}
+                    onUpdate={handleCardUpdateItem}
                     isStriped={globalIndex % 2 !== 0}
-                    onEditRequest={onEditRequest}
-                    onDeleteRequest={onDeleteRequest}
+                    onEditRequest={handleCardEditRequest}
+                    onDeleteRequest={handleCardDeleteRequest}
                     isSelected={selectedItemIds.has(item.id)}
-                    onSelectItem={(itemId) =>
-                      onSelectItem(itemId, columnType, rangePresentation)
-                    }
+                    onSelectItem={handleCardSelectItem}
                     blockBackgroundColor={blockColorMap.get(item.id)}
-                    onMoveUp={
-                      onMoveItemUp
-                        ? () => onMoveItemUp(item.id, columnType)
-                        : undefined
-                    }
-                    onMoveDown={
-                      onMoveItemDown
-                        ? () => onMoveItemDown(item.id, columnType)
-                        : undefined
-                    }
+                    onMoveUp={onMoveItemUp ? handleCardMoveUp : undefined}
+                    onMoveDown={onMoveItemDown ? handleCardMoveDown : undefined}
                     canMoveUp={globalIndex > 0}
                     canMoveDown={globalIndex < items.length - 1}
                     isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
@@ -4255,10 +4309,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                     onNotify={showLimitedMessage}
                     onPostEventDistributionCheckRequest={
                       viewMode === "execute" && columnType === "execute"
-                        ? (soldOutItem) =>
-                            openPostEventDistributionCheck("single", [
-                              soldOutItem,
-                            ])
+                        ? handleCardPostEventDistributionCheckRequest
                         : undefined
                     }
                     purchaseStatusControlMode={purchaseStatusControlMode}
@@ -4498,23 +4549,15 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
         <ShoppingItemCard
           item={item}
-          onUpdate={onUpdateItem}
+          onUpdate={handleCardUpdateItem}
           isStriped={index % 2 !== 0}
-          onEditRequest={onEditRequest}
-          onDeleteRequest={onDeleteRequest}
+          onEditRequest={handleCardEditRequest}
+          onDeleteRequest={handleCardDeleteRequest}
           isSelected={selectedItemIds.has(item.id)}
-          onSelectItem={(itemId) =>
-            onSelectItem(itemId, columnType, rangePresentation)
-          }
+          onSelectItem={handleCardSelectItem}
           blockBackgroundColor={blockColorMap.get(item.id)}
-          onMoveUp={
-            onMoveItemUp ? () => onMoveItemUp(item.id, columnType) : undefined
-          }
-          onMoveDown={
-            onMoveItemDown
-              ? () => onMoveItemDown(item.id, columnType)
-              : undefined
-          }
+          onMoveUp={onMoveItemUp ? handleCardMoveUp : undefined}
+          onMoveDown={onMoveItemDown ? handleCardMoveDown : undefined}
           canMoveUp={index > 0}
           canMoveDown={index < items.length - 1}
           isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
@@ -4527,8 +4570,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
           onNotify={showLimitedMessage}
           onPostEventDistributionCheckRequest={
             viewMode === "execute" && columnType === "execute"
-              ? (soldOutItem) =>
-                  openPostEventDistributionCheck("single", [soldOutItem])
+              ? handleCardPostEventDistributionCheckRequest
               : undefined
           }
           purchaseStatusControlMode={purchaseStatusControlMode}

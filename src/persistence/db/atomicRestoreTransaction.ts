@@ -61,6 +61,80 @@ interface AppDataRestoreObservation {
   runtimeCandidates: RuntimeCandidateSnapshot<unknown>[];
 }
 
+function storedValuesEqual(left: unknown, right: unknown): boolean {
+  const pending: Array<[unknown, unknown]> = [[left, right]];
+  const leftToRight = new WeakMap<object, object>();
+  const rightToLeft = new WeakMap<object, object>();
+
+  while (pending.length > 0) {
+    const [currentLeft, currentRight] = pending.pop()!;
+    if (Object.is(currentLeft, currentRight)) continue;
+    if (
+      typeof currentLeft !== "object" ||
+      currentLeft === null ||
+      typeof currentRight !== "object" ||
+      currentRight === null
+    ) {
+      return false;
+    }
+
+    const mappedRight = leftToRight.get(currentLeft);
+    const mappedLeft = rightToLeft.get(currentRight);
+    if (mappedRight !== undefined || mappedLeft !== undefined) {
+      if (mappedRight !== currentRight || mappedLeft !== currentLeft) {
+        return false;
+      }
+      continue;
+    }
+    leftToRight.set(currentLeft, currentRight);
+    rightToLeft.set(currentRight, currentLeft);
+
+    if (
+      Array.isArray(currentLeft) !== Array.isArray(currentRight) ||
+      Object.getPrototypeOf(currentLeft) !== Object.getPrototypeOf(currentRight)
+    ) {
+      return false;
+    }
+
+    const leftKeys = Reflect.ownKeys(currentLeft);
+    const rightKeys = Reflect.ownKeys(currentRight);
+    if (
+      leftKeys.length !== rightKeys.length ||
+      leftKeys.some((key, index) => key !== rightKeys[index])
+    ) {
+      return false;
+    }
+
+    for (const key of leftKeys) {
+      const leftDescriptor = Object.getOwnPropertyDescriptor(currentLeft, key);
+      const rightDescriptor = Object.getOwnPropertyDescriptor(
+        currentRight,
+        key,
+      );
+      if (
+        !leftDescriptor ||
+        !rightDescriptor ||
+        leftDescriptor.enumerable !== rightDescriptor.enumerable ||
+        leftDescriptor.configurable !== rightDescriptor.configurable ||
+        "value" in leftDescriptor !== "value" in rightDescriptor
+      ) {
+        return false;
+      }
+      if ("value" in leftDescriptor && "value" in rightDescriptor) {
+        if (leftDescriptor.writable !== rightDescriptor.writable) return false;
+        pending.push([leftDescriptor.value, rightDescriptor.value]);
+      } else if (
+        leftDescriptor.get !== rightDescriptor.get ||
+        leftDescriptor.set !== rightDescriptor.set
+      ) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 async function observeAppDataRestoreState(): Promise<AppDataRestoreObservation> {
   const roots = new Map<StoreName, ObservedRevisionRoot>();
   const checkpoints = new Map<StoreName, PersistenceCheckpoint | null>();
@@ -152,10 +226,10 @@ async function observeAppDataRestoreState(): Promise<AppDataRestoreObservation> 
 export async function commitApplicationSnapshotAtomically(
   data: AppData,
 ): Promise<void> {
-  const stableMapData = structuredClone(
-    normalizeMapDataForPersistence(data.mapData as MapDataStore),
-  );
   const stableData = structuredClone(data);
+  const stableMapData = normalizeMapDataForPersistence(
+    stableData.mapData as MapDataStore,
+  );
   stableData.mapData = stableMapData;
   const observation = await observeAppDataRestoreState();
   const database = await openDB();
@@ -207,6 +281,7 @@ export async function commitApplicationSnapshotAtomically(
     }),
   );
   const mapPuts = buildMapDataPuts(stableMapData);
+  const mapPutKeys = new Set(mapPuts.map(({ key }) => key));
 
   await new Promise<void>((resolve, reject) => {
     let transaction: IDBTransaction;
@@ -279,20 +354,28 @@ export async function commitApplicationSnapshotAtomically(
           }
 
           if (storeName === STORES.MAP_DATA) {
-            if (currentMapEntries === null) {
+            const currentEntries = currentMapEntries;
+            if (currentEntries === null) {
               throw new Error("Missing mapData restore CAS snapshot.");
             }
             const knownKeys = assertCurrentMapMatchesExpected(
-              currentMapEntries,
+              currentEntries,
               currentMetadata.get(storeName),
               observed,
             );
             const mapStore = transaction.objectStore(storeName);
             knownKeys.forEach((storageKey) => {
-              trackRequest(mapStore.delete(storageKey));
+              if (!mapPutKeys.has(storageKey)) {
+                trackRequest(mapStore.delete(storageKey));
+              }
             });
             mapPuts.forEach(({ key, value }) => {
-              trackRequest(mapStore.put(value, key));
+              if (
+                !Object.prototype.hasOwnProperty.call(currentEntries, key) ||
+                !storedValuesEqual(currentEntries[key], value)
+              ) {
+                trackRequest(mapStore.put(value, key));
+              }
             });
           } else {
             assertCurrentSnapshotMatchesExpected(

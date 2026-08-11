@@ -175,6 +175,53 @@ describe("db.restoreAppDataAtomically", () => {
     expect(await db.getAllKeys(db.STORES.MAP_DATA)).toEqual([]);
   });
 
+  it("updates only added, changed, and removed map records", async () => {
+    const initialData = makeAppData("差分");
+    const eventName = "差分イベント";
+    initialData.mapData[eventName]["削除対象マップ"] =
+      makeDayMap("removed-map");
+    await db.restoreAppDataAtomically(initialData);
+
+    const restoredData: AppData = {
+      ...initialData,
+      mapData: {
+        [eventName]: {
+          "1日目マップ": initialData.mapData[eventName]["1日目マップ"],
+          "2日目マップ": makeDayMap("changed-map"),
+          追加対象マップ: makeDayMap("added-map"),
+        },
+      },
+    };
+    const putSpy = vi.spyOn(IDBObjectStore.prototype, "put");
+    const deleteSpy = vi.spyOn(IDBObjectStore.prototype, "delete");
+
+    await db.restoreAppDataAtomically(restoredData);
+
+    const mapPutKeys = putSpy.mock.calls.flatMap((args, index) =>
+      (putSpy.mock.contexts[index] as IDBObjectStore).name ===
+      db.STORES.MAP_DATA
+        ? [String(args[1])]
+        : [],
+    );
+    const mapDeleteKeys = deleteSpy.mock.calls.flatMap((args, index) =>
+      (deleteSpy.mock.contexts[index] as IDBObjectStore).name ===
+      db.STORES.MAP_DATA
+        ? [String(args[0])]
+        : [],
+    );
+
+    expect(mapPutKeys.sort()).toEqual(
+      [
+        `mapData:${JSON.stringify([eventName, "2日目マップ"])}`,
+        `mapData:${JSON.stringify([eventName, "追加対象マップ"])}`,
+      ].sort(),
+    );
+    expect(mapDeleteKeys).toEqual([
+      `mapData:${JSON.stringify([eventName, "削除対象マップ"])}`,
+    ]);
+    expect(await db.getAllAppData()).toEqual(restoredData);
+  });
+
   it("rolls back a mid-restore DataCloneError and succeeds on retry", async () => {
     const initialData = makeAppData("復元前");
     const retryData = makeAppData("再成功");

@@ -48,7 +48,11 @@ const preflight = async (
 };
 
 const asFile = (input: ArrayBuffer, name: string): File =>
-  new File([input], name, { type: XLSX_MIME_TYPE });
+  ({
+    name,
+    type: XLSX_MIME_TYPE,
+    arrayBuffer: async () => input,
+  }) as File;
 
 export const xlsxWorkerExecutor: WorkerExecutor = {
   async importWorkbook(request, signal, progress): Promise<XlsxImportResult> {
@@ -59,6 +63,7 @@ export const xlsxWorkerExecutor: WorkerExecutor = {
     if (request.kind === "event-import") {
       const value = await importFromXlsx(
         asFile(request.input, request.fileName),
+        request.input,
       );
       throwIfAborted(signal);
       progress({ phase: "parse", completed: 1, total: 1 });
@@ -68,6 +73,7 @@ export const xlsxWorkerExecutor: WorkerExecutor = {
     const value = await parseMapFile(
       asFile(request.input, request.fileName),
       request.settings,
+      request.input,
     );
     throwIfAborted(signal);
     progress({ phase: "parse", completed: 1, total: 1 });

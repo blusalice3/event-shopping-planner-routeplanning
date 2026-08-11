@@ -559,6 +559,19 @@ function generateBlockColor(index: number): string {
   return colors[index % colors.length];
 }
 
+function dedupeCellsByCoordinate<T extends { row: number; col: number }>(
+  cells: readonly T[],
+  excludedKeys?: ReadonlySet<string>,
+): T[] {
+  const seen = new Set<string>();
+  return cells.filter((cell) => {
+    const key = `${cell.row}-${cell.col}`;
+    if (excludedKeys?.has(key) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function findBorderedRegion(
   startRow: number,
   startCol: number,
@@ -574,9 +587,10 @@ function findBorderedRegion(
   const queue: Array<{ row: number; col: number }> = [
     { row: startRow, col: startCol },
   ];
+  let queueIndex = 0;
 
-  while (queue.length > 0 && region.size < maxRegionSize) {
-    const { row, col } = queue.shift()!;
+  while (queueIndex < queue.length && region.size < maxRegionSize) {
+    const { row, col } = queue[queueIndex++]!;
     const key = `${row}-${col}`;
 
     if (visited.has(key) || region.has(key)) continue;
@@ -1103,20 +1117,23 @@ function collectRegionMediumOrThickBorderColors(
   return colors;
 }
 
-function findNumberCellsByBorderColors(
+interface BorderColorNumberCellCandidate {
+  readonly cell: NumberCellInfo;
+  readonly borderColors: ReadonlySet<string>;
+  readonly strictEligible: boolean;
+  readonly relaxedEligible: boolean;
+}
+
+function buildBorderColorNumberCellCandidates(
   worksheet: ExcelJS.Worksheet,
   mergeMap: Map<string, { row: number; col: number }>,
   mergeRangeMap: Map<string, MergeRange>,
   maxRow: number,
   maxCol: number,
-  targetColors: Set<string>,
   themeColorMap: ThemeColorMap,
   settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS,
-  ignoreNumberRange: boolean = false,
-): NumberCellInfo[] {
-  if (targetColors.size === 0) return [];
-
-  const result: NumberCellInfo[] = [];
+): BorderColorNumberCellCandidate[] {
+  const candidates: BorderColorNumberCellCandidate[] = [];
 
   for (let row = 1; row <= maxRow; row++) {
     for (let col = 1; col <= maxCol; col++) {
@@ -1128,8 +1145,9 @@ function findNumberCellsByBorderColors(
       const value = worksheet.getCell(row, col).value;
       const parsedValue = extractNumericCellValue(value);
       if (parsedValue === null || !Number.isInteger(parsedValue)) continue;
-      if (!ignoreNumberRange && !isNumberCell(value, settings)) continue;
-      if (ignoreNumberRange && parsedValue <= 0) continue;
+      const strictEligible = isNumberCell(value, settings);
+      const relaxedEligible = parsedValue > 0;
+      if (!strictEligible && !relaxedEligible) continue;
 
       const borderColors = collectMediumOrThickBorderColorsForCell(
         worksheet,
@@ -1139,17 +1157,44 @@ function findNumberCellsByBorderColors(
         mergeRangeMap,
         themeColorMap,
       );
-      const hasMatch = Array.from(borderColors).some((color) =>
-        targetColors.has(color),
-      );
-      if (!hasMatch) continue;
+      if (borderColors.size === 0) continue;
 
-      const numValue = parsedValue;
-      result.push({ row, col, value: numValue });
+      candidates.push({
+        cell: { row, col, value: parsedValue },
+        borderColors,
+        strictEligible,
+        relaxedEligible,
+      });
     }
   }
 
-  return result.sort((a, b) => a.value - b.value);
+  return candidates;
+}
+
+function findNumberCellsByBorderColors(
+  candidates: readonly BorderColorNumberCellCandidate[],
+  targetColors: ReadonlySet<string>,
+  ignoreNumberRange: boolean = false,
+): NumberCellInfo[] {
+  if (targetColors.size === 0) return [];
+
+  return candidates
+    .filter(
+      (candidate) =>
+        (ignoreNumberRange
+          ? candidate.relaxedEligible
+          : candidate.strictEligible) &&
+        setsOverlap(candidate.borderColors, targetColors),
+    )
+    .map(({ cell }) => cell)
+    .sort((a, b) => a.value - b.value);
+}
+
+function setsOverlap<T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean {
+  for (const value of left) {
+    if (right.has(value)) return true;
+  }
+  return false;
 }
 
 /**
@@ -1313,15 +1358,26 @@ function detectBlocksWithExcelJS(
     }
   }
 
+  let borderColorNumberCellCandidates: BorderColorNumberCellCandidate[] | null =
+    null;
+  const getBorderColorNumberCellCandidates = () => {
+    borderColorNumberCellCandidates ??= buildBorderColorNumberCellCandidates(
+      worksheet,
+      mergeMap,
+      mergeRangeMap,
+      maxRow,
+      maxCol,
+      themeColorMap,
+      settings,
+    );
+    return borderColorNumberCellCandidates;
+  };
+
   let colorIndex = 0;
   blockGroups.forEach((group, blockName) => {
-    const uniqueNumberCells = group.numberCells
-      .filter(
-        (cell, index, self) =>
-          index ===
-          self.findIndex((c) => c.row === cell.row && c.col === cell.col),
-      )
-      .sort((a, b) => a.value - b.value);
+    const uniqueNumberCells = dedupeCellsByCoordinate(group.numberCells).sort(
+      (a, b) => a.value - b.value,
+    );
 
     const regionBorderColors = collectRegionMediumOrThickBorderColors(
       group.regions,
@@ -1338,14 +1394,8 @@ function detectBlocksWithExcelJS(
     if (nonBlackColors.length > 0) {
       const targetColorSet = new Set(nonBlackColors);
       const strictColorExpandedCells = findNumberCellsByBorderColors(
-        worksheet,
-        mergeMap,
-        mergeRangeMap,
-        maxRow,
-        maxCol,
+        getBorderColorNumberCellCandidates(),
         targetColorSet,
-        themeColorMap,
-        settings,
       );
       colorExpandedNumberCells = strictColorExpandedCells;
 
@@ -1359,14 +1409,8 @@ function detectBlocksWithExcelJS(
 
       if (isLikelyRangeClipped) {
         const relaxedColorExpandedCells = findNumberCellsByBorderColors(
-          worksheet,
-          mergeMap,
-          mergeRangeMap,
-          maxRow,
-          maxCol,
+          getBorderColorNumberCellCandidates(),
           targetColorSet,
-          themeColorMap,
-          settings,
           true,
         );
 
@@ -1381,17 +1425,10 @@ function detectBlocksWithExcelJS(
     const nameCellKeys = new Set(
       group.nameCells.map((nc) => `${nc.row}-${nc.col}`),
     );
-    const mergedNumberCells = [
-      ...uniqueNumberCells,
-      ...colorExpandedNumberCells,
-    ]
-      .filter(
-        (cell, index, self) =>
-          !nameCellKeys.has(`${cell.row}-${cell.col}`) &&
-          index ===
-            self.findIndex((c) => c.row === cell.row && c.col === cell.col),
-      )
-      .sort((a, b) => a.value - b.value);
+    const mergedNumberCells = dedupeCellsByCoordinate(
+      [...uniqueNumberCells, ...colorExpandedNumberCells],
+      nameCellKeys,
+    ).sort((a, b) => a.value - b.value);
 
     if (mergedNumberCells.length < settings.minNumberCellsPerBlock) return;
 
@@ -1415,11 +1452,7 @@ function detectBlocksWithExcelJS(
       endRow: boundingBox.endRow,
       endCol: boundingBox.endCol,
       numberCells: mergedNumberCells,
-      nameCells: group.nameCells.filter(
-        (cell, index, self) =>
-          index ===
-          self.findIndex((c) => c.row === cell.row && c.col === cell.col),
-      ),
+      nameCells: dedupeCellsByCoordinate(group.nameCells),
       color: generateBlockColor(colorIndex++),
       isAutoDetected: true,
     };
@@ -1655,9 +1688,10 @@ function columnLetterToNumber(letters: string): number {
 export async function parseMapFile(
   file: File,
   settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS,
+  suppliedInput?: ArrayBuffer,
 ): Promise<ParseMapFileResult> {
   try {
-    const arrayBuffer = await file.arrayBuffer();
+    const arrayBuffer = suppliedInput ?? (await file.arrayBuffer());
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(arrayBuffer);
 

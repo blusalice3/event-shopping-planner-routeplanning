@@ -2,7 +2,10 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { EventLifecycleCommandPorts } from "./useEventLifecycleCommands";
+import type {
+  EventLifecycleCommandPorts,
+  EventLifecyclePersistenceValues,
+} from "./useEventLifecycleCommands";
 import { useEventLifecycleCommands } from "./useEventLifecycleCommands";
 
 const eventItem = {
@@ -26,6 +29,7 @@ const createPorts = (
     renameEventAtomically: vi.fn(async () => undefined),
   },
   flushPendingSave: vi.fn(async () => undefined),
+  runExclusiveRestore: vi.fn(async (_values, restore) => restore()),
   activeEventName: "イベントA",
   eventToRename: "イベントA",
   eventLists: { イベントA: [eventItem] },
@@ -105,6 +109,111 @@ describe("useEventLifecycleCommands", () => {
       "イベントA",
     );
     expect(ports.navigation.removeEvent).toHaveBeenCalledWith("イベントA");
+  });
+
+  it.each(["delete", "rename"] as const)(
+    "reuses the atomic %s snapshot references so autosave has no stores to write again",
+    async (operation) => {
+      const ports = createPorts();
+      const { result } = renderHook(() => useEventLifecycleCommands(ports));
+
+      await act(async () => {
+        if (operation === "delete") {
+          await result.current.deleteEvent("イベントA");
+        } else {
+          await result.current.confirmRename("イベントB");
+        }
+      });
+
+      const committedValues = vi.mocked(ports.runExclusiveRestore).mock
+        .calls[0]?.[0] as EventLifecyclePersistenceValues;
+      const apply = <T,>(setter: ReturnType<typeof vi.fn>, current: T): T => {
+        const update = setter.mock.calls[0]?.[0] as
+          | T
+          | ((value: T) => T)
+          | undefined;
+        if (update === undefined) {
+          throw new Error("Expected the state setter to be called.");
+        }
+        return typeof update === "function"
+          ? (update as (value: T) => T)(current)
+          : update;
+      };
+
+      const nextValues: EventLifecyclePersistenceValues = {
+        eventLists: apply(
+          ports.setEventLists as ReturnType<typeof vi.fn>,
+          ports.eventLists,
+        ),
+        eventMetadata: apply(
+          ports.setEventMetadata as ReturnType<typeof vi.fn>,
+          ports.eventMetadata,
+        ),
+        executeModeItems: apply(
+          ports.updateExecuteModeItems as ReturnType<typeof vi.fn>,
+          ports.executeModeItems,
+        ),
+        dayModes: apply(
+          ports.setDayModes as ReturnType<typeof vi.fn>,
+          ports.dayModes,
+        ),
+        mapData: apply(
+          ports.setMapData as ReturnType<typeof vi.fn>,
+          ports.mapData,
+        ),
+        mapRotationSettings: apply(
+          ports.setMapRotationSettings as ReturnType<typeof vi.fn>,
+          ports.mapRotationSettings,
+        ),
+        routeSettings: apply(
+          ports.setRouteSettings as ReturnType<typeof vi.fn>,
+          ports.routeSettings,
+        ),
+        hallDefinitions: apply(
+          ports.setHallDefinitions as ReturnType<typeof vi.fn>,
+          ports.hallDefinitions,
+        ),
+        hallRouteSettings: apply(
+          ports.setHallRouteSettings as ReturnType<typeof vi.fn>,
+          ports.hallRouteSettings,
+        ),
+        mapViewportSettings: apply(
+          ports.setMapViewportSettings as ReturnType<typeof vi.fn>,
+          ports.mapViewportSettings,
+        ),
+      };
+
+      (
+        Object.keys(
+          committedValues,
+        ) as (keyof EventLifecyclePersistenceValues)[]
+      ).forEach((key) => {
+        expect(nextValues[key]).toBe(committedValues[key]);
+      });
+    },
+  );
+
+  it("preserves a concurrent state change and leaves it for the normal autosave path", async () => {
+    const ports = createPorts();
+    const { result } = renderHook(() => useEventLifecycleCommands(ports));
+
+    await act(() => result.current.deleteEvent("イベントA"));
+
+    const committedValues = vi.mocked(ports.runExclusiveRestore).mock
+      .calls[0]?.[0] as EventLifecyclePersistenceValues;
+    const updateEventLists = vi.mocked(ports.setEventLists).mock.calls[0]?.[0];
+    if (typeof updateEventLists !== "function") {
+      throw new Error("Expected an event list state updater.");
+    }
+    const concurrentValues = {
+      ...ports.eventLists,
+      イベントC: [{ ...eventItem, id: "item-2" }],
+    };
+    const nextEventLists = updateEventLists(concurrentValues);
+
+    expect(nextEventLists).not.toBe(committedValues.eventLists);
+    expect(nextEventLists).not.toHaveProperty("イベントA");
+    expect(nextEventLists).toHaveProperty("イベントC");
   });
 
   it("commits rename atomically before updating state and the active screen", async () => {
