@@ -18,6 +18,7 @@ import {
   sha256Json,
 } from "../lib/canonical-json.mjs";
 import { manifestTreeHash } from "../lib/file-manifest.mjs";
+import { assertBootstrapStaticOutput } from "../lib/artifact-builder-core.mjs";
 import {
   DEPLOYMENT_BINDING_MEDIA_TYPE,
   FOUNDATION_BOOTSTRAP_RECOVERY_REHEARSAL_MEDIA_TYPE,
@@ -35,24 +36,21 @@ import {
   sameCanonicalValue,
   validateProviderEvidenceForBinding,
 } from "../release-state/releaseWorkflowValidation.mjs";
-import {
-  assertArtifactDrillPreviewOnlyArguments,
-  deriveArtifactDrillPreviewDomains,
-} from "./artifact-control-store-drill-provider.mjs";
 import { resolveAuthoritativeVercelDeployment } from "./prebuiltDeployment.mjs";
 import { extractPrebuiltArchive } from "./prebuiltDeployment.mjs";
 import { resolvePinnedVercelCli } from "./preparedPromotion.mjs";
 import { assertConfiguredFoundationP0aAuthorities } from "./foundation-p0a-authorities-policy.mjs";
+import { readStoredFoundationBootstrapDeploymentSeedAuthority } from "./foundation-bootstrap-deployment-seed.mjs";
 import { buildClosedVercelCommandEnvironment } from "./vercel-command-environment.mjs";
 
 export const FOUNDATION_BOOTSTRAP_RECOVERY_RAW_MEDIA_TYPE =
-  "application/vnd.event-shopping-planner.foundation-bootstrap-recovery-raw+json;version=1";
+  "application/vnd.event-shopping-planner.foundation-bootstrap-recovery-raw+json;version=2";
 export const FOUNDATION_BOOTSTRAP_RECOVERY_OPERATION_MEDIA_TYPE =
   "application/vnd.event-shopping-planner.foundation-bootstrap-recovery-operation+json;version=1";
 export const FOUNDATION_BOOTSTRAP_RECOVERY_OBSERVATION_MEDIA_TYPE =
-  "application/vnd.event-shopping-planner.foundation-bootstrap-recovery+json;version=1";
+  "application/vnd.event-shopping-planner.foundation-bootstrap-recovery+json;version=2";
 export const FOUNDATION_BOOTSTRAP_POLICY_SNAPSHOT_MEDIA_TYPE =
-  "application/vnd.event-shopping-planner.foundation-bootstrap-policy-snapshot+json;version=1";
+  "application/vnd.event-shopping-planner.foundation-bootstrap-policy-snapshot+json;version=2";
 
 const SOURCE_SHA = /^[0-9a-f]{40}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -69,7 +67,7 @@ const REHEARSAL_OPERATION = "rehearse-foundation-bootstrap-recovery";
 const WORKFLOW_PATH = ".github/workflows/release.yml";
 const OPTION_KEYS = [
   "approvalPolicy",
-  "artifactDrillPolicy",
+  "bootstrapSeedAuthority",
   "bootstrapSourceResolution",
   "databaseContract",
   "environment",
@@ -84,6 +82,50 @@ const OPTION_KEYS = [
   "storePolicy",
   "toolchainPolicy",
 ];
+
+const assertFoundationBootstrapPreviewOnlyArguments = (arguments_) => {
+  if (
+    !Array.isArray(arguments_) ||
+    arguments_.length !== 7 ||
+    typeof arguments_[0] !== "string" ||
+    arguments_[0].length === 0 ||
+    arguments_[1] !== "deploy" ||
+    arguments_[2] !== "--prebuilt" ||
+    arguments_[3] !== "--skip-domain" ||
+    arguments_[4] !== "--yes" ||
+    arguments_[5] !== "--cwd" ||
+    typeof arguments_[6] !== "string" ||
+    arguments_[6].length === 0 ||
+    arguments_.includes("--prod")
+  ) {
+    throw new Error("Foundation bootstrap Vercel command is not preview-only");
+  }
+  return arguments_;
+};
+
+const deriveFoundationBootstrapPreviewAlias = ({
+  namespace,
+  aliasSuffix,
+  forbiddenAliases,
+}) => {
+  const alias = `${namespace}.containment.${aliasSuffix}`.toLowerCase();
+  if (!DOMAIN.test(alias) || alias.length > 253) {
+    throw new Error("Foundation bootstrap preview alias is invalid");
+  }
+  for (const domain of forbiddenAliases) {
+    const forbidden = domain.toLowerCase();
+    if (
+      alias === forbidden ||
+      alias.endsWith(`.${forbidden}`) ||
+      forbidden.endsWith(`.${alias}`)
+    ) {
+      throw new Error(
+        "Foundation bootstrap preview authority overlaps production domain",
+      );
+    }
+  }
+  return alias;
+};
 
 const referenceFor = (namespace, bytes) => {
   const sha256 = sha256Bytes(bytes);
@@ -445,7 +487,10 @@ export const materializeFoundationBootstrapArtifact = async ({
     destination: outputRoot,
     expectedFiles: manifest.outputFiles,
   });
-  await assertManifestMatchesOutput(outputRoot, manifest);
+  await Promise.all([
+    assertManifestMatchesOutput(outputRoot, manifest),
+    assertBootstrapStaticOutput({ outputRoot, rawDistManifest }),
+  ]);
   const receipt = assertFoundationBootstrapMaterializationReceipt(
     {
       schemaVersion: 1,
@@ -480,6 +525,7 @@ export const materializeFoundationBootstrapArtifact = async ({
     manifest,
     archiveBytes: Buffer.from(archiveStored.bytes),
     rawDistManifest,
+    rawDistRoot: path.join(outputRoot, "static"),
     expectedRoutes: expectedRoutes({ manifest, requiredRoutes }),
     receipt,
   });
@@ -713,6 +759,19 @@ const deploymentProviderProjection = (resolution) => ({
   readyState: resolution.deployment.readyState,
 });
 
+const materializePreviewArchive = async ({
+  archivePath,
+  outputRoot,
+  artifact,
+}) => {
+  await extractPrebuiltArchive({
+    archivePath,
+    destination: outputRoot,
+    expectedFiles: artifact.manifest.outputFiles,
+  });
+  await assertManifestMatchesOutput(outputRoot, artifact.manifest);
+};
+
 const deployPreview = async ({
   stage,
   artifact,
@@ -725,6 +784,8 @@ const deployPreview = async ({
   fetchImpl,
   commandRunner,
   resolveDeployment,
+  trackDeployment,
+  materializeArchive,
 }) => {
   const deployRoot = await mkdtemp(path.join(workRoot, `deploy-${stage}-`));
   const outputRoot = path.join(deployRoot, ".vercel", "output");
@@ -734,14 +795,9 @@ const deployPreview = async ({
     flag: "wx",
     mode: 0o600,
   });
-  await extractPrebuiltArchive({
-    archivePath,
-    destination: outputRoot,
-    expectedFiles: artifact.manifest.outputFiles,
-  });
-  await assertManifestMatchesOutput(outputRoot, artifact.manifest);
+  await materializeArchive({ archivePath, outputRoot, artifact });
   const cli = await resolvePinnedVercelCli({ root, toolchainPolicy });
-  const arguments_ = assertArtifactDrillPreviewOnlyArguments([
+  const arguments_ = assertFoundationBootstrapPreviewOnlyArguments([
     cli.cliPath,
     "deploy",
     "--prebuilt",
@@ -761,11 +817,17 @@ const deployPreview = async ({
     throw new Error(`Foundation bootstrap preview deploy failed: ${stage}`);
   }
   const previewUrl = singlePreviewUrl(command.stdout);
+  trackDeployment({ stage, previewUrl, deploymentId: null });
   const resolution = await resolveDeployment({
     deploymentUrl: previewUrl,
     expectedTeamId: providerPolicy.expectedTeamId,
     token,
     fetchImpl,
+  });
+  trackDeployment({
+    stage,
+    previewUrl,
+    deploymentId: resolution.deployment.id,
   });
   const routes = await probeRoutes({
     fetchImpl,
@@ -971,7 +1033,9 @@ export const cleanupFoundationBootstrapPreview = async ({
   }
   const aliasUrl = aliasUrls({
     alias,
-    deploymentId: deployments[0].deploymentId,
+    deploymentId:
+      deployments[0].deploymentId ??
+      new URL(deployments[0].previewUrl).hostname,
     providerPolicy,
   }).observe;
   const aliasCleanup = cleanupProviderTarget({
@@ -995,8 +1059,10 @@ export const cleanupFoundationBootstrapPreview = async ({
     label: "Foundation bootstrap alias",
   });
   const deploymentCleanups = deployments.map(async (deployment) => {
+    const deploymentId =
+      deployment.deploymentId ?? new URL(deployment.previewUrl).hostname;
     const url = new URL(
-      `/v13/deployments/${encodeURIComponent(deployment.deploymentId)}`,
+      `/v13/deployments/${encodeURIComponent(deploymentId)}`,
       "https://api.vercel.com",
     );
     url.searchParams.set("teamId", providerPolicy.expectedTeamId);
@@ -1018,10 +1084,10 @@ export const cleanupFoundationBootstrapPreview = async ({
           allowedStatuses: [404],
           label: "Foundation bootstrap deployment cleanup verification",
         }),
-      label: `Foundation bootstrap deployment ${deployment.deploymentId}`,
+      label: `Foundation bootstrap deployment ${deploymentId}`,
     });
     return {
-      deploymentId: deployment.deploymentId,
+      deploymentId,
       deleteStatus: target.deletion.status,
       deleteResponseSha256: target.deletion.bodySha256,
       verifyStatus: target.verification.status,
@@ -1214,7 +1280,6 @@ export const executeFoundationBootstrapPreviewRecovery = async (
     runId,
     runAttempt,
     p0aPolicy,
-    artifactDrillPolicy,
     providerPolicy,
     toolchainPolicy,
     environment,
@@ -1227,6 +1292,7 @@ export const executeFoundationBootstrapPreviewRecovery = async (
     deploy = deployPreview,
     assign = assignAlias,
     cleanupDeployment = cleanupFoundationBootstrapPreview,
+    materializeArchive = materializePreviewArchive,
     clock = Date.now,
   } = {},
 ) => {
@@ -1239,9 +1305,9 @@ export const executeFoundationBootstrapPreviewRecovery = async (
   ) {
     throw new Error("Foundation bootstrap provider authority is absent");
   }
-  const { containment: alias } = deriveArtifactDrillPreviewDomains({
-    drillNamespace: `p0a-${sha256Json({ namespace, executorSourceSha, runId, runAttempt }).slice(0, 12)}`,
-    aliasSuffix: artifactDrillPolicy.providerPreviewAliasSuffix,
+  const alias = deriveFoundationBootstrapPreviewAlias({
+    namespace: `p0a-${sha256Json({ namespace, executorSourceSha, runId, runAttempt }).slice(0, 12)}`,
+    aliasSuffix: p0aPolicy.bootstrapRecovery.previewAliasSuffix,
     forbiddenAliases: [
       ...(providerPolicy.ownedProductionDomains ?? []),
       ...(providerPolicy.productionDomains ?? []),
@@ -1253,6 +1319,34 @@ export const executeFoundationBootstrapPreviewRecovery = async (
   );
   const startedAt = new Date(clockMilliseconds(clock)).toISOString();
   const deployments = [];
+  const trackedDeployments = new Map();
+  const trackDeployment = ({ stage, previewUrl, deploymentId }) => {
+    if (
+      !["forward", "recovery"].includes(stage) ||
+      typeof previewUrl !== "string" ||
+      !DOMAIN.test(new URL(previewUrl).hostname) ||
+      (deploymentId !== null && !SAFE_ID.test(deploymentId ?? ""))
+    ) {
+      throw new Error("Foundation bootstrap cleanup handle is invalid");
+    }
+    const existing = trackedDeployments.get(previewUrl);
+    if (existing !== undefined && existing.stage !== stage) {
+      throw new Error("Foundation bootstrap cleanup handle is ambiguous");
+    }
+    if (
+      existing !== undefined &&
+      existing.deploymentId !== null &&
+      deploymentId !== null &&
+      existing.deploymentId !== deploymentId
+    ) {
+      throw new Error("Foundation bootstrap cleanup deployment differs");
+    }
+    trackedDeployments.set(previewUrl, {
+      stage,
+      previewUrl,
+      deploymentId: deploymentId ?? existing?.deploymentId ?? null,
+    });
+  };
   let assignments = [];
   let primaryError = null;
   let cleanup = null;
@@ -1270,6 +1364,13 @@ export const executeFoundationBootstrapPreviewRecovery = async (
       fetchImpl,
       commandRunner,
       resolveDeployment,
+      trackDeployment,
+      materializeArchive,
+    });
+    trackDeployment({
+      stage: "forward",
+      previewUrl: forward.previewUrl,
+      deploymentId: forward.deploymentId,
     });
     deployments.push(forward);
     const forwardAssignment = await assign({
@@ -1292,6 +1393,13 @@ export const executeFoundationBootstrapPreviewRecovery = async (
       fetchImpl,
       commandRunner,
       resolveDeployment,
+      trackDeployment,
+      materializeArchive,
+    });
+    trackDeployment({
+      stage: "recovery",
+      previewUrl: recovery.previewUrl,
+      deploymentId: recovery.deploymentId,
     });
     deployments.push(recovery);
     const recoveryAssignment = await assign({
@@ -1306,11 +1414,11 @@ export const executeFoundationBootstrapPreviewRecovery = async (
   } catch (error) {
     primaryError = error;
   } finally {
-    if (deployments.length > 0) {
+    if (trackedDeployments.size > 0) {
       try {
         cleanup = await cleanupDeployment({
           alias,
-          deployments,
+          deployments: [...trackedDeployments.values()],
           providerPolicy,
           token,
           fetchImpl,
@@ -1554,6 +1662,7 @@ const assertResult = (result, rehearsal) => {
 const rehearsalFor = ({
   namespace,
   executorSourceSha,
+  bootstrapSeedAuthority,
   bootstrapSourceResolution,
   oidcAuthority,
   oidcReceipt,
@@ -1582,6 +1691,7 @@ const rehearsalFor = ({
     runId: oidcAuthority.runId,
     runAttempt: oidcAuthority.runAttempt,
     producerOidc: { ...oidcReceipt },
+    bootstrapDeploymentSeed: { ...bootstrapSeedAuthority },
     reviewedWorkflowRun: { ...reviewedWorkflowRun },
     startedAt: operations.startedAt,
     completedAt: operations.completedAt,
@@ -1604,6 +1714,7 @@ const assertRehearsal = (rehearsal) => {
     rehearsal,
     [
       "artifactArchiveSha256",
+      "bootstrapDeploymentSeed",
       "completedAt",
       "dataLossObserved",
       "evidenceKind",
@@ -1663,6 +1774,11 @@ const assertRehearsal = (rehearsal) => {
     "Bootstrap OIDC",
   );
   assertReference(
+    rehearsal.bootstrapDeploymentSeed,
+    rehearsal.namespace,
+    "Bootstrap deployment seed",
+  );
+  assertReference(
     rehearsal.reviewedWorkflowRun,
     rehearsal.namespace,
     "Bootstrap reviewed workflow run",
@@ -1673,7 +1789,6 @@ const assertRehearsal = (rehearsal) => {
 const policySnapshot = (options) => ({
   p0aPolicy: options.p0aPolicy,
   providerPolicy: options.providerPolicy,
-  artifactDrillPolicy: options.artifactDrillPolicy,
   storePolicy: options.storePolicy,
   databaseContract: options.databaseContract,
   approvalPolicy: options.approvalPolicy,
@@ -1710,8 +1825,8 @@ const assertRaw = (raw, { namespace, sourceSha = null }) => {
     "Foundation bootstrap raw authority",
   );
   if (
-    raw.schemaVersion !== 1 ||
-    raw.kind !== "foundation-bootstrap-recovery-raw/v1" ||
+    raw.schemaVersion !== 2 ||
+    raw.kind !== "foundation-bootstrap-recovery-raw/v2" ||
     raw.namespace !== namespace ||
     !SOURCE_SHA.test(raw.sourceSha ?? "") ||
     (sourceSha !== null && raw.sourceSha !== sourceSha)
@@ -1721,7 +1836,7 @@ const assertRaw = (raw, { namespace, sourceSha = null }) => {
   timestamp(raw.observedAt, "Foundation bootstrap raw observation");
   assertExactKeys(
     raw.collector,
-    ["oidcReceipt", "reviewedWorkflowRun", "runAttempt", "runId"],
+    ["oidcReceipt", "runAttempt", "runId"],
     "Foundation bootstrap collector identity",
   );
   if (
@@ -1735,14 +1850,16 @@ const assertRaw = (raw, { namespace, sourceSha = null }) => {
     raw.namespace,
     "Foundation bootstrap collector OIDC",
   );
-  assertReference(
-    raw.collector.reviewedWorkflowRun,
-    raw.namespace,
-    "Foundation bootstrap reviewed workflow run",
-  );
   assertExactKeys(
     raw.bootstrap,
-    ["bindingId", "bindingReference", "commitTreeSha", "sourceSha"],
+    [
+      "bindingId",
+      "bindingReference",
+      "commitTreeSha",
+      "reviewedSeedWorkflowRun",
+      "seedAuthority",
+      "sourceSha",
+    ],
     "Foundation bootstrap identity",
   );
   if (
@@ -1756,6 +1873,16 @@ const assertRaw = (raw, { namespace, sourceSha = null }) => {
     raw.bootstrap.bindingReference,
     raw.namespace,
     "Foundation bootstrap deployment binding",
+  );
+  assertReference(
+    raw.bootstrap.seedAuthority,
+    raw.namespace,
+    "Foundation bootstrap deployment seed authority",
+  );
+  assertReference(
+    raw.bootstrap.reviewedSeedWorkflowRun,
+    raw.namespace,
+    "Foundation bootstrap reviewed seed workflow run",
   );
   assertExactKeys(
     raw.operationReceipts,
@@ -1789,8 +1916,8 @@ export const assertFoundationBootstrapRecoveryObservation = (observation) => {
     "stateInitializationSubject",
   ]);
   if (
-    observation.schemaVersion !== 1 ||
-    observation.kind !== "foundation-bootstrap-recovery-observation/v1" ||
+    observation.schemaVersion !== 2 ||
+    observation.kind !== "foundation-bootstrap-recovery-observation/v2" ||
     !NAMESPACE.test(observation.namespace ?? "") ||
     !SOURCE_SHA.test(observation.sourceSha ?? "") ||
     observation.collectorIdentity?.sourceSha !== observation.sourceSha ||
@@ -1876,13 +2003,13 @@ export const readStoredFoundationBootstrapRecoveryAuthority = async (
     databaseContract,
     storePolicy,
     approvalPolicy,
-    artifactDrillPolicy,
     foundationBaseline,
     toolchainPolicy,
     bootstrapSourceResolution,
   },
   {
     readOidcAuthority = readStoredProductionRequestGraphOidcAuthority,
+    readSeedAuthority = readStoredFoundationBootstrapDeploymentSeedAuthority,
     readWorkflowRun = readReviewedWorkflowRunAuthority,
     assertBootstrapSource = assertLiveBootstrapFoundationSource,
     now = Date.now,
@@ -1894,12 +2021,11 @@ export const readStoredFoundationBootstrapRecoveryAuthority = async (
     databaseContract,
     storePolicy,
     approvalPolicy,
-    artifactDrillPolicy,
     requireBootstrap: true,
   });
   if (
     !NAMESPACE.test(namespace ?? "") ||
-    foundationBaseline?.bootstrapBaselineSourceSha !==
+    p0aPolicy?.bootstrapRecovery?.bootstrapSourceSha !==
       bootstrapSourceResolution?.gitCommitSha
   ) {
     throw new Error("Foundation bootstrap readback identity differs");
@@ -1964,7 +2090,6 @@ export const readStoredFoundationBootstrapRecoveryAuthority = async (
   const expectedSnapshot = policySnapshot({
     p0aPolicy,
     providerPolicy,
-    artifactDrillPolicy,
     storePolicy,
     databaseContract,
     approvalPolicy,
@@ -1995,6 +2120,22 @@ export const readStoredFoundationBootstrapRecoveryAuthority = async (
     raw.bootstrap.commitTreeSha !== bootstrapSourceResolution.treeSha
   ) {
     throw new Error("Foundation bootstrap binding readback differs");
+  }
+  const seed = await readSeedAuthority({
+    store,
+    namespace,
+    reference: raw.bootstrap.seedAuthority,
+    p0aPolicy,
+    providerPolicy,
+    databaseContract,
+    storePolicy,
+    approvalPolicy,
+  });
+  if (
+    !sameCanonicalValue(seed.binding, binding) ||
+    !sameCanonicalValue(seed.reference, raw.bootstrap.seedAuthority)
+  ) {
+    throw new Error("Foundation bootstrap reviewed seed binding differs");
   }
   await Promise.all([
     validateProviderEvidenceForBinding({
@@ -2129,13 +2270,14 @@ export const readStoredFoundationBootstrapRecoveryAuthority = async (
   const rederivedRehearsal = rehearsalFor({
     namespace,
     executorSourceSha: raw.sourceSha,
+    bootstrapSeedAuthority: raw.bootstrap.seedAuthority,
     bootstrapSourceResolution,
     oidcAuthority: {
       runId: raw.collector.runId,
       runAttempt: raw.collector.runAttempt,
     },
     oidcReceipt: raw.collector.oidcReceipt,
-    reviewedWorkflowRun: raw.collector.reviewedWorkflowRun,
+    reviewedWorkflowRun: raw.bootstrap.reviewedSeedWorkflowRun,
     artifact,
     operations,
     approvalPolicy,
@@ -2159,11 +2301,11 @@ export const readStoredFoundationBootstrapRecoveryAuthority = async (
     readWorkflowRun({
       namespace,
       repository: approvalPolicy.repository,
-      expectedRunId: raw.collector.runId,
-      expectedRunAttempt: raw.collector.runAttempt,
-      expectedSourceSha: raw.sourceSha,
+      expectedRunId: seed.authority.runId,
+      expectedRunAttempt: seed.authority.runAttempt,
+      expectedSourceSha: seed.authority.workflowSourceSha,
       expectedWorkflowPath: WORKFLOW_PATH,
-      reference: raw.collector.reviewedWorkflowRun,
+      reference: raw.bootstrap.reviewedSeedWorkflowRun,
       store,
     }),
   ]);
@@ -2195,6 +2337,7 @@ export const collectAndStoreFoundationBootstrapRecovery = async (
   options,
   {
     readOidcAuthority = readStoredProductionRequestGraphOidcAuthority,
+    readSeedAuthority = readStoredFoundationBootstrapDeploymentSeedAuthority,
     readWorkflowRun = readReviewedWorkflowRunAuthority,
     materialize = materializeFoundationBootstrapArtifact,
     executeRecovery = executeFoundationBootstrapPreviewRecovery,
@@ -2216,7 +2359,7 @@ export const collectAndStoreFoundationBootstrapRecovery = async (
   void configured;
   const {
     approvalPolicy,
-    artifactDrillPolicy,
+    bootstrapSeedAuthority,
     bootstrapSourceResolution,
     environment,
     foundationBaseline,
@@ -2245,7 +2388,7 @@ export const collectAndStoreFoundationBootstrapRecovery = async (
     !RUN_ID.test(oidcAuthority?.runId ?? "") ||
     !RUN_ID.test(oidcAuthority?.runAttempt ?? "") ||
     !sameCanonicalValue(oidcAuthority.approvalPolicy, approvalPolicy) ||
-    foundationBaseline?.bootstrapBaselineSourceSha !==
+    p0aPolicy?.bootstrapRecovery?.bootstrapSourceSha !==
       bootstrapSourceResolution?.gitCommitSha
   ) {
     throw new Error("Foundation bootstrap recovery collector identity differs");
@@ -2253,6 +2396,27 @@ export const collectAndStoreFoundationBootstrapRecovery = async (
   assertStore(store, namespace);
   assertBootstrapSource(bootstrapSourceResolution);
   const executorSourceSha = environment.GITHUB_SHA;
+  const seed = await readSeedAuthority({
+    store,
+    namespace,
+    reference: bootstrapSeedAuthority,
+    p0aPolicy,
+    providerPolicy,
+    databaseContract: options.databaseContract,
+    storePolicy: options.storePolicy,
+    approvalPolicy,
+  });
+  if (
+    seed.authority.runId === oidcAuthority.runId ||
+    seed.authority.workflowSourceSha === executorSourceSha ||
+    bootstrapSeedAuthority.sha256 !==
+      p0aPolicy.bootstrapRecovery.deploymentSeedAuthoritySha256 ||
+    seed.binding.sourceSha !== bootstrapSourceResolution.gitCommitSha
+  ) {
+    throw new Error(
+      "Foundation bootstrap deployment seed is not a prior dual-source run",
+    );
+  }
   await Promise.all([
     readOidcAuthority({
       store,
@@ -2266,9 +2430,9 @@ export const collectAndStoreFoundationBootstrapRecovery = async (
     readWorkflowRun({
       namespace,
       repository: approvalPolicy.repository,
-      expectedRunId: oidcAuthority.runId,
-      expectedRunAttempt: oidcAuthority.runAttempt,
-      expectedSourceSha: executorSourceSha,
+      expectedRunId: seed.authority.runId,
+      expectedRunAttempt: seed.authority.runAttempt,
+      expectedSourceSha: seed.authority.workflowSourceSha,
       expectedWorkflowPath: WORKFLOW_PATH,
       reference: reviewedWorkflowRun,
       store,
@@ -2298,7 +2462,6 @@ export const collectAndStoreFoundationBootstrapRecovery = async (
     runId: oidcAuthority.runId,
     runAttempt: oidcAuthority.runAttempt,
     p0aPolicy,
-    artifactDrillPolicy,
     providerPolicy,
     toolchainPolicy,
     environment,
@@ -2327,6 +2490,7 @@ export const collectAndStoreFoundationBootstrapRecovery = async (
     rehearsalFor({
       namespace,
       executorSourceSha,
+      bootstrapSeedAuthority,
       bootstrapSourceResolution,
       oidcAuthority,
       oidcReceipt,
@@ -2356,8 +2520,8 @@ export const collectAndStoreFoundationBootstrapRecovery = async (
     operationStored.map(([name, stored]) => [name, { ...stored.reference }]),
   );
   const raw = {
-    schemaVersion: 1,
-    kind: "foundation-bootstrap-recovery-raw/v1",
+    schemaVersion: 2,
+    kind: "foundation-bootstrap-recovery-raw/v2",
     namespace,
     sourceSha: executorSourceSha,
     observedAt: rehearsal.completedAt,
@@ -2365,7 +2529,6 @@ export const collectAndStoreFoundationBootstrapRecovery = async (
       runId: oidcAuthority.runId,
       runAttempt: oidcAuthority.runAttempt,
       oidcReceipt: { ...oidcReceipt },
-      reviewedWorkflowRun: { ...reviewedWorkflowRun },
     },
     bootstrap: {
       sourceSha: bootstrapSourceResolution.gitCommitSha,
@@ -2374,6 +2537,8 @@ export const collectAndStoreFoundationBootstrapRecovery = async (
       bindingReference: {
         ...bindingReference(namespace, p0aPolicy),
       },
+      seedAuthority: { ...bootstrapSeedAuthority },
+      reviewedSeedWorkflowRun: { ...reviewedWorkflowRun },
     },
     policySnapshot: { ...snapshotStored.reference },
     operationReceipts,
@@ -2410,13 +2575,13 @@ export const collectAndStoreFoundationBootstrapRecovery = async (
       databaseContract: options.databaseContract,
       storePolicy: options.storePolicy,
       approvalPolicy,
-      artifactDrillPolicy,
       foundationBaseline,
       toolchainPolicy,
       bootstrapSourceResolution,
     },
     {
       readOidcAuthority,
+      readSeedAuthority,
       readWorkflowRun,
       assertBootstrapSource,
       now: clock,
@@ -2424,8 +2589,8 @@ export const collectAndStoreFoundationBootstrapRecovery = async (
   );
   return Object.freeze(
     assertFoundationBootstrapRecoveryObservation({
-      schemaVersion: 1,
-      kind: "foundation-bootstrap-recovery-observation/v1",
+      schemaVersion: 2,
+      kind: "foundation-bootstrap-recovery-observation/v2",
       namespace,
       sourceSha: executorSourceSha,
       observedAt: verified.rehearsal.completedAt,

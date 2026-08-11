@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import process from "node:process";
 import test from "node:test";
 
@@ -23,6 +25,7 @@ import {
   ARTIFACT_ARCHIVE_MEDIA_TYPE,
 } from "../release-state/releaseWorkflowValidation.mjs";
 import {
+  FOUNDATION_BOOTSTRAP_RECOVERY_RAW_MEDIA_TYPE,
   assertFoundationBootstrapRecoveryObservation,
   assertFoundationBootstrapRecoveryOperations,
   assertFoundationBootstrapStateInitializationSubject,
@@ -36,6 +39,14 @@ import {
   parseFoundationBootstrapRecoveryArguments,
   runFoundationBootstrapRecoveryCli,
 } from "./collect-foundation-bootstrap-recovery.mjs";
+import {
+  assertFoundationBootstrapDeploymentSeedAuthority,
+  parseFoundationBootstrapDeploymentSeedArguments,
+  readStoredFoundationBootstrapDeploymentSeedAuthority,
+  recordFoundationBootstrapDeploymentSeed,
+  reviewFoundationBootstrapDeploymentSeed,
+  runFoundationBootstrapDeploymentSeedCli,
+} from "./foundation-bootstrap-deployment-seed.mjs";
 
 const load = async (name) =>
   JSON.parse(
@@ -48,7 +59,6 @@ const [
   baseDatabase,
   baseStore,
   baseApproval,
-  baseArtifactDrill,
   baseFoundation,
   toolchainPolicy,
   releasePolicy,
@@ -58,7 +68,6 @@ const [
   load("db-compatibility-contract.json"),
   load("release-state-store.json"),
   load("approval-policy.json"),
-  load("artifact-control-store-drill.json"),
   load("foundation-baseline.json"),
   load("toolchain-versions.json"),
   load("release-variants.json"),
@@ -79,6 +88,10 @@ const oidcReceipt = {
 const reviewedWorkflowRun = {
   uri: `release-state://${namespace}/evidence/${"b".repeat(64)}`,
   sha256: "b".repeat(64),
+};
+const bootstrapSeedAuthority = {
+  uri: `release-state://${namespace}/evidence/${"c".repeat(64)}`,
+  sha256: "c".repeat(64),
 };
 
 const wafRule = (id, route) => ({
@@ -102,6 +115,8 @@ const configuredPolicies = () => {
     namespaceStatus: "uninitialized",
     credentialOwner: "github-team:release-state",
   };
+  p0aPolicy.bootstrapRecovery.previewAliasSuffix =
+    "preview.blusalice3-foundation.dev";
   p0aPolicy.blockerCodes = [];
 
   const providerPolicy = structuredClone(baseProvider);
@@ -170,20 +185,13 @@ const configuredPolicies = () => {
     "github-team-operations";
   approvalPolicy.blockerCodes = [];
 
-  const artifactDrillPolicy = structuredClone(baseArtifactDrill);
-  artifactDrillPolicy.bindingStatus = "configured";
-  artifactDrillPolicy.providerPreviewAliasSuffix = "preview.example.test";
-  artifactDrillPolicy.blockerCodes = [];
-
   const foundationBaseline = structuredClone(baseFoundation);
-  foundationBaseline.bootstrapBaselineSourceSha = bootstrapSourceSha;
   return {
     p0aPolicy,
     providerPolicy,
     databaseContract,
     storePolicy,
     approvalPolicy,
-    artifactDrillPolicy,
     foundationBaseline,
     toolchainPolicy,
   };
@@ -492,6 +500,11 @@ const createBindingArtifact = async (store, policies) => {
   );
   policies.p0aPolicy.bootstrapRecovery.deploymentBindingSha256 =
     bindingReference.sha256;
+  policies.p0aPolicy.bootstrapRecovery.deploymentSeedAuthoritySha256 =
+    "c".repeat(64);
+  policies.p0aPolicy.bootstrapRecovery.bootstrapSourceSha = bootstrapSourceSha;
+  policies.p0aPolicy.bootstrapRecovery.rawDistManifestSha256 =
+    rawDistReference.sha256;
   const receipt = {
     schemaVersion: 1,
     kind: "foundation-bootstrap-materialization-receipt/v1",
@@ -614,6 +627,15 @@ const createFixture = async () => {
   };
   const dependencies = {
     readOidcAuthority: async () => ({ receipt: { trusted: true } }),
+    readSeedAuthority: async () => ({
+      authority: {
+        runId: "7001",
+        runAttempt: "1",
+        workflowSourceSha: bootstrapSourceSha,
+      },
+      binding: artifact.binding,
+      reference: bootstrapSeedAuthority,
+    }),
     readWorkflowRun: async () => ({ receipt: { reviewed: true } }),
     assertBootstrapSource: (resolution) => resolution,
     materialize: async () => artifact,
@@ -622,6 +644,7 @@ const createFixture = async () => {
   };
   const options = {
     ...policies,
+    bootstrapSeedAuthority,
     bootstrapSourceResolution,
     environment: {
       GITHUB_SHA: sourceSha,
@@ -653,6 +676,321 @@ const createFixture = async () => {
     store,
   };
 };
+
+const markBootstrapSeedPending = (policies) => {
+  policies.p0aPolicy.bindingStatus = "bootstrap-seed-pending";
+  policies.p0aPolicy.blockerCodes = [
+    "p0a-bootstrap-deployment-binding-seed-pending",
+  ];
+  policies.p0aPolicy.bootstrapRecovery.bootstrapSourceSha = null;
+  policies.p0aPolicy.bootstrapRecovery.deploymentBindingSha256 = null;
+  policies.p0aPolicy.bootstrapRecovery.deploymentSeedAuthoritySha256 = null;
+  policies.p0aPolicy.bootstrapRecovery.rawDistManifestSha256 = null;
+  return policies;
+};
+
+const seedOidcReader = async (options) => {
+  assert.equal(options.sourceSha, bootstrapSourceSha);
+  assert.equal(options.runId, "7001");
+  assert.equal(options.runAttempt, "1");
+  return {
+    receipt: { verifiedAt: committedAt },
+    readback: { receipt: { verifiedAt: committedAt } },
+  };
+};
+
+test("bootstrap seed parser and CLI reject caller selectors and wrong operation before authority I/O", async () => {
+  assert.deepEqual(
+    parseFoundationBootstrapDeploymentSeedArguments([
+      "--namespace",
+      namespace,
+      "--binding",
+      "binding.json",
+      "--output",
+      "seed.json",
+    ]),
+    {
+      namespace,
+      bindingPath: "binding.json",
+      outputPath: "seed.json",
+    },
+  );
+  for (const injected of [
+    ["--source-sha", sourceSha],
+    ["--run-id", runId],
+    ["--binding-sha256", "f".repeat(64)],
+    ["--status", "passed"],
+  ]) {
+    assert.throws(
+      () =>
+        parseFoundationBootstrapDeploymentSeedArguments([
+          "--namespace",
+          namespace,
+          "--binding",
+          "binding.json",
+          "--output",
+          "seed.json",
+          ...injected,
+        ]),
+      /Usage|arguments/u,
+    );
+  }
+  let policyReads = 0;
+  await assert.rejects(
+    runFoundationBootstrapDeploymentSeedCli(
+      {
+        argv: [
+          "--namespace",
+          namespace,
+          "--binding",
+          "binding.json",
+          "--output",
+          "seed.json",
+        ],
+        environment: { REQUESTED_OPERATION: "caller-selected-operation" },
+      },
+      {
+        loadPolicy: async () => {
+          policyReads += 1;
+          throw new Error("must not read policy");
+        },
+      },
+    ),
+    /operation differs/u,
+  );
+  assert.equal(policyReads, 0);
+});
+
+test("bootstrap seed CLI requires pending policy and protected current workflow identity", async (t) => {
+  const policies = markBootstrapSeedPending(configuredPolicies());
+  const store = memoryStore();
+  const artifact = await createBindingArtifact(store, policies);
+  markBootstrapSeedPending(policies);
+  store.close = async () => undefined;
+  const temporaryRoot = await mkdtemp(
+    path.join(os.tmpdir(), "foundation-bootstrap-seed-cli-"),
+  );
+  t.after(() => rm(temporaryRoot, { recursive: true, force: true }));
+  const bindingPath = path.join(temporaryRoot, "binding.json");
+  await writeFile(
+    bindingPath,
+    store.objects.get(artifact.bindingReference.sha256).bytes,
+  );
+  const byName = new Map([
+    ["foundation-p0a-authorities.json", policies.p0aPolicy],
+    ["provider-policy.json", policies.providerPolicy],
+    ["db-compatibility-contract.json", policies.databaseContract],
+    ["release-state-store.json", policies.storePolicy],
+    ["approval-policy.json", policies.approvalPolicy],
+    ["foundation-baseline.json", policies.foundationBaseline],
+  ]);
+  let protectedOptions = null;
+  let recordOptions = null;
+  const result = await runFoundationBootstrapDeploymentSeedCli(
+    {
+      argv: [
+        "--namespace",
+        namespace,
+        "--binding",
+        bindingPath,
+        "--output",
+        path.join(temporaryRoot, "seed.json"),
+      ],
+      environment: {
+        REQUESTED_OPERATION: "seed-foundation-bootstrap-deployment-binding",
+        GITHUB_SHA: bootstrapSourceSha,
+        GITHUB_RUN_ID: "7001",
+        GITHUB_RUN_ATTEMPT: "1",
+        ACTIONS_ID_TOKEN_REQUEST_URL: "https://oidc.example.test/token",
+        ACTIONS_ID_TOKEN_REQUEST_TOKEN: "oidc-token",
+        RELEASE_STATE_DATABASE_URL: "postgresql://fixture",
+        RELEASE_STATE_DATABASE_CA_PEM: "fixture-ca",
+      },
+      cwd: temporaryRoot,
+      stdout: { write: () => undefined },
+    },
+    {
+      loadPolicy: async (filePath) => byName.get(path.basename(filePath)),
+      assertProtected: (options) => {
+        protectedOptions = options;
+      },
+      createStore: async () => store,
+      collectOidc: async () => ({ reference: oidcReceipt }),
+      recordSeed: async (options) => {
+        recordOptions = options;
+        return {
+          authorityBytes: canonicalJsonBytes({ fixture: "seed" }),
+          authorityReference: bootstrapSeedAuthority,
+        };
+      },
+      writeOutput: async () => undefined,
+    },
+  );
+  assert.equal(protectedOptions.sourceSha, bootstrapSourceSha);
+  assert.equal(protectedOptions.runId, "7001");
+  assert.equal(
+    recordOptions.oidcAuthority.workflowSourceSha,
+    bootstrapSourceSha,
+  );
+  assert.equal(recordOptions.oidcAuthority.runId, "7001");
+  assert.deepEqual(result.authorityReference, bootstrapSeedAuthority);
+});
+
+test("bootstrap seed records, rereads, and reviews only its configured prior run and hashes", async () => {
+  const policies = markBootstrapSeedPending(configuredPolicies());
+  const store = memoryStore();
+  const artifact = await createBindingArtifact(store, policies);
+  markBootstrapSeedPending(policies);
+  const bindingBytes = store.objects.get(
+    artifact.bindingReference.sha256,
+  ).bytes;
+  const recorded = await recordFoundationBootstrapDeploymentSeed(
+    {
+      store,
+      namespace,
+      bindingBytes,
+      oidcReceipt,
+      oidcAuthority: {
+        approvalPolicy: policies.approvalPolicy,
+        workflowSourceSha: bootstrapSourceSha,
+        runId: "7001",
+        runAttempt: "1",
+      },
+      ...policies,
+    },
+    { readOidcAuthority: seedOidcReader },
+  );
+  Object.assign(policies.p0aPolicy, {
+    bindingStatus: "configured",
+    blockerCodes: [],
+  });
+  Object.assign(policies.p0aPolicy.bootstrapRecovery, {
+    bootstrapSourceSha,
+    rawDistManifestSha256: recorded.authority.rawDistManifest.sha256,
+    deploymentBindingSha256: recorded.bindingReference.sha256,
+    deploymentSeedAuthoritySha256: recorded.authorityReference.sha256,
+  });
+  const reread = await readStoredFoundationBootstrapDeploymentSeedAuthority(
+    {
+      store,
+      namespace,
+      reference: recorded.authorityReference,
+      ...policies,
+    },
+    { readOidcAuthority: seedOidcReader },
+  );
+  assert.ok(reread.bytes.equals(recorded.authorityBytes));
+  let reviewedOptions = null;
+  const reviewed = await reviewFoundationBootstrapDeploymentSeed(
+    {
+      store,
+      namespace,
+      githubToken: "github-token-for-test",
+      ...policies,
+    },
+    {
+      readStoredAuthority: (options) =>
+        readStoredFoundationBootstrapDeploymentSeedAuthority(options, {
+          readOidcAuthority: seedOidcReader,
+        }),
+      collectReviewedRun: async (options) => {
+        reviewedOptions = options;
+        return { receipt: { reviewed: true } };
+      },
+    },
+  );
+  assert.equal(reviewedOptions.expectedRunId, "7001");
+  assert.equal(reviewedOptions.expectedRunAttempt, "1");
+  assert.equal(reviewedOptions.expectedSourceSha, bootstrapSourceSha);
+  assert.equal(reviewed.seed.authority.runId, "7001");
+  assert.throws(
+    () =>
+      assertFoundationBootstrapDeploymentSeedAuthority({
+        ...recorded.authority,
+        workflowSourceSha: sourceSha,
+      }),
+    /identity differs/u,
+  );
+
+  const wrongSource = structuredClone(policies.p0aPolicy);
+  wrongSource.bootstrapRecovery.bootstrapSourceSha = sourceSha;
+  await assert.rejects(
+    readStoredFoundationBootstrapDeploymentSeedAuthority(
+      {
+        store,
+        namespace,
+        reference: recorded.authorityReference,
+        ...policies,
+        p0aPolicy: wrongSource,
+      },
+      { readOidcAuthority: seedOidcReader },
+    ),
+    /identity differs/u,
+  );
+  const tampered = store.objects.get(recorded.authorityReference.sha256);
+  tampered.bytes = Buffer.concat([tampered.bytes, Buffer.from(" ")]);
+  await assert.rejects(
+    readStoredFoundationBootstrapDeploymentSeedAuthority(
+      {
+        store,
+        namespace,
+        reference: recorded.authorityReference,
+        ...policies,
+      },
+      { readOidcAuthority: seedOidcReader },
+    ),
+    /immutable verification/u,
+  );
+});
+
+test("bootstrap seed rejects wrong source, run, and non-containment binding", async () => {
+  const policies = markBootstrapSeedPending(configuredPolicies());
+  const store = memoryStore();
+  const artifact = await createBindingArtifact(store, policies);
+  markBootstrapSeedPending(policies);
+  const record = (bindingBytes, oidcAuthority = {}) =>
+    recordFoundationBootstrapDeploymentSeed(
+      {
+        store,
+        namespace,
+        bindingBytes,
+        oidcReceipt,
+        oidcAuthority: {
+          approvalPolicy: policies.approvalPolicy,
+          workflowSourceSha: bootstrapSourceSha,
+          runId: "7001",
+          runAttempt: "1",
+          ...oidcAuthority,
+        },
+        ...policies,
+      },
+      { readOidcAuthority: seedOidcReader },
+    );
+  const wrongSourceBinding = {
+    ...artifact.binding,
+    sourceSha,
+    buildId: sourceSha,
+  };
+  await assert.rejects(
+    record(canonicalJsonBytes(wrongSourceBinding)),
+    /not store-bound|source/u,
+  );
+  await assert.rejects(
+    record(
+      canonicalJsonBytes({
+        ...artifact.binding,
+        releaseRole: "standard",
+      }),
+    ),
+    /role|containment/u,
+  );
+  await assert.rejects(
+    record(store.objects.get(artifact.bindingReference.sha256).bytes, {
+      runId: "0",
+    }),
+    /options differ/u,
+  );
+});
 
 test("collects and rederives build-less bootstrap recovery with an initialization-ready full binding", async () => {
   const fixture = await createFixture();
@@ -689,6 +1027,7 @@ test("collects and rederives build-less bootstrap recovery with an initializatio
     },
     {
       readOidcAuthority: fixture.dependencies.readOidcAuthority,
+      readSeedAuthority: fixture.dependencies.readSeedAuthority,
       readWorkflowRun: fixture.dependencies.readWorkflowRun,
       assertBootstrapSource: fixture.dependencies.assertBootstrapSource,
       now: () => NOW,
@@ -703,6 +1042,28 @@ test("collects and rederives build-less bootstrap recovery with an initializatio
 
 test("rejects caller authority and invalid cleanup or state projection semantics", async () => {
   const fixture = await createFixture();
+  const legacyObservation = structuredClone(fixture.observation);
+  legacyObservation.schemaVersion = 1;
+  legacyObservation.kind = "foundation-bootstrap-recovery-observation/v1";
+  assert.throws(
+    () => assertFoundationBootstrapRecoveryObservation(legacyObservation),
+    /observation is invalid/,
+  );
+  await assert.rejects(
+    collectAndStoreFoundationBootstrapRecovery(fixture.options, {
+      ...fixture.dependencies,
+      readSeedAuthority: async () => ({
+        authority: {
+          runId,
+          runAttempt,
+          workflowSourceSha: sourceSha,
+        },
+        binding: fixture.artifact.binding,
+        reference: bootstrapSeedAuthority,
+      }),
+    }),
+    /not a prior dual-source run/u,
+  );
   await assert.rejects(
     collectAndStoreFoundationBootstrapRecovery(
       { ...fixture.options, sourceSha: sourceSha },
@@ -767,6 +1128,7 @@ test("readback rejects stale evidence, current-policy drift, and immutable recei
       },
       {
         readOidcAuthority: fixture.dependencies.readOidcAuthority,
+        readSeedAuthority: fixture.dependencies.readSeedAuthority,
         readWorkflowRun: fixture.dependencies.readWorkflowRun,
         assertBootstrapSource: fixture.dependencies.assertBootstrapSource,
         now: () => NOW,
@@ -788,6 +1150,45 @@ test("readback rejects stale evidence, current-policy drift, and immutable recei
       .get(fixture.observation.rawAuthority.sha256)
       .bytes.toString("utf8"),
   );
+  const legacyRawReference = referenceFromReceipt(
+    await fixture.store.putEvidence({
+      bytes: canonicalJsonBytes({
+        ...raw,
+        schemaVersion: 1,
+        kind: "foundation-bootstrap-recovery-raw/v1",
+      }),
+      mediaType: FOUNDATION_BOOTSTRAP_RECOVERY_RAW_MEDIA_TYPE,
+    }),
+  );
+  await assert.rejects(
+    read({ reference: legacyRawReference }),
+    /raw identity differs/u,
+  );
+  const wrongMediaReference = referenceFromReceipt(
+    await fixture.store.putEvidence({
+      bytes: canonicalJsonBytes({
+        ...raw,
+        schemaVersion: 1,
+        kind: "foundation-bootstrap-recovery-raw/v1",
+      }),
+      mediaType:
+        "application/vnd.event-shopping-planner.foundation-bootstrap-recovery-raw+json;version=1",
+    }),
+  );
+  await assert.rejects(
+    read({ reference: wrongMediaReference }),
+    /media type differs/u,
+  );
+  const rawStored = fixture.store.objects.get(
+    fixture.observation.rawAuthority.sha256,
+  );
+  rawStored.bytes = canonicalJsonBytes({
+    ...raw,
+    schemaVersion: 1,
+    kind: "foundation-bootstrap-recovery-raw/v1",
+  });
+  await assert.rejects(read(), /immutable verification/u);
+  rawStored.bytes = canonicalJsonBytes(raw);
   const operation = fixture.store.objects.get(
     raw.operationReceipts.recoveryDeployment.sha256,
   );
@@ -811,7 +1212,6 @@ test("preview executor performs forward/recovery and always cleans a partial fai
     runId,
     runAttempt,
     p0aPolicy: fixture.policies.p0aPolicy,
-    artifactDrillPolicy: fixture.policies.artifactDrillPolicy,
     providerPolicy: fixture.policies.providerPolicy,
     toolchainPolicy,
     environment,
@@ -873,6 +1273,46 @@ test("preview executor performs forward/recovery and always cleans a partial fai
     "assign:failed",
     "cleanup:1",
   ]);
+
+  for (const failure of [
+    { label: "provider-resolution", deploymentId: null },
+    { label: "route-probe", deploymentId: "dpl_route_probe_failure" },
+  ]) {
+    const compensationCalls = [];
+    await assert.rejects(
+      executeFoundationBootstrapPreviewRecovery(common, {
+        commandRunner: async () => ({
+          status: 0,
+          stdout: `https://forward-${failure.label}.vercel.app/\n`,
+        }),
+        resolveDeployment: async () => {
+          compensationCalls.push(`failed:${failure.label}`);
+          if (failure.deploymentId === null) {
+            throw new Error(`fixture ${failure.label} failure`);
+          }
+          return { deployment: { id: failure.deploymentId } };
+        },
+        fetchImpl: async () =>
+          new Response("fixture route probe failure", { status: 500 }),
+        materializeArchive: async () => {},
+        cleanupDeployment: async ({ deployments }) => {
+          compensationCalls.push(`cleanup:${deployments.length}`);
+          assert.equal(deployments.length, 1);
+          assert.equal(deployments[0].deploymentId, failure.deploymentId);
+          assert.match(deployments[0].previewUrl, /\.vercel\.app\/$/u);
+          return { completedAt: new Date(NOW).toISOString() };
+        },
+        clock: () => NOW - 60_000,
+      }),
+      failure.deploymentId === null
+        ? new RegExp(`fixture ${failure.label} failure`, "u")
+        : /immutable route differs/u,
+    );
+    assert.deepEqual(compensationCalls, [
+      `failed:${failure.label}`,
+      "cleanup:1",
+    ]);
+  }
 });
 
 test("Vercel child environment excludes control-store, GitHub, OIDC, and database secrets", () => {
@@ -1061,7 +1501,9 @@ test("CLI only accepts namespace/output and fails unconfigured before protected 
           if (filePath.endsWith("release-state-store.json")) return baseStore;
           if (filePath.endsWith("approval-policy.json")) return baseApproval;
           if (filePath.endsWith("artifact-control-store-drill.json")) {
-            return baseArtifactDrill;
+            throw new Error(
+              "P0A recovery must not load the P0C artifact policy",
+            );
           }
           if (filePath.endsWith("foundation-baseline.json")) {
             return baseFoundation;

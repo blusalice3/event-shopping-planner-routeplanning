@@ -26,10 +26,7 @@ const ADMIN_EXECUTION = schema([
 ]);
 const PHASE_AUTHORITY_FIELDS_BY_GATE = Object.freeze({
   "P0-BASELINE": Object.freeze([
-    "phase_authority_external_bindings_run_id",
-    "phase_authority_external_bindings_run_attempt",
-    "phase_authority_bootstrap_recovery_run_id",
-    "phase_authority_bootstrap_recovery_run_attempt",
+    "phase_authority_foundation_baseline_closure_sha256",
   ]),
   "P0-ARTIFACT": Object.freeze([
     "phase_authority_artifact_drill_run_id",
@@ -253,7 +250,9 @@ export const RELEASE_DISPATCH_OPERATION_SCHEMAS = Object.freeze({
   "execute-reviewed-archive-recovery": SUBJECT,
   "collect-remote-db-observation": EMPTY,
   "collect-foundation-external-bindings": EMPTY,
+  "seed-foundation-bootstrap-deployment-binding": EMPTY,
   "collect-foundation-bootstrap-recovery": EMPTY,
+  "produce-foundation-baseline-closure": EMPTY,
   "collect-production-request-graph": EMPTY,
   "collect-csp-report-observation": EMPTY,
   "collect-deployed-csp-flow": EMPTY,

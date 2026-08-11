@@ -74,8 +74,11 @@ executor/reviewer、historical auditor/reviewer、publisherを同じaccountが�
 - P0C は production alias/namespace を拒否する non-promotable drill で、standard/containment の
   二重 build、preview deploy、route probe、3分離DB credential、CAS/idempotency、SQLSTATE
   `40001` / `42501`、cleanup を閉じる。
-- backup/restore は provider API の backup/PITR/restore status、nonproduction restore、DB TLS
-  connectivity、integrity、RPO/RTO、privilege/所有権、実 DML/DDL `42501` denial、cleanup を閉じる。
+- backup/restore はDashboardで作った別nonproduction projectを対象に、documented Management APIの
+  backup/PITR recovery pointとexact project GET/DELETEだけを使う。in-place restoreは呼ばず、同一
+  `organization_slug`/region、別ref、name/freshness、Management API `database.host`とdirect DB URLの一致、
+  port `5432` / database `postgres`、DB TLS、migration head、core SHA-256 content equality、
+  function-only privilege/無所有、実DML/DDL `42501` denial、404 cleanupを閉じる。
 - P1 managed deviceは、fresh 24時間観測と三役分のapproval（同一reviewerによる兼任可）を独立に完了した二つのdistinct-source prompt standardを
   same `P1-PWA` floorで受理した後、Windows 11 managed self-hosted runner上でprotected strict signed
   prompt-close receiptを先行runとして採取する。その後、二つのreviewed archive recoveryを挟み、current →

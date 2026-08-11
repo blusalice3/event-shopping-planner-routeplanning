@@ -149,7 +149,7 @@
 | `implementationTreeBaselineSha` | §3 の application/config tree を照合した commit。配布 identity には使わない |
 | `sourceSha`                     | 実際に build する clean checkout の完全 commit SHA                          |
 | `measurementSourceSha`          | baseline 数値を採取した `sourceSha`                                         |
-| `bootstrapBaselineSourceSha`    | P0 の一時 containment だけに許可する監査済み build source                   |
+| `bootstrapSourceSha`            | P0A policyがseed run後に固定する一時 containment専用の監査済みbuild source  |
 | `buildId`                       | Release A v1 では `sourceSha` と exact 一致する既存 field                   |
 | `variantId`                     | canonical dimension object の JCS bytes に対する完全 SHA-256                |
 | `releaseRole`                   | `standard` または `containment`                                             |
@@ -1465,7 +1465,7 @@ source change の production 配布、fresh v1、24 時間 observation、三役�
   を別 field で保存する。
 - provider production deployment/source/project/domain/environment を read-only で観測する。
   Git branch 名だけから production/rollback binding を推測しない。
-- 初回promotionのmandatory recovery package用に`bootstrapBaselineSourceSha`を一件選ぶ。
+- 初回promotionのmandatory recovery package用にP0A policyの`bootstrapSourceSha`を一件固定する。
   actual provider sourceまたはclean main-line commitからRelease A build、capability、
   smoke、raw dist hashを再現できることを必須にする。証跡がなければ`P0-BASELINE`/
   `P0-PROMOTE`を停止し、managed recovery先なしにaliasを変えない。
@@ -1479,7 +1479,7 @@ exit `P0-BASELINE`:
 - baseline file と evidence object の hash が clean checkout から再現する。
 - target file の UTF-8 BOMなし、LF、U+FFFDなし、代表日本語が確認される。
 - external project/deployment/DB binding の unknown が列挙され、promotion blocker になる。
-- verified `bootstrapBaselineSourceSha`、raw-dist manifest、recovery rehearsal evidenceが
+- verified P0A `bootstrapSourceSha`、raw-dist manifest、recovery rehearsal evidenceが
   固定される。
 
 ### Phase 0B: Toolchain、dependency、quality graph
@@ -1562,6 +1562,19 @@ exit `P0-ARTIFACT`:
 - CSP sanitized report table、bounded aggregate/retention functionを同じmigrationでdormant
   provisionし、Phase 2Bまではroute/credential edgeが0であることを検証する。
 - `config/db-compatibility-contract.json` と fingerprint を remote observation から確定する。
+- tracked migrationでpasswordlessな固定LOGIN observer/source-reader/restore-readerを作り、membershipと
+  object ownershipを与えない。observerはbounded application-data authorityとして、migration historyの
+  exact `SELECT`と定義hashを固定した3 read functionだけを許可する。stock Supabaseのmanaged platform schemaが
+  `PUBLIC`へ与えるrelation/column/sequence/routine権限は、application data proofの外側にあるexact
+  object/privilege matrixをconfigへ固定し、observerへのdirect ACL 0件、grant option 0件、unknown object 0件、
+  baseline drift 0件を検証する。Supabase管理ACLをmigrationで一括変更しない。backup readerはcore PostgreSQL
+  SHA-256 integrity functionだけを実行でき、各passwordは外部で別々に設定する。
+- backup rehearsalはDashboardの**Restore to a New Project**で作った別nonproduction projectを使う。
+  documented APIにclone provenanceがない限界を明示し、sourceへのin-place PITRを禁止する。exact ref、同一
+  `organization_slug`/region、name prefix、recovery point以後のfresh creation、Management API
+  `database.host`とdirect DB URL（port `5432` / database `postgres`）の一致、source/restoreのdistinct endpoint・
+  credential・cryptographic DB equalityを検証した後、明示cleanup承認に基づきrestore projectをDELETEして
+  immutable identityを再確認しながら404まで待つ。
 - final DB contractを明示したmandatory bootstrap packageを再生成し、immutable deploymentへ
   deploy/probeして`bootstrapRecovery` bindingを確定する。
 - migration後のremote fingerprintとunmanaged production observationを再検証し、final
@@ -1578,7 +1591,8 @@ exit `P0-DATA`:
 - generic environment/credential/read privilege が production から除去される。
 - `currentDbCompatibility`、final contract、使用可能な`bootstrapRecovery` bindingの
   DB URI/fingerprintがexact一致する。
-- retention dry-run、bounded delete、alert、backup/PITR owner が証跡化される。
+- retention dry-run、bounded delete、alert、backup/PITR owner、別project restore integrity、exact cleanup が
+  証跡化される。
 - existing v1 valid/invalid fixture と追加 bundle tamper fixture が通る。
 - production namespace が final DB contract と unmanaged production observation に結び付いて
   初期化され、accepted/active managed bindingはまだnull、`bootstrapRecovery`はnon-nullで
@@ -2009,7 +2023,7 @@ eligibilityを縮小できるが、active/accepted bindingをineligibleのまま
 
 P0 temporary bootstrap:
 
-- policyで明示した一回限りの`bootstrapBaselineSourceSha`とraw dist hashだけを使う。
+- P0A policyで明示した一回限りの`bootstrapSourceSha`とraw dist hashだけを使う。
 - alias変更、assignment evidence、reconcileは通常containmentと同じ手順を使う。
 - metrics-disabled、legacy public identity、Release A hard-offを持つ既存applicationとして
   activeにできる。raw distを変更しないため、read-only roleや独立containment entryを

@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "kind": "backup-restore-provider-contract/v1",
+  "schemaVersion": 2,
+  "kind": "backup-restore-provider-contract/v2",
   "bindingStatus": "unconfigured",
   "provider": null,
   "api": null,

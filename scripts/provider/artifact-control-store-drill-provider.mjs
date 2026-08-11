@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { lstat, mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -36,6 +36,7 @@ import {
   assertArtifactDrillRedeployReceipt,
   putCanonicalArtifactDrillReceipt,
 } from "./artifact-control-store-drill-receipts.mjs";
+import { assertPreparedArtifactDrillBootstrapRawDist } from "./artifact-control-store-drill-bootstrap.mjs";
 
 const MAXIMUM_PROVIDER_RESPONSE_BYTES = 2 * 1024 * 1024;
 const PURPOSE = "non-promotable-artifact-drill";
@@ -355,31 +356,8 @@ const defaultBuildPackage = async (options) => {
   return buildNonPromotableArtifactDrillPackage(options);
 };
 
-const defaultPrepareRawDist = async ({ environment }) => {
-  const configured = environment?.ARTIFACT_DRILL_BOOTSTRAP_RAW_DIST_ROOT;
-  if (typeof configured !== "string" || configured.length === 0) {
-    throw new Error(
-      "Artifact drill P0A bootstrap raw-dist root is unavailable",
-    );
-  }
-  const rawDistRoot = path.resolve(configured);
-  const metadata = await lstat(rawDistRoot);
-  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-    throw new Error("Artifact drill P0A raw-dist is not a regular directory");
-  }
-  const resolvedRealPath = path.resolve(await realpath(rawDistRoot));
-  if (
-    (process.platform === "win32"
-      ? resolvedRealPath.toLowerCase()
-      : resolvedRealPath) !==
-    (process.platform === "win32" ? rawDistRoot.toLowerCase() : rawDistRoot)
-  ) {
-    throw new Error(
-      "Artifact drill P0A raw-dist resolves through a path alias",
-    );
-  }
-  return rawDistRoot;
-};
+const defaultPrepareRawDist = ({ bootstrapMaterialization }) =>
+  assertPreparedArtifactDrillBootstrapRawDist(bootstrapMaterialization);
 
 const normalizedRoleBuilds = (roles) =>
   [...roles]
@@ -1041,6 +1019,7 @@ export const executeArtifactControlStoreLiveOperations = async (
     controlStoreExecutor,
     providerPolicy,
     artifactDrillPolicy,
+    bootstrapMaterialization,
     buildOptions,
     cspPolicy,
     toolchainPolicy,
@@ -1117,11 +1096,10 @@ export const executeArtifactControlStoreLiveOperations = async (
   };
   try {
     controlStorePromise = Promise.resolve().then(controlStoreExecutor);
-    const rawDistRoot =
-      buildOptions?.rawDistRoot ??
-      (await prepareRawDist({
-        environment,
-      }));
+    if (Object.hasOwn(buildOptions ?? {}, "rawDistRoot")) {
+      throw new Error("Artifact drill raw dist cannot be caller supplied");
+    }
+    const rawDistRoot = await prepareRawDist({ bootstrapMaterialization });
     const effectiveBuildOptions = { ...buildOptions, rawDistRoot };
     const attempts = [];
     for (const attempt of [1, 2]) {

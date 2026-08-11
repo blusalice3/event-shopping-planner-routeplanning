@@ -22,7 +22,7 @@ import { assertProductionProviderContext } from "../lib/artifact-builder-core.mj
 import { assertArtifactDrillBuildAuthority } from "../lib/artifact-drill-build-authority.mjs";
 
 export const ARTIFACT_CONTROL_STORE_DRILL_CLOSURE_MEDIA_TYPE =
-  "application/vnd.event-shopping-planner.artifact-provider-control-store-drill-closure+json;version=1";
+  "application/vnd.event-shopping-planner.artifact-provider-control-store-drill-closure+json;version=2";
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const RUN_ID = /^[1-9][0-9]*$/u;
@@ -156,8 +156,8 @@ export const buildArtifactControlStoreDrillClosure = ({
   }
   assertArtifactControlStoreDrillObservation(observation);
   const closure = {
-    schemaVersion: 1,
-    kind: "artifact-provider-control-store-drill-closure/v1",
+    schemaVersion: 2,
+    kind: "artifact-provider-control-store-drill-closure/v2",
     productionNamespace: observation.productionNamespace,
     drillNamespace: observation.drillNamespace,
     sourceSha: observation.sourceSha,
@@ -242,6 +242,7 @@ export const readArtifactControlStoreDrillClosure = async (
     dbContract = null,
     cspPolicy = null,
     foundationBaseline = null,
+    p0aPolicy = null,
   },
   {
     readOidcAuthority = readStoredProductionRequestGraphOidcAuthority,
@@ -281,8 +282,8 @@ export const readArtifactControlStoreDrillClosure = async (
       "schemaVersion",
       "sourceSha",
     ]) ||
-    closure.schemaVersion !== 1 ||
-    closure.kind !== "artifact-provider-control-store-drill-closure/v1" ||
+    closure.schemaVersion !== 2 ||
+    closure.kind !== "artifact-provider-control-store-drill-closure/v2" ||
     closure.sourceSha !== expectedSourceSha ||
     closure.runId !== expectedRunId ||
     closure.runAttempt !== expectedRunAttempt ||
@@ -423,15 +424,14 @@ export const readArtifactControlStoreDrillClosure = async (
     dbContract,
     cspPolicy,
     foundationBaseline,
+    p0aPolicy,
   ];
   if (currentInputs.every((value) => value !== null)) {
     const bootstrapVerification = buildReceipts[0].bootstrapVerification;
     const expectedBootstrapSource =
-      foundationBaseline.bootstrapBaselineSourceSha;
+      p0aPolicy.bootstrapRecovery.bootstrapSourceSha;
     const expectedRawDistManifest =
-      foundationBaseline.external?.bootstrapBaseline?.rawDistManifestSha256 ??
-      foundationBaseline.baselineEvidence?.artifactObservation
-        ?.rawDistManifestSha256;
+      p0aPolicy.bootstrapRecovery.rawDistManifestSha256;
     if (
       bootstrapVerification.sourceSha !== expectedBootstrapSource ||
       bootstrapVerification.rawDistManifestSha256 !== expectedRawDistManifest ||

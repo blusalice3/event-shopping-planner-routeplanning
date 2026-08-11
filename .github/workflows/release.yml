@@ -199,10 +199,7 @@ jobs:
             $env:REQUESTED_PHASE_AUTHORITY_BUNDLE_RUN_ATTEMPT,
             $env:REQUESTED_PHASE_AUTHORITY_BUNDLE_SHA256,
             $env:REQUESTED_PHASE_AUTHORITY_REVIEW_SHA256,
-            $env:REQUESTED_PHASE_AUTHORITY_EXTERNAL_BINDINGS_RUN_ID,
-            $env:REQUESTED_PHASE_AUTHORITY_EXTERNAL_BINDINGS_RUN_ATTEMPT,
-            $env:REQUESTED_PHASE_AUTHORITY_BOOTSTRAP_RECOVERY_RUN_ID,
-            $env:REQUESTED_PHASE_AUTHORITY_BOOTSTRAP_RECOVERY_RUN_ATTEMPT,
+            $env:REQUESTED_PHASE_AUTHORITY_FOUNDATION_BASELINE_CLOSURE_SHA256,
             $env:REQUESTED_PHASE_AUTHORITY_ARTIFACT_DRILL_RUN_ID,
             $env:REQUESTED_PHASE_AUTHORITY_ARTIFACT_DRILL_RUN_ATTEMPT,
             $env:REQUESTED_PHASE_AUTHORITY_QUALITY_RUN_ID,
@@ -375,7 +372,9 @@ jobs:
             'collect-startup-waf-observation' {}
             'collect-remote-db-observation' {}
             'collect-foundation-external-bindings' {}
+            'seed-foundation-bootstrap-deployment-binding' {}
             'collect-foundation-bootstrap-recovery' {}
+            'produce-foundation-baseline-closure' {}
             'collect-artifact-control-store-drill' {}
             'collect-backup-restore-rehearsal' {}
             'produce-state-initialization-subject' {
@@ -673,6 +672,12 @@ jobs:
               ) {
                 throw "phase authority production requires one exact target-gate collector set"
               }
+              if (
+                $env:REQUESTED_TARGET_GATE -eq 'P0-BASELINE' -and
+                $env:REQUESTED_PHASE_AUTHORITY_FOUNDATION_BASELINE_CLOSURE_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "P0-BASELINE requires the exact reviewed foundation baseline closure"
+              }
             }
             'publish-phase-exit-authority-bundle' {
               if (
@@ -682,10 +687,7 @@ jobs:
                 $env:REQUESTED_PHASE_AUTHORITY_BUNDLE_RUN_ATTEMPT -notmatch $runIdPattern -or
                 $env:REQUESTED_PHASE_AUTHORITY_BUNDLE_SHA256 -notmatch $sha256Pattern -or
                 $env:REQUESTED_PHASE_AUTHORITY_REVIEW_SHA256 -notmatch $sha256Pattern -or
-                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_EXTERNAL_BINDINGS_RUN_ID) -or
-                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_EXTERNAL_BINDINGS_RUN_ATTEMPT) -or
-                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_BOOTSTRAP_RECOVERY_RUN_ID) -or
-                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_BOOTSTRAP_RECOVERY_RUN_ATTEMPT) -or
+                -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_FOUNDATION_BASELINE_CLOSURE_SHA256) -or
                 -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_ARTIFACT_DRILL_RUN_ID) -or
                 -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_ARTIFACT_DRILL_RUN_ATTEMPT) -or
                 -not [string]::IsNullOrEmpty($env:REQUESTED_PHASE_AUTHORITY_QUALITY_RUN_ID) -or
@@ -907,7 +909,7 @@ jobs:
           run-id: ${{ env.REQUESTED_ARTIFACT_BUILD_REQUIREMENTS_RUN_ID }}
 
       - name: Collect authoritative provider configuration
-        if: inputs.operation == 'build-and-verify' || inputs.operation == 'build-policy-activation-qa' || inputs.operation == 'deploy-prebuilt' || inputs.operation == 'collect-prepromotion-evidence-source' || inputs.operation == 'produce-archive-recovery-subject' || inputs.operation == 'collect-remote-db-observation'
+        if: inputs.operation == 'build-and-verify' || inputs.operation == 'build-policy-activation-qa' || inputs.operation == 'deploy-prebuilt' || inputs.operation == 'collect-prepromotion-evidence-source' || inputs.operation == 'produce-archive-recovery-subject' || inputs.operation == 'collect-remote-db-observation' || inputs.operation == 'seed-foundation-bootstrap-deployment-binding'
         shell: pwsh
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -939,7 +941,8 @@ jobs:
             $env:REQUESTED_OPERATION -eq 'deploy-prebuilt' -or
             $env:REQUESTED_OPERATION -eq 'collect-prepromotion-evidence-source' -or
             $env:REQUESTED_OPERATION -eq 'produce-archive-recovery-subject' -or
-            $env:REQUESTED_OPERATION -eq 'collect-remote-db-observation'
+            $env:REQUESTED_OPERATION -eq 'collect-remote-db-observation' -or
+            $env:REQUESTED_OPERATION -eq 'seed-foundation-bootstrap-deployment-binding'
           ) {
             $observationPath = Join-Path $env:RUNNER_TEMP 'provider-observation.json'
             npm run verify:provider-policy -- --require-configured --observation $observationPath
@@ -947,6 +950,122 @@ jobs:
               throw "provider policy verification failed with exit code $LASTEXITCODE"
             }
           }
+
+      - name: Build current protected bootstrap and produce immutable package
+        if: inputs.operation == 'seed-foundation-bootstrap-deployment-binding'
+        shell: pwsh
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+        run: |
+          $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
+          $actualNode = node --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "bootstrap seed Node version check failed with exit code $LASTEXITCODE"
+          }
+          $actualNpm = npm --version
+          if ($LASTEXITCODE -ne 0) {
+            throw "bootstrap seed npm version check failed with exit code $LASTEXITCODE"
+          }
+          if ($actualNode -ne 'v24.19.0' -or $actualNpm -ne '11.19.0') {
+            throw "bootstrap seed runtime differs from the pinned current toolchain"
+          }
+          npm run build:release-a
+          if ($LASTEXITCODE -ne 0) {
+            throw "current protected bootstrap raw-dist build failed with exit code $LASTEXITCODE"
+          }
+          $rawDistRoot = [IO.Path]::GetFullPath((Join-Path $env:GITHUB_WORKSPACE 'dist'))
+          if (-not (Test-Path -LiteralPath $rawDistRoot -PathType Container)) {
+            throw "current protected bootstrap raw dist is absent"
+          }
+          $packagePath = Join-Path $runnerTemp 'foundation-bootstrap-seed-package'
+          $observationPath = Join-Path $runnerTemp 'provider-observation.json'
+          npm run artifact:build -- `
+            --bootstrap-seed `
+            --raw-dist $rawDistRoot `
+            --output $packagePath `
+            --provider-observation $observationPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "bootstrap immutable package build failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Seed protected bootstrap deployment binding authority
+        if: inputs.operation == 'seed-foundation-bootstrap-deployment-binding'
+        shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+        run: |
+          $packagePath = Join-Path $env:RUNNER_TEMP 'foundation-bootstrap-seed-package'
+          $observationPath = Join-Path $env:RUNNER_TEMP 'provider-observation.json'
+          $outputPath = Join-Path $env:RUNNER_TEMP 'foundation-bootstrap-seed-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $receiptPath = Join-Path $outputPath 'prebuilt-deployment-receipt.json'
+          $bindingPath = Join-Path $outputPath 'deployment-binding.json'
+          $authorityPath = Join-Path $outputPath 'bootstrap-deployment-seed-authority.json'
+          $idempotencyKey = "bootstrap-seed:$($env:GITHUB_RUN_ID):$env:REQUESTED_SOURCE_SHA"
+          npm run release:deploy-prebuilt -- `
+            --package $packagePath `
+            --role containment `
+            --provider-observation $observationPath `
+            --idempotency-key $idempotencyKey `
+            --receipt $receiptPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "bootstrap prebuilt deployment failed with exit code $LASTEXITCODE"
+          }
+          npm run release:produce-deployment-binding -- deployment-binding `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --package $packagePath `
+            --role containment `
+            --deployment-receipt $receiptPath `
+            --provider-observation $observationPath `
+            --output $bindingPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "bootstrap deployment binding production failed with exit code $LASTEXITCODE"
+          }
+          npm run provider:foundation-bootstrap-deployment:seed -- `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --binding $bindingPath `
+            --output $authorityPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "bootstrap deployment seed authority failed with exit code $LASTEXITCODE"
+          }
+          $bindingHash = (Get-FileHash -LiteralPath $bindingPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $authorityHash = (Get-FileHash -LiteralPath $authorityPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $authority = Get-Content -LiteralPath $authorityPath -Raw -Encoding utf8 | ConvertFrom-Json -Depth 100
+          $bootstrapSourceSha = [string]$authority.bootstrapSourceSha
+          $rawDistManifestHash = [string]$authority.rawDistManifest.sha256
+          if (
+            $authority.schemaVersion -ne 1 -or
+            $authority.kind -ne 'foundation-bootstrap-deployment-seed/v1' -or
+            $bootstrapSourceSha -ne $env:REQUESTED_SOURCE_SHA -or
+            [string]$authority.workflowSourceSha -ne $env:REQUESTED_SOURCE_SHA -or
+            [string]$authority.binding.sha256 -ne $bindingHash -or
+            $rawDistManifestHash -notmatch '^[0-9a-f]{64}$' -or
+            $authorityHash -notmatch '^[0-9a-f]{64}$'
+          ) {
+            throw 'bootstrap deployment seed summary binding differs'
+          }
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Bootstrap source SHA: ``$bootstrapSourceSha``" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Bootstrap raw-dist manifest SHA-256: ``$rawDistManifestHash``" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Bootstrap deployment binding SHA-256: ``$bindingHash``" -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Bootstrap deployment seed authority SHA-256: ``$authorityHash``" -Encoding utf8
+
+      - name: Upload protected bootstrap deployment seed authority
+        if: inputs.operation == 'seed-foundation-bootstrap-deployment-binding'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-bootstrap-deployment-seed-${{ inputs.source_sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/foundation-bootstrap-seed-output
+          if-no-files-found: error
+          compression-level: 9
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 90
 
       - name: Collect and store protected remote DB observation
         if: inputs.operation == 'collect-remote-db-observation'
@@ -1076,18 +1195,63 @@ jobs:
           include-hidden-files: false
           retention-days: 90
 
+      - name: Produce reviewed foundation baseline closure
+        if: inputs.operation == 'produce-foundation-baseline-closure'
+        shell: pwsh
+        env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+          DB_COMPATIBILITY_OBSERVER_DATABASE_URL: ${{ secrets.DB_COMPATIBILITY_OBSERVER_DATABASE_URL }}
+          DB_COMPATIBILITY_OBSERVER_CA_PEM: ${{ secrets.DB_COMPATIBILITY_OBSERVER_CA_PEM }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'foundation-baseline-closure.json'
+          npm run release:produce-baseline-closure -- `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --output $outputPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "foundation baseline closure production failed with exit code $LASTEXITCODE"
+          }
+          $result = Get-Content -LiteralPath $outputPath -Raw -Encoding utf8 | ConvertFrom-Json -Depth 100
+          if (
+            $result.schemaVersion -ne 2 -or
+            $result.resultKind -ne 'foundation-baseline-closure-stored/v2' -or
+            $result.namespace -ne $env:RELEASE_STATE_NAMESPACE -or
+            $result.sourceSha -ne $env:REQUESTED_SOURCE_SHA -or
+            $result.workflowRunId -ne $env:GITHUB_RUN_ID -or
+            $result.workflowRunAttempt -ne $env:GITHUB_RUN_ATTEMPT -or
+            $result.reviewedBootstrapRecovery.runId -eq $env:GITHUB_RUN_ID -or
+            $result.reference.sha256 -notmatch '^[0-9a-f]{64}$'
+          ) {
+            throw "foundation baseline closure result binding differs"
+          }
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Foundation baseline closure SHA-256: ``$($result.reference.sha256)``" -Encoding utf8
+
+      - name: Upload reviewed foundation baseline closure result
+        if: inputs.operation == 'produce-foundation-baseline-closure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-baseline-closure-${{ inputs.source_sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/foundation-baseline-closure.json
+          if-no-files-found: error
+          compression-level: 9
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 90
+
       - name: Collect non-promotable artifact/provider/control-store drill
         if: inputs.operation == 'collect-artifact-control-store-drill'
         shell: pwsh
         env:
+          RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+          RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           ARTIFACT_DRILL_DATABASE_CA_PEM: ${{ secrets.ARTIFACT_DRILL_DATABASE_CA_PEM }}
           ARTIFACT_DRILL_ADMIN_DATABASE_URL: ${{ secrets.ARTIFACT_DRILL_ADMIN_DATABASE_URL }}
           ARTIFACT_DRILL_EXECUTOR_DATABASE_URL: ${{ secrets.ARTIFACT_DRILL_EXECUTOR_DATABASE_URL }}
-          ARTIFACT_DRILL_PRODUCTION_READER_DATABASE_URL: ${{ secrets.ARTIFACT_DRILL_PRODUCTION_READER_DATABASE_URL }}
-          ARTIFACT_DRILL_BOOTSTRAP_RAW_DIST_ROOT: ${{ vars.ARTIFACT_DRILL_BOOTSTRAP_RAW_DIST_ROOT }}
+          ARTIFACT_DRILL_DENIED_READER_DATABASE_URL: ${{ secrets.ARTIFACT_DRILL_DENIED_READER_DATABASE_URL }}
         run: |
           $outputPath = Join-Path $env:RUNNER_TEMP 'artifact-provider-control-store-drill-closure.json'
           npm run provider:artifact-control-store:drill -- `
@@ -1162,10 +1326,7 @@ jobs:
           switch ($env:REQUESTED_TARGET_GATE) {
             'P0-BASELINE' {
               $phaseArguments += @(
-                '--external-bindings-run-id', $env:REQUESTED_PHASE_AUTHORITY_EXTERNAL_BINDINGS_RUN_ID,
-                '--external-bindings-run-attempt', $env:REQUESTED_PHASE_AUTHORITY_EXTERNAL_BINDINGS_RUN_ATTEMPT,
-                '--bootstrap-recovery-run-id', $env:REQUESTED_PHASE_AUTHORITY_BOOTSTRAP_RECOVERY_RUN_ID,
-                '--bootstrap-recovery-run-attempt', $env:REQUESTED_PHASE_AUTHORITY_BOOTSTRAP_RECOVERY_RUN_ATTEMPT
+                '--foundation-baseline-closure-sha256', $env:REQUESTED_PHASE_AUTHORITY_FOUNDATION_BASELINE_CLOSURE_SHA256
               )
             }
             'P0-ARTIFACT' {

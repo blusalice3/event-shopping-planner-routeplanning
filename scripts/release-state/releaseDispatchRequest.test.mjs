@@ -151,10 +151,7 @@ test("dispatch payload rejects missing, extra, malformed, duplicate-run, and non
 test("closes P0 baseline collectors and pre-initialization attestation predecessors by gate", () => {
   const baseline = {
     target_gate: "P0-BASELINE",
-    phase_authority_external_bindings_run_id: "7101",
-    phase_authority_external_bindings_run_attempt: "1",
-    phase_authority_bootstrap_recovery_run_id: "7102",
-    phase_authority_bootstrap_recovery_run_attempt: "2",
+    phase_authority_foundation_baseline_closure_sha256: "f".repeat(64),
   };
   assert.deepEqual(
     validateReleaseDispatchRequest({

@@ -14,7 +14,7 @@ import { createPostgresReleaseStateStore } from "../release-state/postgresStore.
 export { assertConfiguredArtifactControlStoreDrillPolicy };
 
 export const ARTIFACT_DRILL_CONTROL_STORE_RECEIPT_MEDIA_TYPE =
-  "application/vnd.event-shopping-planner.artifact-drill-control-store-receipt+json;version=1";
+  "application/vnd.event-shopping-planner.artifact-drill-control-store-receipt+json;version=2";
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -52,20 +52,24 @@ const requireEnvironment = (environment, name) => {
 
 const parseConnection = (value, label) => {
   let parsed;
+  let database;
+  let password;
+  let role;
   try {
     parsed = new URL(value);
+    database = decodeURIComponent(parsed.pathname.slice(1));
+    password = decodeURIComponent(parsed.password);
+    role = decodeURIComponent(parsed.username);
   } catch {
     throw new Error(`${label} URL is invalid`);
   }
   const queryNames = [...new Set(parsed.searchParams.keys())];
-  const database = decodeURIComponent(parsed.pathname.slice(1));
-  const role = decodeURIComponent(parsed.username);
   if (
     !["postgres:", "postgresql:"].includes(parsed.protocol) ||
     !HOST.test(parsed.hostname) ||
     !DATABASE.test(database) ||
     !ROLE.test(role) ||
-    parsed.password.length < 8 ||
+    password.length < 8 ||
     parsed.hash !== "" ||
     (parsed.port !== "" && parsed.port !== "5432") ||
     queryNames.length !== 1 ||
@@ -77,6 +81,7 @@ const parseConnection = (value, label) => {
   }
   return Object.freeze({
     database,
+    credentialSha256: sha256Bytes(Buffer.from(password, "utf8")),
     endpoint: `${parsed.hostname.toLowerCase()}:${parsed.port || "5432"}/${database}`,
     host: parsed.hostname.toLowerCase(),
     parsed,
@@ -107,14 +112,14 @@ export const resolveArtifactControlStoreDrillConnections = ({
     ),
     "Artifact drill executor",
   );
-  const productionReader = parseConnection(
+  const deniedReaderProjection = parseConnection(
     requireEnvironment(
       environment,
-      policy.productionReaderDatabaseUrlEnvironmentName,
+      policy.deniedReaderProjectionDatabaseUrlEnvironmentName,
     ),
-    "Artifact drill production reader",
+    "Artifact drill denied reader projection",
   );
-  for (const connection of [administrator, executor, productionReader]) {
+  for (const connection of [administrator, executor, deniedReaderProjection]) {
     if (
       !policy.allowedDrillHosts.includes(connection.host) ||
       !policy.allowedDrillDatabases.includes(connection.database)
@@ -126,21 +131,29 @@ export const resolveArtifactControlStoreDrillConnections = ({
   }
   if (
     administrator.endpoint !== executor.endpoint ||
-    administrator.endpoint !== productionReader.endpoint ||
+    administrator.endpoint !== deniedReaderProjection.endpoint ||
     !policy.allowedDrillAdministratorRoles.includes(administrator.role) ||
     !policy.allowedDrillExecutorRoles.includes(executor.role) ||
-    !policy.allowedProductionReaderRoles.includes(productionReader.role) ||
-    new Set([administrator.role, executor.role, productionReader.role]).size !==
-      3 ||
-    administrator.parsed.password === executor.parsed.password ||
-    administrator.parsed.password === productionReader.parsed.password ||
-    executor.parsed.password === productionReader.parsed.password
+    !policy.allowedDeniedReaderProjectionRoles.includes(
+      deniedReaderProjection.role,
+    ) ||
+    new Set([administrator.role, executor.role, deniedReaderProjection.role])
+      .size !== 3 ||
+    administrator.credentialSha256 === executor.credentialSha256 ||
+    administrator.credentialSha256 ===
+      deniedReaderProjection.credentialSha256 ||
+    executor.credentialSha256 === deniedReaderProjection.credentialSha256
   ) {
     throw new Error(
       "Artifact drill database roles or credentials are not separated",
     );
   }
-  return Object.freeze({ administrator, ca, executor, productionReader });
+  return Object.freeze({
+    administrator,
+    ca,
+    deniedReaderProjection,
+    executor,
+  });
 };
 
 const runtimeConnectionString = (connection) => {
@@ -225,7 +238,7 @@ export const inspectArtifactControlStoreUnprivilegedRole = async ({
   });
 };
 
-const inspectStorePrivileges = async ({ pool, label }) => {
+const inspectStorePrivileges = async ({ pool, label, expected }) => {
   const result = await pool.query({
     name: `artifact-drill-store-privileges-${label}-v1`,
     text: `
@@ -260,26 +273,27 @@ const inspectStorePrivileges = async ({ pool, label }) => {
     result.rowCount !== 1 ||
     row?.schema_usage !== true ||
     row.schema_create !== false ||
-    row.evidence_select !== true ||
+    row.evidence_select !== expected.selectEvidence ||
     row.evidence_insert !== false ||
     row.evidence_update !== false ||
     row.evidence_delete !== false ||
     row.evidence_truncate !== false ||
     row.evidence_references !== false ||
     row.evidence_trigger !== false ||
-    row.put_function_execute !== true ||
-    row.append_function_execute !== true
+    row.put_function_execute !== expected.putFunctionExecute ||
+    row.append_function_execute !== expected.appendFunctionExecute
   ) {
     throw new Error(
       `Artifact drill ${label} direct privilege boundary differs`,
     );
   }
   return Object.freeze({
+    appendFunctionExecute: row.append_function_execute,
     directEvidenceWrite: false,
-    functionExecute: true,
+    putFunctionExecute: row.put_function_execute,
     schemaCreate: false,
     schemaUsage: true,
-    selectEvidence: true,
+    selectEvidence: row.evidence_select,
   });
 };
 
@@ -361,6 +375,7 @@ const loadMigrations = async (storePolicy) => {
 
 const assertDedicatedDatabaseOutsideProduction = ({
   connections,
+  environment,
   storePolicy,
 }) => {
   if (
@@ -374,6 +389,18 @@ const assertDedicatedDatabaseOutsideProduction = ({
       "Artifact drill production Release State endpoint policy is not configured",
     );
   }
+  const production = parseConnection(
+    requireEnvironment(environment, storePolicy.databaseUrlEnvironmentName),
+    "Production Release State",
+  );
+  if (
+    !storePolicy.allowedHosts.includes(production.host) ||
+    !storePolicy.allowedDatabases.includes(production.database)
+  ) {
+    throw new Error(
+      "Production Release State credential is outside its configured endpoint",
+    );
+  }
   const drill = connections.executor;
   if (
     storePolicy.allowedHosts.includes(drill.host) &&
@@ -381,6 +408,21 @@ const assertDedicatedDatabaseOutsideProduction = ({
   ) {
     throw new Error(
       "Artifact drill dedicated database overlaps a production Release State endpoint",
+    );
+  }
+  if (
+    [
+      connections.administrator,
+      connections.executor,
+      connections.deniedReaderProjection,
+    ].some(
+      (connection) =>
+        connection.role === production.role ||
+        connection.credentialSha256 === production.credentialSha256,
+    )
+  ) {
+    throw new Error(
+      "Artifact drill and production Release State credentials are not separated",
     );
   }
 };
@@ -481,7 +523,7 @@ const cleanupDisposableSchema = async ({
 const provisionSchema = async ({
   administratorPool,
   executor,
-  reader,
+  deniedReaderProjection,
   namespace,
   migrations,
 }) => {
@@ -497,21 +539,25 @@ const provisionSchema = async ({
     `,
     values: [namespace, executor.role],
   });
-  for (const role of [executor.role, reader.role]) {
-    const identifier = quoteIdentifier(role);
+  const executorIdentifier = quoteIdentifier(executor.role);
+  const deniedReaderIdentifier = quoteIdentifier(deniedReaderProjection.role);
+  for (const identifier of [executorIdentifier, deniedReaderIdentifier]) {
     await administratorPool.query(
       `grant usage on schema ${SCHEMA} to ${identifier}`,
     );
-    await administratorPool.query(
-      `grant select on all tables in schema ${SCHEMA} to ${identifier}`,
-    );
-    await administratorPool.query(
-      `grant execute on function foundation_release.put_evidence_if_absent(text,text,text,bytea) to ${identifier}`,
-    );
-    await administratorPool.query(
-      `grant execute on function foundation_release.compare_and_append(text,bigint,text,uuid,bytea) to ${identifier}`,
-    );
   }
+  await administratorPool.query(
+    `grant select on all tables in schema ${SCHEMA} to ${executorIdentifier}`,
+  );
+  await administratorPool.query(
+    `grant execute on function foundation_release.put_evidence_if_absent(text,text,text,bytea) to ${executorIdentifier}`,
+  );
+  await administratorPool.query(
+    `grant execute on function foundation_release.compare_and_append(text,bigint,text,uuid,bytea) to ${executorIdentifier}`,
+  );
+  await administratorPool.query(
+    `grant execute on function foundation_release.put_evidence_if_absent(text,text,text,bytea) to ${deniedReaderIdentifier}`,
+  );
 };
 
 const disposableStorePolicy = ({ policy, connection }) => ({
@@ -538,13 +584,17 @@ export const openDisposableArtifactControlStoreDrill = async (
     policy,
     environment,
   });
-  assertDedicatedDatabaseOutsideProduction({ connections, storePolicy });
+  assertDedicatedDatabaseOutsideProduction({
+    connections,
+    environment,
+    storePolicy,
+  });
   const migrations = await loadMigrations(storePolicy);
   const poolResults = await Promise.allSettled(
     [
       connections.administrator,
       connections.executor,
-      connections.productionReader,
+      connections.deniedReaderProjection,
     ].map((connection) =>
       poolFactory({ connection, ca: connections.ca, policy }),
     ),
@@ -562,8 +612,11 @@ export const openDisposableArtifactControlStoreDrill = async (
       "Artifact drill database pools failed to open or close",
     );
   }
-  const [administratorPool, executorInspectionPool, productionReaderPool] =
-    pools;
+  const [
+    administratorPool,
+    executorInspectionPool,
+    deniedReaderProjectionPool,
+  ] = pools;
   let drillStore = null;
   let cleaned = false;
   let provisionStarted = false;
@@ -575,9 +628,9 @@ export const openDisposableArtifactControlStoreDrill = async (
         label: "administrator",
       }),
       assertSessionIdentity({
-        pool: productionReaderPool,
-        expected: connections.productionReader,
-        label: "production-reader",
+        pool: deniedReaderProjectionPool,
+        expected: connections.deniedReaderProjection,
+        label: "denied-reader-projection",
       }),
       assertSessionIdentity({
         pool: executorInspectionPool,
@@ -585,7 +638,7 @@ export const openDisposableArtifactControlStoreDrill = async (
         label: "executor",
       }),
     ]);
-    const [administratorRole, executorRole, productionReaderRole] =
+    const [administratorRole, executorRole, deniedReaderProjectionRole] =
       await Promise.all([
         inspectArtifactControlStoreUnprivilegedRole({
           pool: administratorPool,
@@ -598,30 +651,41 @@ export const openDisposableArtifactControlStoreDrill = async (
           label: "executor",
         }),
         inspectArtifactControlStoreUnprivilegedRole({
-          pool: productionReaderPool,
-          expected: connections.productionReader,
-          label: "production-reader",
+          pool: deniedReaderProjectionPool,
+          expected: connections.deniedReaderProjection,
+          label: "denied-reader-projection",
         }),
       ]);
     provisionStarted = true;
     await provisionSchema({
       administratorPool,
       executor: connections.executor,
-      reader: connections.productionReader,
+      deniedReaderProjection: connections.deniedReaderProjection,
       namespace,
       migrations,
     });
-    const [executorPrivileges, productionReaderPrivileges] = await Promise.all([
-      inspectStorePrivileges({
-        pool: executorInspectionPool,
-        label: "executor",
-      }),
-      inspectStorePrivileges({
-        pool: productionReaderPool,
-        label: "production-reader",
-      }),
-    ]);
-    const [executorDirectDenials, productionReaderDirectDenials] =
+    const [executorPrivileges, deniedReaderProjectionPrivileges] =
+      await Promise.all([
+        inspectStorePrivileges({
+          pool: executorInspectionPool,
+          label: "executor",
+          expected: {
+            appendFunctionExecute: true,
+            putFunctionExecute: true,
+            selectEvidence: true,
+          },
+        }),
+        inspectStorePrivileges({
+          pool: deniedReaderProjectionPool,
+          label: "denied-reader-projection",
+          expected: {
+            appendFunctionExecute: false,
+            putFunctionExecute: true,
+            selectEvidence: false,
+          },
+        }),
+      ]);
+    const [executorDirectDenials, deniedReaderProjectionDirectDenials] =
       await Promise.all([
         observeDirectWriteDenial({
           pool: executorInspectionPool,
@@ -630,10 +694,10 @@ export const openDisposableArtifactControlStoreDrill = async (
           roleSha256: executorRole.roleSha256,
         }),
         observeDirectWriteDenial({
-          pool: productionReaderPool,
+          pool: deniedReaderProjectionPool,
           namespace,
-          label: "production-reader",
-          roleSha256: productionReaderRole.roleSha256,
+          label: "denied-reader-projection",
+          roleSha256: deniedReaderProjectionRole.roleSha256,
         }),
       ]);
     drillStore = await storeFactory({
@@ -647,7 +711,7 @@ export const openDisposableArtifactControlStoreDrill = async (
     });
     return {
       drillStore,
-      productionReaderPool,
+      deniedReaderProjectionPool,
       identity: Object.freeze({
         databaseEndpointSha256: sha256Json({
           endpoint: connections.executor.endpoint,
@@ -658,8 +722,8 @@ export const openDisposableArtifactControlStoreDrill = async (
         executorRoleSha256: sha256Bytes(
           Buffer.from(connections.executor.role, "utf8"),
         ),
-        productionReaderRoleSha256: sha256Bytes(
-          Buffer.from(connections.productionReader.role, "utf8"),
+        deniedReaderProjectionRoleSha256: sha256Bytes(
+          Buffer.from(connections.deniedReaderProjection.role, "utf8"),
         ),
         roleAuthority: {
           administrator: administratorRole,
@@ -668,10 +732,10 @@ export const openDisposableArtifactControlStoreDrill = async (
             directDenials: executorDirectDenials,
             privileges: executorPrivileges,
           },
-          productionReader: {
-            ...productionReaderRole,
-            directDenials: productionReaderDirectDenials,
-            privileges: productionReaderPrivileges,
+          deniedReaderProjection: {
+            ...deniedReaderProjectionRole,
+            directDenials: deniedReaderProjectionDirectDenials,
+            privileges: deniedReaderProjectionPrivileges,
           },
         },
       }),
@@ -793,17 +857,16 @@ const assertRoleProjection = (role, label, { direct = false } = {}) => {
   if (!direct) return role;
   if (
     !exactKeys(role.privileges, [
+      "appendFunctionExecute",
       "directEvidenceWrite",
-      "functionExecute",
+      "putFunctionExecute",
       "schemaCreate",
       "schemaUsage",
       "selectEvidence",
     ]) ||
     role.privileges.directEvidenceWrite !== false ||
-    role.privileges.functionExecute !== true ||
     role.privileges.schemaCreate !== false ||
     role.privileges.schemaUsage !== true ||
-    role.privileges.selectEvidence !== true ||
     !Array.isArray(role.directDenials) ||
     role.directDenials.length !== 2
   ) {
@@ -839,20 +902,37 @@ const assertRoleProjection = (role, label, { direct = false } = {}) => {
 
 export const assertArtifactControlStoreRoleAuthority = (authority) => {
   if (
-    !exactKeys(authority, ["administrator", "executor", "productionReader"])
+    !exactKeys(authority, [
+      "administrator",
+      "deniedReaderProjection",
+      "executor",
+    ])
   ) {
     throw new Error("Artifact drill role authority fields are invalid");
   }
   assertRoleProjection(authority.administrator, "administrator");
   assertRoleProjection(authority.executor, "executor", { direct: true });
-  assertRoleProjection(authority.productionReader, "production-reader", {
-    direct: true,
-  });
+  assertRoleProjection(
+    authority.deniedReaderProjection,
+    "denied-reader-projection",
+    { direct: true },
+  );
+  if (
+    authority.executor.privileges.appendFunctionExecute !== true ||
+    authority.executor.privileges.putFunctionExecute !== true ||
+    authority.executor.privileges.selectEvidence !== true ||
+    authority.deniedReaderProjection.privileges.appendFunctionExecute !==
+      false ||
+    authority.deniedReaderProjection.privileges.putFunctionExecute !== true ||
+    authority.deniedReaderProjection.privileges.selectEvidence !== false
+  ) {
+    throw new Error("Artifact drill role privilege projections differ");
+  }
   if (
     new Set([
       authority.administrator.roleSha256,
       authority.executor.roleSha256,
-      authority.productionReader.roleSha256,
+      authority.deniedReaderProjection.roleSha256,
     ]).size !== 3
   ) {
     throw new Error("Artifact drill role authority identities are ambiguous");
@@ -879,7 +959,7 @@ const putCanonicalReceipt = async (store, value, mediaType) => {
 
 export const executeArtifactControlStorePostgresDrill = async ({
   drillStore,
-  productionReaderPool,
+  deniedReaderProjectionPool,
   namespace,
   identity,
 }) => {
@@ -890,14 +970,14 @@ export const executeArtifactControlStorePostgresDrill = async ({
       "administratorRoleSha256",
       "databaseEndpointSha256",
       "executorRoleSha256",
-      "productionReaderRoleSha256",
+      "deniedReaderProjectionRoleSha256",
       "roleAuthority",
     ]) ||
     [
       identity.administratorRoleSha256,
       identity.databaseEndpointSha256,
       identity.executorRoleSha256,
-      identity.productionReaderRoleSha256,
+      identity.deniedReaderProjectionRoleSha256,
     ].some((value) => !SHA256.test(value))
   ) {
     throw new Error("Artifact drill PostgreSQL execution authority is invalid");
@@ -908,8 +988,8 @@ export const executeArtifactControlStorePostgresDrill = async ({
       identity.roleAuthority.administrator.roleSha256 ||
     identity.executorRoleSha256 !==
       identity.roleAuthority.executor.roleSha256 ||
-    identity.productionReaderRoleSha256 !==
-      identity.roleAuthority.productionReader.roleSha256
+    identity.deniedReaderProjectionRoleSha256 !==
+      identity.roleAuthority.deniedReaderProjection.roleSha256
   ) {
     throw new Error("Artifact drill PostgreSQL role authority hashes differ");
   }
@@ -1003,10 +1083,33 @@ export const executeArtifactControlStorePostgresDrill = async ({
     throw new Error("Artifact drill CAS rejection SQLSTATE differs");
   }
 
-  let denialError;
+  let readerVisibilityError;
   try {
-    await productionReaderPool.query({
-      name: "artifact-drill-production-reader-write-denial-v1",
+    await deniedReaderProjectionPool.query({
+      name: "artifact-drill-denied-reader-projection-read-denial-v2",
+      text: `
+        select object_bytes
+        from foundation_release.release_evidence_objects
+        where namespace = $1 and sha256 = $2
+      `,
+      values: [namespace, objectHash],
+    });
+  } catch (error) {
+    readerVisibilityError = error;
+  }
+  const readerVisibilityDenial = sqlErrorReceipt(
+    readerVisibilityError,
+    "denied-reader-projection-select-evidence",
+    identity.deniedReaderProjectionRoleSha256,
+  );
+  if (readerVisibilityDenial.sqlstate !== "42501") {
+    throw new Error("Artifact drill denied reader visibility SQLSTATE differs");
+  }
+
+  let readerWriteError;
+  try {
+    await deniedReaderProjectionPool.query({
+      name: "artifact-drill-denied-reader-projection-write-denial-v2",
       text: `
         select *
         from foundation_release.put_evidence_if_absent($1, $2, $3, $4)
@@ -1014,25 +1117,25 @@ export const executeArtifactControlStorePostgresDrill = async ({
       values: [namespace, objectHash, mediaType, objectBytes],
     });
   } catch (error) {
-    denialError = error;
+    readerWriteError = error;
   }
-  const credentialDenial = sqlErrorReceipt(
-    denialError,
-    "production-reader-put-evidence",
-    identity.productionReaderRoleSha256,
+  const readerWriteDenial = sqlErrorReceipt(
+    readerWriteError,
+    "denied-reader-projection-put-evidence",
+    identity.deniedReaderProjectionRoleSha256,
   );
-  if (credentialDenial.sqlstate !== "42501") {
-    throw new Error("Artifact drill production-reader denial SQLSTATE differs");
+  if (readerWriteDenial.sqlstate !== "42501") {
+    throw new Error("Artifact drill denied reader write SQLSTATE differs");
   }
 
   const receiptValue = {
     schemaVersion: 1,
-    kind: "artifact-drill-control-store-receipt/v1",
+    kind: "artifact-drill-control-store-receipt/v2",
     namespace,
     databaseEndpointSha256: identity.databaseEndpointSha256,
     administratorRoleSha256: identity.administratorRoleSha256,
     executorRoleSha256: identity.executorRoleSha256,
-    productionReaderRoleSha256: identity.productionReaderRoleSha256,
+    deniedReaderProjectionRoleSha256: identity.deniedReaderProjectionRoleSha256,
     roleAuthority: identity.roleAuthority,
     immutableEvidence: {
       committedAt: firstPut.committedAt,
@@ -1046,7 +1149,8 @@ export const executeArtifactControlStorePostgresDrill = async ({
       evidenceReplayObserved: true,
     },
     casConflict,
-    credentialDenial,
+    readerVisibilityDenial,
+    readerWriteDenial,
   };
   const stored = await putCanonicalReceipt(
     drillStore,
@@ -1055,7 +1159,8 @@ export const executeArtifactControlStorePostgresDrill = async ({
   );
   return Object.freeze({
     casConflictDenied: casConflict.sqlstate === "40001",
-    credentialDenialVerified: credentialDenial.sqlstate === "42501",
+    readerVisibilityDenied: readerVisibilityDenial.sqlstate === "42501",
+    readerWriteDenied: readerWriteDenial.sqlstate === "42501",
     idempotencyVerified: true,
     putReadbackVerified: true,
     receiptSha256: stored.reference.sha256,
@@ -1067,30 +1172,31 @@ export const assertArtifactControlStorePostgresReceipt = (receipt) => {
     !exactKeys(receipt, [
       "administratorRoleSha256",
       "casConflict",
-      "credentialDenial",
       "databaseEndpointSha256",
+      "deniedReaderProjectionRoleSha256",
       "executorRoleSha256",
       "idempotency",
       "immutableEvidence",
       "kind",
       "namespace",
-      "productionReaderRoleSha256",
+      "readerVisibilityDenial",
+      "readerWriteDenial",
       "roleAuthority",
       "schemaVersion",
     ]) ||
     receipt.schemaVersion !== 1 ||
-    receipt.kind !== "artifact-drill-control-store-receipt/v1" ||
+    receipt.kind !== "artifact-drill-control-store-receipt/v2" ||
     !NAMESPACE.test(receipt.namespace ?? "") ||
     [
       receipt.administratorRoleSha256,
       receipt.databaseEndpointSha256,
       receipt.executorRoleSha256,
-      receipt.productionReaderRoleSha256,
+      receipt.deniedReaderProjectionRoleSha256,
     ].some((value) => !SHA256.test(value ?? "")) ||
     new Set([
       receipt.administratorRoleSha256,
       receipt.executorRoleSha256,
-      receipt.productionReaderRoleSha256,
+      receipt.deniedReaderProjectionRoleSha256,
     ]).size !== 3 ||
     !exactKeys(receipt.casConflict, [
       "kind",
@@ -1103,18 +1209,33 @@ export const assertArtifactControlStorePostgresReceipt = (receipt) => {
     receipt.casConflict.operation !== "compare-and-append-stale-head" ||
     receipt.casConflict.roleSha256 !== receipt.executorRoleSha256 ||
     receipt.casConflict.sqlstate !== "40001" ||
-    !exactKeys(receipt.credentialDenial, [
+    !exactKeys(receipt.readerVisibilityDenial, [
       "kind",
       "operation",
       "roleSha256",
       "schemaVersion",
       "sqlstate",
     ]) ||
-    receipt.credentialDenial.kind !== "artifact-drill-postgres-error/v1" ||
-    receipt.credentialDenial.operation !== "production-reader-put-evidence" ||
-    receipt.credentialDenial.roleSha256 !==
-      receipt.productionReaderRoleSha256 ||
-    receipt.credentialDenial.sqlstate !== "42501" ||
+    receipt.readerVisibilityDenial.kind !==
+      "artifact-drill-postgres-error/v1" ||
+    receipt.readerVisibilityDenial.operation !==
+      "denied-reader-projection-select-evidence" ||
+    receipt.readerVisibilityDenial.roleSha256 !==
+      receipt.deniedReaderProjectionRoleSha256 ||
+    receipt.readerVisibilityDenial.sqlstate !== "42501" ||
+    !exactKeys(receipt.readerWriteDenial, [
+      "kind",
+      "operation",
+      "roleSha256",
+      "schemaVersion",
+      "sqlstate",
+    ]) ||
+    receipt.readerWriteDenial.kind !== "artifact-drill-postgres-error/v1" ||
+    receipt.readerWriteDenial.operation !==
+      "denied-reader-projection-put-evidence" ||
+    receipt.readerWriteDenial.roleSha256 !==
+      receipt.deniedReaderProjectionRoleSha256 ||
+    receipt.readerWriteDenial.sqlstate !== "42501" ||
     !exactKeys(receipt.immutableEvidence, [
       "committedAt",
       "mediaType",
@@ -1144,8 +1265,8 @@ export const assertArtifactControlStorePostgresReceipt = (receipt) => {
     receipt.administratorRoleSha256 !==
       receipt.roleAuthority.administrator.roleSha256 ||
     receipt.executorRoleSha256 !== receipt.roleAuthority.executor.roleSha256 ||
-    receipt.productionReaderRoleSha256 !==
-      receipt.roleAuthority.productionReader.roleSha256
+    receipt.deniedReaderProjectionRoleSha256 !==
+      receipt.roleAuthority.deniedReaderProjection.roleSha256
   ) {
     throw new Error("Artifact drill PostgreSQL receipt role hashes differ");
   }

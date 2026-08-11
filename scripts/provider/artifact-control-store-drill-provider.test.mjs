@@ -593,7 +593,8 @@ test("live executor aggregates its primary failure with provider cleanup failure
         artifactDrillPolicy: {
           providerPreviewAliasSuffix: "drill.example.net",
         },
-        buildOptions: { rawDistRoot: "fixture-raw-dist" },
+        bootstrapMaterialization: { fixture: true },
+        buildOptions: {},
         cspPolicy: {},
         toolchainPolicy: { runtime: { node: "24.19.0", npm: "11.19.0" } },
         environment: {
@@ -606,6 +607,7 @@ test("live executor aggregates its primary failure with provider cleanup failure
         buildPackage: async () => {
           throw new Error("build failed after control-store start");
         },
+        prepareRawDist: async () => "fixture-raw-dist",
         fetchImpl: async () => {
           throw new Error("provider network must not start");
         },

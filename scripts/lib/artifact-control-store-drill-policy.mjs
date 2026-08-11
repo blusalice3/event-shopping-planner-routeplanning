@@ -10,7 +10,7 @@ export const ARTIFACT_DRILL_BINDING_BLOCKERS = Object.freeze([
   "artifact-drill-database-name-unconfigured",
   "artifact-drill-administrator-role-unconfigured",
   "artifact-drill-executor-role-unconfigured",
-  "artifact-drill-production-reader-role-unconfigured",
+  "artifact-drill-denied-reader-projection-role-unconfigured",
   "artifact-drill-ca-unobserved",
   "artifact-drill-preview-alias-suffix-unconfigured",
 ]);
@@ -34,7 +34,7 @@ const ROOT_KEYS = Object.freeze([
   "allowedDrillDatabases",
   "allowedDrillExecutorRoles",
   "allowedDrillHosts",
-  "allowedProductionReaderRoles",
+  "allowedDeniedReaderProjectionRoles",
   "bindingStatus",
   "blockerCodes",
   "connectTimeoutMilliseconds",
@@ -43,7 +43,7 @@ const ROOT_KEYS = Object.freeze([
   "drillAdministratorDatabaseUrlEnvironmentName",
   "drillExecutorDatabaseUrlEnvironmentName",
   "implementation",
-  "productionReaderDatabaseUrlEnvironmentName",
+  "deniedReaderProjectionDatabaseUrlEnvironmentName",
   "providerPreviewAliasSuffix",
   "schemaResetMode",
   "schemaVersion",
@@ -107,8 +107,8 @@ const assertPolicyStructure = (policy) => {
       "ARTIFACT_DRILL_ADMIN_DATABASE_URL" ||
     policy.drillExecutorDatabaseUrlEnvironmentName !==
       "ARTIFACT_DRILL_EXECUTOR_DATABASE_URL" ||
-    policy.productionReaderDatabaseUrlEnvironmentName !==
-      "ARTIFACT_DRILL_PRODUCTION_READER_DATABASE_URL" ||
+    policy.deniedReaderProjectionDatabaseUrlEnvironmentName !==
+      "ARTIFACT_DRILL_DENIED_READER_DATABASE_URL" ||
     policy.schemaResetMode !== "dedicated-database-foundation-release-schema" ||
     policy.connectTimeoutMilliseconds !== 5000 ||
     policy.statementTimeoutMilliseconds !== 15000
@@ -138,14 +138,14 @@ const assertPolicyStructure = (policy) => {
     label: "Artifact drill executor roles",
   });
   assertClosedStringArray({
-    value: policy.allowedProductionReaderRoles,
+    value: policy.allowedDeniedReaderProjectionRoles,
     pattern: ROLE,
-    label: "Artifact drill production reader roles",
+    label: "Artifact drill denied reader projection roles",
   });
   const roleBindings = [
     ...policy.allowedDrillAdministratorRoles,
     ...policy.allowedDrillExecutorRoles,
-    ...policy.allowedProductionReaderRoles,
+    ...policy.allowedDeniedReaderProjectionRoles,
   ];
   if (new Set(roleBindings).size !== roleBindings.length) {
     throw new Error(
@@ -228,7 +228,7 @@ export const deriveArtifactControlStoreDrillPolicyState = (policy) => {
   if (policy.allowedDrillExecutorRoles.length === 0) {
     blockers.push(ARTIFACT_DRILL_BINDING_BLOCKERS[3]);
   }
-  if (policy.allowedProductionReaderRoles.length === 0) {
+  if (policy.allowedDeniedReaderProjectionRoles.length === 0) {
     blockers.push(ARTIFACT_DRILL_BINDING_BLOCKERS[4]);
   }
   if (policy.databaseCaSha256 === null) {

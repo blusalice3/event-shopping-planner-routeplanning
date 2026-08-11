@@ -1,15 +1,11 @@
 #!/usr/bin/env node
 
 import { execFileSync } from "node:child_process";
-import { lstat, realpath, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import {
-  canonicalJsonBytes,
-  readJsonStrict,
-  sha256Bytes,
-} from "../lib/canonical-json.mjs";
+
 import {
   FOUNDATION_BASELINE_CLOSURE_MEDIA_TYPE,
   FOUNDATION_RAW_DIST_MANIFEST_MEDIA_TYPE,
@@ -22,9 +18,22 @@ import {
   resolveHistoricalFoundationBaseline,
 } from "../lib/foundation-baseline-closure-authority.mjs";
 import {
-  describeExactFile,
-  readExactRegularFile,
-} from "../lib/exact-file-read.mjs";
+  canonicalJsonBytes,
+  parseJsonStrict,
+  sha256Bytes,
+} from "../lib/canonical-json.mjs";
+import { writeExactCreateOnlyFile } from "../lib/exact-file-write.mjs";
+import {
+  FOUNDATION_BOOTSTRAP_RECOVERY_OBSERVATION_MEDIA_TYPE,
+  assertFoundationBootstrapRecoveryObservation,
+  readStoredFoundationBootstrapRecoveryAuthority,
+} from "../provider/foundation-bootstrap-recovery.mjs";
+import {
+  readFoundationBootstrapSeedProviderObservationBinding,
+  readStoredFoundationBootstrapDeploymentSeedAuthority,
+} from "../provider/foundation-bootstrap-deployment-seed.mjs";
+import { assertConfiguredFoundationP0aAuthorities } from "../provider/foundation-p0a-authorities-policy.mjs";
+import { putRemoteDbObservationOidcAuthority } from "../db/remote-db-observation-authority.mjs";
 import {
   GITHUB_OIDC_RECEIPT_MEDIA_TYPE,
   assertVerifiedGitHubOidcResult,
@@ -33,117 +42,241 @@ import {
 } from "./githubOidc.mjs";
 import { createPostgresReleaseStateStore } from "./postgresStore.mjs";
 import { assertProtectedWorkflowEnvironment } from "./protected-release.mjs";
-import { putRemoteDbObservationOidcAuthority } from "../db/remote-db-observation-authority.mjs";
+import {
+  REVIEWED_WORKFLOW_ARTIFACT_RECEIPT_MEDIA_TYPE,
+  collectReviewedWorkflowArtifactAuthority,
+} from "./reviewedWorkflowArtifactAuthority.mjs";
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
   "..",
 );
-const FLAGS = Object.freeze([
-  "--bootstrap-source-sha",
-  "--namespace",
-  "--output",
-  "--provider-binding-sha256",
-  "--provider-observation-sha256",
-  "--provider-policy-sha256",
-  "--raw-dist-manifest",
-  "--raw-dist-manifest-sha256",
-  "--recovery-rehearsal-sha256",
-  "--run-id",
-  "--source-sha",
-]);
-const SOURCE_SHA_PATTERN = /^[0-9a-f]{40}$/u;
-const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
-const RUN_ID_PATTERN = /^[1-9][0-9]{0,19}$/u;
-const NAMESPACE_PATTERN = /^[a-z0-9][a-z0-9-]{2,62}$/u;
-const MAXIMUM_RAW_DIST_MANIFEST_BYTES = 16 * 1024 * 1024;
 const OPERATION = "produce-foundation-baseline-closure";
+const WORKFLOW_PATH = ".github/workflows/release.yml";
+const SOURCE_SHA = /^[0-9a-f]{40}$/u;
+const RUN_ID = /^[1-9][0-9]{0,19}$/u;
+const NAMESPACE = /^[a-z0-9][a-z0-9-]{2,62}$/u;
+const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
+const MAXIMUM_GITHUB_RESPONSE_BYTES = 4 * 1024 * 1024;
+const MAXIMUM_DISCOVERY_RUNS = 1_000;
+const DISCOVERY_PAGE_SIZE = 100;
+const MAXIMUM_RAW_DIST_MANIFEST_BYTES = 16 * 1024 * 1024;
+const MAXIMUM_OUTPUT_BYTES = 4 * 1024 * 1024;
 
 const requireEnvironment = (environment, name) => {
-  const value = environment[name];
+  const value = environment?.[name];
   if (typeof value !== "string" || value.length === 0) {
     throw new Error(`Required baseline closure environment is absent: ${name}`);
   }
   return value;
 };
 
+const sameCanonicalValue = (left, right) =>
+  canonicalJsonBytes(left).equals(canonicalJsonBytes(right));
+
 const referenceFromHash = (namespace, sha256) => ({
   uri: `release-state://${namespace}/evidence/${sha256}`,
   sha256,
 });
 
-export const parseFoundationBaselineClosureArguments = (argv) => {
-  if (!Array.isArray(argv) || argv.length !== FLAGS.length * 2) {
-    throw new Error("Foundation baseline closure arguments are incomplete");
+const githubHeaders = (githubToken) => ({
+  accept: "application/vnd.github+json",
+  authorization: `Bearer ${githubToken}`,
+  "user-agent": "event-shopping-planner-foundation-release",
+  "x-github-api-version": "2022-11-28",
+});
+
+const fetchGithubJson = async ({ fetchImpl, githubToken, url, label }) => {
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      method: "GET",
+      headers: githubHeaders(githubToken),
+      redirect: "follow",
+    });
+  } catch {
+    throw new Error(`${label} request failed`);
   }
-  const values = {};
+  if (
+    response?.status !== 200 ||
+    !/^application\/(?:json|vnd\.github\+json)(?:\s*;|$)/iu.test(
+      response.headers?.get?.("content-type") ?? "",
+    ) ||
+    typeof response.arrayBuffer !== "function"
+  ) {
+    throw new Error(`${label} request failed`);
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length === 0 || bytes.length > MAXIMUM_GITHUB_RESPONSE_BYTES) {
+    throw new Error(`${label} response is empty or oversized`);
+  }
+  return parseJsonStrict(bytes.toString("utf8"), label);
+};
+
+const exactArtifactName = ({ sourceSha, runAttempt }) =>
+  `foundation-bootstrap-recovery-${sourceSha}-${runAttempt}`;
+
+export const discoverFoundationBootstrapRecoveryRun = async ({
+  fetchImpl = fetch,
+  githubToken,
+  repository,
+  sourceSha,
+  currentRunId,
+}) => {
+  if (
+    typeof fetchImpl !== "function" ||
+    typeof githubToken !== "string" ||
+    githubToken.length < 8 ||
+    !REPOSITORY.test(repository ?? "") ||
+    !SOURCE_SHA.test(sourceSha ?? "") ||
+    !RUN_ID.test(currentRunId ?? "")
+  ) {
+    throw new Error("Bootstrap recovery discovery identity is invalid");
+  }
+  const repositoryPath = repository
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/");
+  const workflow = encodeURIComponent(WORKFLOW_PATH);
+  const query = new URLSearchParams({
+    branch: "main",
+    event: "workflow_dispatch",
+    head_sha: sourceSha,
+    status: "completed",
+    per_page: String(DISCOVERY_PAGE_SIZE),
+  });
+  const workflowRuns = [];
+  let totalCount = null;
+  for (
+    let page = 1;
+    page <= MAXIMUM_DISCOVERY_RUNS / DISCOVERY_PAGE_SIZE;
+    page += 1
+  ) {
+    query.set("page", String(page));
+    const runs = await fetchGithubJson({
+      fetchImpl,
+      githubToken,
+      url:
+        `https://api.github.com/repos/${repositoryPath}/actions/workflows/` +
+        `${workflow}/runs?${query.toString()}`,
+      label: "Bootstrap recovery workflow discovery",
+    });
+    if (
+      !Number.isSafeInteger(runs?.total_count) ||
+      runs.total_count < 1 ||
+      runs.total_count > MAXIMUM_DISCOVERY_RUNS ||
+      !Array.isArray(runs.workflow_runs) ||
+      runs.workflow_runs.length > DISCOVERY_PAGE_SIZE ||
+      (totalCount !== null && runs.total_count !== totalCount)
+    ) {
+      throw new Error("Bootstrap recovery workflow discovery is incomplete");
+    }
+    totalCount = runs.total_count;
+    workflowRuns.push(...runs.workflow_runs);
+    if (workflowRuns.length >= totalCount) break;
+    if (runs.workflow_runs.length !== DISCOVERY_PAGE_SIZE) {
+      throw new Error("Bootstrap recovery workflow discovery is incomplete");
+    }
+  }
+  if (
+    workflowRuns.length !== totalCount ||
+    new Set(workflowRuns.map((run) => String(run?.id ?? ""))).size !==
+      workflowRuns.length
+  ) {
+    throw new Error("Bootstrap recovery workflow discovery is incomplete");
+  }
+  const completed = workflowRuns.flatMap((run) => {
+    const runId = String(run?.id ?? "");
+    const runAttempt = String(run?.run_attempt ?? "");
+    return RUN_ID.test(runId) &&
+      RUN_ID.test(runAttempt) &&
+      runId !== currentRunId &&
+      run.head_sha === sourceSha &&
+      run.head_branch === "main" &&
+      run.path === WORKFLOW_PATH &&
+      run.event === "workflow_dispatch" &&
+      run.status === "completed" &&
+      run.conclusion === "success"
+      ? [{ runId, runAttempt }]
+      : [];
+  });
+  const candidates = [];
+  for (const run of completed) {
+    const artifactName = exactArtifactName({
+      sourceSha,
+      runAttempt: run.runAttempt,
+    });
+    const artifactSet = await fetchGithubJson({
+      fetchImpl,
+      githubToken,
+      url:
+        `https://api.github.com/repos/${repositoryPath}/actions/runs/` +
+        `${run.runId}/artifacts?name=${encodeURIComponent(artifactName)}` +
+        `&per_page=${DISCOVERY_PAGE_SIZE}`,
+      label: "Bootstrap recovery artifact discovery",
+    });
+    if (
+      !Number.isSafeInteger(artifactSet?.total_count) ||
+      artifactSet.total_count < 0 ||
+      artifactSet.total_count > 1 ||
+      !Array.isArray(artifactSet.artifacts) ||
+      artifactSet.artifacts.length !== artifactSet.total_count
+    ) {
+      throw new Error("Bootstrap recovery artifact discovery is incomplete");
+    }
+    const exact = artifactSet.artifacts.filter(
+      (artifact) =>
+        artifact?.name === artifactName &&
+        artifact.expired === false &&
+        String(artifact.workflow_run?.id ?? "") === run.runId &&
+        artifact.workflow_run?.head_sha === sourceSha,
+    );
+    if (exact.length > 1) {
+      throw new Error("Bootstrap recovery artifact discovery is ambiguous");
+    }
+    if (exact.length === 1) {
+      candidates.push({ ...run, artifactName });
+    }
+  }
+  if (candidates.length === 0) {
+    throw new Error("No completed prior bootstrap recovery artifact exists");
+  }
+  candidates.sort((left, right) => {
+    const runOrder = BigInt(left.runId) - BigInt(right.runId);
+    if (runOrder !== 0n) return runOrder < 0n ? -1 : 1;
+    const attemptOrder = BigInt(left.runAttempt) - BigInt(right.runAttempt);
+    return attemptOrder < 0n ? -1 : attemptOrder > 0n ? 1 : 0;
+  });
+  return Object.freeze({ ...candidates.at(-1) });
+};
+
+export const parseFoundationBaselineClosureArguments = (argv) => {
+  if (!Array.isArray(argv) || argv.length !== 4) {
+    throw new Error(
+      "Usage: produce-foundation-baseline-closure.mjs --namespace <namespace> --output <new-file>",
+    );
+  }
+  const values = new Map();
   for (let index = 0; index < argv.length; index += 2) {
     const flag = argv[index];
     const value = argv[index + 1];
     if (
-      !FLAGS.includes(flag) ||
-      Object.hasOwn(values, flag) ||
+      !["--namespace", "--output"].includes(flag) ||
+      values.has(flag) ||
       typeof value !== "string" ||
       value.length === 0 ||
       value.startsWith("--")
     ) {
-      throw new Error(`Invalid foundation baseline closure flag: ${flag}`);
+      throw new Error("Foundation baseline closure arguments are invalid");
     }
-    values[flag] = value;
+    values.set(flag, value);
   }
-  if (
-    Object.keys(values).length !== FLAGS.length ||
-    !NAMESPACE_PATTERN.test(values["--namespace"]) ||
-    !SOURCE_SHA_PATTERN.test(values["--source-sha"]) ||
-    !SOURCE_SHA_PATTERN.test(values["--bootstrap-source-sha"]) ||
-    !RUN_ID_PATTERN.test(values["--run-id"]) ||
-    [
-      "--provider-binding-sha256",
-      "--provider-observation-sha256",
-      "--provider-policy-sha256",
-      "--raw-dist-manifest-sha256",
-      "--recovery-rehearsal-sha256",
-    ].some((flag) => !SHA256_PATTERN.test(values[flag]))
-  ) {
-    throw new Error("Foundation baseline closure identity is invalid");
+  const namespace = values.get("--namespace");
+  if (!NAMESPACE.test(namespace ?? "")) {
+    throw new Error("Foundation baseline closure namespace is invalid");
   }
-  return values;
-};
-
-const comparablePath = (value) => {
-  const resolved = path.resolve(value);
-  return process.platform === "win32" ? resolved.toLowerCase() : resolved;
-};
-
-const readRawDistManifestSnapshot = async (filePath) => {
-  const resolved = path.resolve(filePath);
-  const metadata = await lstat(resolved, { bigint: true });
-  if (!metadata.isFile() || metadata.isSymbolicLink()) {
-    throw new Error("Raw dist manifest must be a regular non-link file");
-  }
-  if (comparablePath(await realpath(resolved)) !== comparablePath(resolved)) {
-    throw new Error("Raw dist manifest path is aliased");
-  }
-  const description = { path: resolved, ...describeExactFile(metadata) };
-  const bytes = await readExactRegularFile({
-    description,
-    maximumBytes: MAXIMUM_RAW_DIST_MANIFEST_BYTES,
-    label: "Raw dist manifest",
-  });
-  return {
-    bytes,
-    async assertUnchanged() {
-      const current = await readExactRegularFile({
-        description,
-        maximumBytes: MAXIMUM_RAW_DIST_MANIFEST_BYTES,
-        label: "Raw dist manifest",
-      });
-      if (!current.equals(bytes)) {
-        throw new Error("Raw dist manifest changed during baseline closure");
-      }
-    },
-  };
+  return Object.freeze({ namespace, outputPath: values.get("--output") });
 };
 
 const verifyHistoricalBaseline = () => {
@@ -159,17 +292,6 @@ const verifyHistoricalBaseline = () => {
     },
   );
 };
-
-const createBoundStore = ({ environment, namespace, policy, createStore }) =>
-  createStore({
-    connectionString: requireEnvironment(
-      environment,
-      policy.databaseUrlEnvironmentName,
-    ),
-    namespace,
-    policy,
-    ca: requireEnvironment(environment, "RELEASE_STATE_DATABASE_CA_PEM"),
-  });
 
 const collectProducerOidcReceipt = async ({
   environment,
@@ -200,19 +322,54 @@ const collectProducerOidcReceipt = async ({
   return verified.receiptBytes;
 };
 
+const readCanonicalRecoveryObservation = (bytes) => {
+  const input = Buffer.from(bytes ?? "");
+  const observation = assertFoundationBootstrapRecoveryObservation(
+    parseJsonStrict(
+      input.toString("utf8"),
+      "Reviewed foundation bootstrap recovery observation",
+    ),
+  );
+  if (!canonicalJsonBytes(observation).equals(input)) {
+    throw new Error("Reviewed bootstrap recovery observation is not canonical");
+  }
+  return observation;
+};
+
+const readRawDistManifest = async ({ store, reference }) => {
+  const stored = await store.readEvidence({ sha256: reference.sha256 });
+  if (
+    !Buffer.isBuffer(stored?.bytes) ||
+    stored.bytes.length === 0 ||
+    stored.bytes.length > MAXIMUM_RAW_DIST_MANIFEST_BYTES ||
+    sha256Bytes(stored.bytes) !== reference.sha256 ||
+    stored.mediaType !== FOUNDATION_RAW_DIST_MANIFEST_MEDIA_TYPE
+  ) {
+    throw new Error("Foundation raw dist manifest is absent or differs");
+  }
+  return Buffer.from(stored.bytes);
+};
+
 export const runFoundationBaselineClosureCli = async (
   {
     argv = process.argv.slice(2),
-    env = process.env,
+    environment = process.env,
     cwd = process.cwd(),
     stdout = process.stdout,
   } = {},
   {
-    loadJson = readJsonStrict,
-    assertEnvironment = assertProtectedWorkflowEnvironment,
+    loadJson,
+    assertP0a = assertConfiguredFoundationP0aAuthorities,
+    assertProtected = assertProtectedWorkflowEnvironment,
     verifyBaseline = verifyHistoricalBaseline,
-    readRawDistManifest = readRawDistManifestSnapshot,
     createStore = createPostgresReleaseStateStore,
+    discoverRecovery = discoverFoundationBootstrapRecoveryRun,
+    collectReviewedArtifact = collectReviewedWorkflowArtifactAuthority,
+    readRecovery = readStoredFoundationBootstrapRecoveryAuthority,
+    readSeed = readStoredFoundationBootstrapDeploymentSeedAuthority,
+    readSeedProviderObservation = readFoundationBootstrapSeedProviderObservationBinding,
+    readRecoveryObservation = readCanonicalRecoveryObservation,
+    readRawManifest = readRawDistManifest,
     resolveSource = resolveCleanFoundationSource,
     resolveBootstrapSource = resolveBootstrapFoundationSource,
     resolveHistorical = resolveHistoricalFoundationBaseline,
@@ -222,107 +379,216 @@ export const runFoundationBaselineClosureCli = async (
     storeClosure = putFoundationBaselineClosureAuthority,
     collectOidcReceipt = collectProducerOidcReceipt,
     storeOidcReceipt = putRemoteDbObservationOidcAuthority,
+    writeOutput = writeExactCreateOnlyFile,
     fetchImpl = fetch,
-    writeFileImpl = writeFile,
     now = Date.now,
   } = {},
 ) => {
-  const values = parseFoundationBaselineClosureArguments(argv);
-  const namespace = values["--namespace"];
-  const sourceSha = values["--source-sha"];
-  const bootstrapSourceSha = values["--bootstrap-source-sha"];
-  const currentWorkflowRunId = values["--run-id"];
-  const outputPath = path.resolve(cwd, values["--output"]);
-  const rawDistManifestPath = path.resolve(cwd, values["--raw-dist-manifest"]);
-  if (comparablePath(outputPath) === comparablePath(rawDistManifestPath)) {
-    throw new Error("Baseline closure output must not overwrite its input");
-  }
+  const parsed = parseFoundationBaselineClosureArguments(argv);
+  const readPolicy =
+    loadJson ??
+    (async (filePath) =>
+      parseJsonStrict(
+        await readFile(filePath, "utf8"),
+        path.basename(filePath),
+      ));
   const [
     approvalPolicy,
     storePolicy,
     databaseContract,
     providerPolicy,
     baseline,
+    p0aPolicy,
+    toolchainPolicy,
   ] = await Promise.all([
-    loadJson(path.join(repositoryRoot, "config", "approval-policy.json")),
-    loadJson(path.join(repositoryRoot, "config", "release-state-store.json")),
-    loadJson(
+    readPolicy(path.join(repositoryRoot, "config", "approval-policy.json")),
+    readPolicy(path.join(repositoryRoot, "config", "release-state-store.json")),
+    readPolicy(
       path.join(repositoryRoot, "config", "db-compatibility-contract.json"),
     ),
-    loadJson(path.join(repositoryRoot, "config", "provider-policy.json")),
-    loadJson(path.join(repositoryRoot, "config", "foundation-baseline.json")),
+    readPolicy(path.join(repositoryRoot, "config", "provider-policy.json")),
+    readPolicy(path.join(repositoryRoot, "config", "foundation-baseline.json")),
+    readPolicy(
+      path.join(repositoryRoot, "config", "foundation-p0a-authorities.json"),
+    ),
+    readPolicy(path.join(repositoryRoot, "config", "toolchain-versions.json")),
   ]);
-  assertEnvironment({
-    env,
+  assertP0a({
+    p0aPolicy,
+    providerPolicy,
+    databaseContract,
+    storePolicy,
     approvalPolicy,
-    namespace,
-    sourceSha,
-    runId: currentWorkflowRunId,
+    requireBootstrap: true,
   });
-  if (requireEnvironment(env, "REQUESTED_OPERATION") !== OPERATION) {
-    throw new Error("Foundation baseline closure operation binding is invalid");
-  }
-  verifyBaseline();
-  const rawDistSnapshot = await readRawDistManifest({
-    filePath: rawDistManifestPath,
-  });
+  const sourceSha = requireEnvironment(environment, "GITHUB_SHA");
+  const currentRunId = requireEnvironment(environment, "GITHUB_RUN_ID");
+  const currentRunAttempt = requireEnvironment(
+    environment,
+    "GITHUB_RUN_ATTEMPT",
+  );
   if (
-    sha256Bytes(rawDistSnapshot.bytes) !== values["--raw-dist-manifest-sha256"]
+    !SOURCE_SHA.test(sourceSha) ||
+    !RUN_ID.test(currentRunId) ||
+    !RUN_ID.test(currentRunAttempt) ||
+    requireEnvironment(environment, "REQUESTED_OPERATION") !== OPERATION
   ) {
-    throw new Error("Raw dist manifest differs from its reviewed SHA-256");
+    throw new Error("Foundation baseline closure workflow identity is invalid");
   }
+  assertProtected({
+    env: environment,
+    approvalPolicy,
+    namespace: parsed.namespace,
+    sourceSha,
+    runId: currentRunId,
+  });
+  verifyBaseline();
+  const sourceResolution = resolveSource({
+    expectedSourceSha: sourceSha,
+    cwd: repositoryRoot,
+  });
+  const bootstrapSourceResolution = resolveBootstrapSource({
+    bootstrapSourceSha: p0aPolicy.bootstrapRecovery.bootstrapSourceSha,
+    cwd: repositoryRoot,
+  });
+  const historicalBaselineResolution = resolveHistorical(baseline);
   const connectionString = requireEnvironment(
-    env,
+    environment,
     storePolicy.databaseUrlEnvironmentName,
   );
-  const ca = requireEnvironment(env, "RELEASE_STATE_DATABASE_CA_PEM");
-  const applicationDatabaseAuthority =
-    databaseContract.remote.observationAuthority;
+  const ca = requireEnvironment(environment, "RELEASE_STATE_DATABASE_CA_PEM");
+  const applicationAuthority = databaseContract.remote.observationAuthority;
   const applicationDatabaseConnectionString = requireEnvironment(
-    env,
-    applicationDatabaseAuthority.databaseUrlEnvironmentName,
+    environment,
+    applicationAuthority.databaseUrlEnvironmentName,
   );
   const applicationDatabaseCa = requireEnvironment(
-    env,
-    applicationDatabaseAuthority.databaseCaEnvironmentName,
+    environment,
+    applicationAuthority.databaseCaEnvironmentName,
   );
-  const runAttempt = requireEnvironment(env, "GITHUB_RUN_ATTEMPT");
-  if (!RUN_ID_PATTERN.test(runAttempt)) {
-    throw new Error("Foundation baseline closure run attempt is invalid");
-  }
+  const githubToken = requireEnvironment(
+    environment,
+    p0aPolicy.githubCredentialEnvironmentName,
+  );
   const nowMilliseconds = Number(now());
   if (!Number.isFinite(nowMilliseconds)) {
     throw new Error("Foundation baseline closure clock is invalid");
   }
-  const [oidcReceiptBytes, store] = await Promise.all([
-    collectOidcReceipt({
-      environment: env,
-      approvalPolicy,
-      sourceSha,
-      runId: currentWorkflowRunId,
-      nowMilliseconds,
-      fetchImpl,
-    }),
-    createBoundStore({
-      environment: env,
-      namespace,
-      policy: storePolicy,
-      createStore,
-    }),
-  ]);
+  const store = await createStore({
+    connectionString,
+    namespace: parsed.namespace,
+    policy: storePolicy,
+    ca,
+  });
   try {
-    const sourceResolution = resolveSource({
+    const [oidcReceiptBytes, selectedRecovery] = await Promise.all([
+      collectOidcReceipt({
+        environment,
+        approvalPolicy,
+        sourceSha,
+        runId: currentRunId,
+        nowMilliseconds,
+        fetchImpl,
+      }),
+      discoverRecovery({
+        fetchImpl,
+        githubToken,
+        repository: approvalPolicy.repository,
+        sourceSha,
+        currentRunId,
+      }),
+    ]);
+    if (
+      selectedRecovery.runId === currentRunId ||
+      !RUN_ID.test(selectedRecovery.runId ?? "") ||
+      !RUN_ID.test(selectedRecovery.runAttempt ?? "") ||
+      selectedRecovery.artifactName !==
+        exactArtifactName({
+          sourceSha,
+          runAttempt: selectedRecovery.runAttempt,
+        })
+    ) {
+      throw new Error("Selected bootstrap recovery run is not prior and exact");
+    }
+    const reviewedRecovery = await collectReviewedArtifact({
+      fetchImpl,
+      githubToken,
+      namespace: parsed.namespace,
+      repository: approvalPolicy.repository,
+      expectedRunId: selectedRecovery.runId,
+      expectedRunAttempt: selectedRecovery.runAttempt,
       expectedSourceSha: sourceSha,
-      cwd: repositoryRoot,
+      expectedWorkflowPath: WORKFLOW_PATH,
+      expectedArtifactName: selectedRecovery.artifactName,
+      expectedFileName: "foundation-bootstrap-recovery.json",
+      expectedFileMediaType:
+        FOUNDATION_BOOTSTRAP_RECOVERY_OBSERVATION_MEDIA_TYPE,
+      store,
     });
-    const bootstrapSourceResolution = resolveBootstrapSource({
-      bootstrapSourceSha,
-      cwd: repositoryRoot,
+    const observation = readRecoveryObservation(reviewedRecovery.fileBytes);
+    if (
+      observation.namespace !== parsed.namespace ||
+      observation.sourceSha !== sourceSha ||
+      observation.collectorIdentity.repository !== approvalPolicy.repository ||
+      observation.collectorIdentity.runId !== selectedRecovery.runId ||
+      observation.collectorIdentity.runAttempt !== selectedRecovery.runAttempt
+    ) {
+      throw new Error(
+        "Reviewed bootstrap recovery observation identity differs",
+      );
+    }
+    const recovery = await readRecovery({
+      store,
+      namespace: parsed.namespace,
+      reference: observation.rawAuthority,
+      p0aPolicy,
+      providerPolicy,
+      databaseContract,
+      storePolicy,
+      approvalPolicy,
+      foundationBaseline: baseline,
+      toolchainPolicy,
+      bootstrapSourceResolution,
     });
-    const historicalBaselineResolution = resolveHistorical(baseline);
+    if (
+      recovery.raw.sourceSha !== sourceSha ||
+      recovery.raw.collector.runId !== selectedRecovery.runId ||
+      recovery.raw.collector.runAttempt !== selectedRecovery.runAttempt ||
+      !sameCanonicalValue(
+        recovery.raw.rehearsal,
+        observation.rehearsalAuthority,
+      ) ||
+      !sameCanonicalValue(recovery.result, observation.result) ||
+      !sameCanonicalValue(
+        recovery.raw.collector.oidcReceipt,
+        observation.oidcReceipt,
+      )
+    ) {
+      throw new Error("Reviewed bootstrap recovery store authority differs");
+    }
+    const seed = await readSeed({
+      store,
+      namespace: parsed.namespace,
+      reference: recovery.raw.bootstrap.seedAuthority,
+      p0aPolicy,
+      providerPolicy,
+      databaseContract,
+      storePolicy,
+      approvalPolicy,
+    });
+    const rawDistManifestBytes = await readRawManifest({
+      store,
+      reference: seed.authority.rawDistManifest,
+    });
+    const seedProviderObservation = await readSeedProviderObservation({
+      store,
+      namespace: parsed.namespace,
+      binding: seed.binding,
+      providerPolicy,
+    });
     const policyBindingResolution = resolvePolicies({
       store,
-      namespace,
+      namespace: parsed.namespace,
       providerPolicy,
       databaseContract,
       controlStorePolicy: storePolicy,
@@ -334,20 +600,20 @@ export const runFoundationBaselineClosureCli = async (
     });
     const producerOidcStored = await storeOidcReceipt({
       store,
-      namespace,
+      namespace: parsed.namespace,
       receiptBytes: oidcReceiptBytes,
       approvalPolicy,
       sourceSha,
-      runId: currentWorkflowRunId,
-      runAttempt,
+      runId: currentRunId,
+      runAttempt: currentRunAttempt,
     });
     const producerOidcResolution = await resolveProducerOidc({
       store,
       policyBindingResolution,
       reference: producerOidcStored.reference,
       sourceResolution,
-      runId: currentWorkflowRunId,
-      runAttempt,
+      runId: currentRunId,
+      runAttempt: currentRunAttempt,
     });
     const resolution = await resolveClosure({
       store,
@@ -356,50 +622,51 @@ export const runFoundationBaselineClosureCli = async (
       historicalBaselineResolution,
       policyBindingResolution,
       producerOidcResolution,
-      providerBindingReference: referenceFromHash(
-        namespace,
-        values["--provider-binding-sha256"],
-      ),
-      providerObservationReference: referenceFromHash(
-        namespace,
-        values["--provider-observation-sha256"],
-      ),
-      providerPolicyReference: referenceFromHash(
-        namespace,
-        values["--provider-policy-sha256"],
-      ),
-      rawDistManifestBytes: rawDistSnapshot.bytes,
-      recoveryRehearsalReference: referenceFromHash(
-        namespace,
-        values["--recovery-rehearsal-sha256"],
-      ),
-      currentWorkflowRunId,
-      now,
+      providerBindingReference: recovery.raw.bootstrap.bindingReference,
+      providerObservationReference: seedProviderObservation.observation,
+      providerPolicyReference: seedProviderObservation.policy,
+      rawDistManifestBytes,
+      recoveryRehearsalReference: recovery.raw.rehearsal,
+      reviewedRecoveryArtifactReference: reviewedRecovery.reference,
+      currentWorkflowRunId: currentRunId,
+      now: () => nowMilliseconds,
     });
-    await rawDistSnapshot.assertUnchanged();
     const stored = await storeClosure({ store, resolution });
-    await rawDistSnapshot.assertUnchanged();
     const result = {
-      schemaVersion: 1,
-      resultKind: "foundation-baseline-closure-stored/v1",
-      namespace,
+      schemaVersion: 2,
+      resultKind: "foundation-baseline-closure-stored/v2",
+      namespace: parsed.namespace,
       sourceSha,
-      bootstrapSourceSha,
-      workflowRunId: currentWorkflowRunId,
-      workflowRunAttempt: runAttempt,
+      bootstrapSourceSha: p0aPolicy.bootstrapRecovery.bootstrapSourceSha,
+      workflowRunId: currentRunId,
+      workflowRunAttempt: currentRunAttempt,
       mediaType: FOUNDATION_BASELINE_CLOSURE_MEDIA_TYPE,
       reference: stored.reference,
       producerOidc: {
         mediaType: GITHUB_OIDC_RECEIPT_MEDIA_TYPE,
         reference: producerOidcStored.reference,
       },
+      reviewedBootstrapRecovery: {
+        mediaType: REVIEWED_WORKFLOW_ARTIFACT_RECEIPT_MEDIA_TYPE,
+        reference: reviewedRecovery.reference,
+        runId: selectedRecovery.runId,
+        runAttempt: selectedRecovery.runAttempt,
+      },
       rawDistManifest: {
         mediaType: FOUNDATION_RAW_DIST_MANIFEST_MEDIA_TYPE,
-        sha256: values["--raw-dist-manifest-sha256"],
+        reference: referenceFromHash(
+          parsed.namespace,
+          sha256Bytes(rawDistManifestBytes),
+        ),
       },
     };
     const resultBytes = canonicalJsonBytes(result);
-    await writeFileImpl(outputPath, resultBytes, { flag: "wx", mode: 0o600 });
+    await writeOutput({
+      outputPath: path.resolve(cwd, parsed.outputPath),
+      bytes: resultBytes,
+      label: "Foundation baseline closure result",
+      maximumBytes: MAXIMUM_OUTPUT_BYTES,
+    });
     stdout.write(`${resultBytes.toString("utf8")}\n`);
     return result;
   } finally {

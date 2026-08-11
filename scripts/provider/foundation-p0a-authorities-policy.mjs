@@ -8,6 +8,10 @@ export const FOUNDATION_P0A_AUTHORITIES_POLICY_KIND =
 const SHA256 = /^[0-9a-f]{64}$/u;
 const ENVIRONMENT_NAME = /^[A-Z][A-Z0-9_]{2,127}$/u;
 const SAFE_OWNER = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{2,254}$/u;
+const PREVIEW_ALIAS_SUFFIX =
+  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
+const PLACEHOLDER =
+  /(?:^|[._-])(?:changeme|example|local|placeholder|replace|sample|test|todo)(?:$|[._-])/iu;
 
 const isRecord = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -125,7 +129,9 @@ export const assertFoundationP0aAuthoritiesPolicy = (
     ]) ||
     policy.schemaVersion !== 1 ||
     policy.kind !== FOUNDATION_P0A_AUTHORITIES_POLICY_KIND ||
-    !["configured", "unconfigured"].includes(policy.bindingStatus) ||
+    !["bootstrap-seed-pending", "configured", "unconfigured"].includes(
+      policy.bindingStatus,
+    ) ||
     !ENVIRONMENT_NAME.test(policy.providerCredentialEnvironmentName ?? "") ||
     !ENVIRONMENT_NAME.test(policy.githubCredentialEnvironmentName ?? "") ||
     !Array.isArray(policy.blockerCodes) ||
@@ -137,13 +143,24 @@ export const assertFoundationP0aAuthoritiesPolicy = (
     ]) ||
     !exactKeys(policy.controlStore, ["credentialOwner", "namespaceStatus"]) ||
     !exactKeys(policy.bootstrapRecovery, [
+      "bootstrapSourceSha",
       "cleanupMode",
       "deploymentBindingSha256",
+      "deploymentSeedAuthoritySha256",
       "maximumRecoverySeconds",
+      "previewAliasSuffix",
+      "rawDistManifestSha256",
       "requiredRoutes",
     ]) ||
     !Number.isSafeInteger(policy.bootstrapRecovery.maximumRecoverySeconds) ||
     policy.bootstrapRecovery.maximumRecoverySeconds < 1 ||
+    !(
+      policy.bootstrapRecovery.previewAliasSuffix === null ||
+      (PREVIEW_ALIAS_SUFFIX.test(
+        policy.bootstrapRecovery.previewAliasSuffix ?? "",
+      ) &&
+        !PLACEHOLDER.test(policy.bootstrapRecovery.previewAliasSuffix))
+    ) ||
     policy.bootstrapRecovery.cleanupMode !==
       "delete-alias-and-preview-deployments"
   ) {
@@ -162,13 +179,47 @@ export const assertFoundationP0aAuthoritiesPolicy = (
       policy.applicationDatabase.restoreOwner !== null ||
       policy.controlStore.namespaceStatus !== "unconfigured" ||
       policy.controlStore.credentialOwner !== null ||
-      policy.bootstrapRecovery.deploymentBindingSha256 !== null
+      policy.bootstrapRecovery.bootstrapSourceSha !== null ||
+      policy.bootstrapRecovery.deploymentBindingSha256 !== null ||
+      policy.bootstrapRecovery.deploymentSeedAuthoritySha256 !== null ||
+      policy.bootstrapRecovery.rawDistManifestSha256 !== null ||
+      policy.bootstrapRecovery.previewAliasSuffix !== null
     ) {
       throw new Error("Unconfigured Foundation P0A policy is not closed");
     }
     if (requireConfigured) {
       throw new Error(
         `Foundation P0A authority policy is not configured: ${policy.blockerCodes.join(", ")}`,
+      );
+    }
+    return policy;
+  }
+  if (policy.bindingStatus === "bootstrap-seed-pending") {
+    if (
+      policy.blockerCodes.length !== 1 ||
+      policy.blockerCodes[0] !==
+        "p0a-bootstrap-deployment-binding-seed-pending" ||
+      policy.applicationDatabase.provisioningStatus !== "provisioned" ||
+      !SAFE_OWNER.test(policy.applicationDatabase.credentialOwner ?? "") ||
+      !SAFE_OWNER.test(policy.applicationDatabase.backupOwner ?? "") ||
+      !SAFE_OWNER.test(policy.applicationDatabase.restoreOwner ?? "") ||
+      policy.controlStore.namespaceStatus !== "uninitialized" ||
+      !SAFE_OWNER.test(policy.controlStore.credentialOwner ?? "") ||
+      policy.bootstrapRecovery.bootstrapSourceSha !== null ||
+      policy.bootstrapRecovery.deploymentBindingSha256 !== null ||
+      policy.bootstrapRecovery.deploymentSeedAuthoritySha256 !== null ||
+      policy.bootstrapRecovery.rawDistManifestSha256 !== null ||
+      !PREVIEW_ALIAS_SUFFIX.test(
+        policy.bootstrapRecovery.previewAliasSuffix ?? "",
+      )
+    ) {
+      throw new Error(
+        "Foundation P0A bootstrap seed prerequisites are incomplete",
+      );
+    }
+    if (requireConfigured) {
+      throw new Error(
+        "Foundation P0A authority policy has no reviewed bootstrap seed",
       );
     }
     return policy;
@@ -181,25 +232,30 @@ export const assertFoundationP0aAuthoritiesPolicy = (
     !SAFE_OWNER.test(policy.applicationDatabase.restoreOwner ?? "") ||
     policy.controlStore.namespaceStatus !== "uninitialized" ||
     !SAFE_OWNER.test(policy.controlStore.credentialOwner ?? "") ||
-    !SHA256.test(policy.bootstrapRecovery.deploymentBindingSha256 ?? "")
+    !/^[0-9a-f]{40}$/u.test(
+      policy.bootstrapRecovery.bootstrapSourceSha ?? "",
+    ) ||
+    !SHA256.test(policy.bootstrapRecovery.deploymentBindingSha256 ?? "") ||
+    !SHA256.test(
+      policy.bootstrapRecovery.deploymentSeedAuthoritySha256 ?? "",
+    ) ||
+    !SHA256.test(policy.bootstrapRecovery.rawDistManifestSha256 ?? "") ||
+    !PREVIEW_ALIAS_SUFFIX.test(
+      policy.bootstrapRecovery.previewAliasSuffix ?? "",
+    )
   ) {
     throw new Error("Configured Foundation P0A policy is incomplete");
   }
   return policy;
 };
 
-export const assertConfiguredFoundationP0aAuthorities = ({
+const assertConfiguredExternalAuthorities = ({
   p0aPolicy,
   providerPolicy,
   databaseContract,
   storePolicy,
   approvalPolicy,
-  artifactDrillPolicy = null,
-  requireBootstrap = false,
 }) => {
-  assertFoundationP0aAuthoritiesPolicy(p0aPolicy, {
-    requireConfigured: true,
-  });
   assertProviderPolicyConfigured(providerPolicy);
   const databaseAuthority = assertConfiguredDatabase(databaseContract);
   assertConfiguredStore(storePolicy);
@@ -210,20 +266,6 @@ export const assertConfiguredFoundationP0aAuthorities = ({
   ) {
     throw new Error("Foundation P0A credential environment allowlist differs");
   }
-  if (requireBootstrap) {
-    if (
-      !isRecord(artifactDrillPolicy) ||
-      artifactDrillPolicy.bindingStatus !== "configured" ||
-      !Array.isArray(artifactDrillPolicy.blockerCodes) ||
-      artifactDrillPolicy.blockerCodes.length !== 0 ||
-      typeof artifactDrillPolicy.providerPreviewAliasSuffix !== "string" ||
-      artifactDrillPolicy.providerPreviewAliasSuffix.length === 0
-    ) {
-      throw new Error(
-        "Foundation bootstrap preview authority is not configured",
-      );
-    }
-  }
   return Object.freeze({
     databaseAuthority,
     applicationDatabaseOwners: Object.freeze({
@@ -233,6 +275,69 @@ export const assertConfiguredFoundationP0aAuthorities = ({
     databaseCaSha256: databaseAuthority.productionCaSha256,
     storeCaSha256: storePolicy.productionCaSha256,
   });
+};
+
+export const assertFoundationP0aBootstrapSeedPrerequisites = ({
+  p0aPolicy,
+  providerPolicy,
+  databaseContract,
+  storePolicy,
+  approvalPolicy,
+}) => {
+  assertFoundationP0aAuthoritiesPolicy(p0aPolicy);
+  if (p0aPolicy.bindingStatus !== "bootstrap-seed-pending") {
+    throw new Error("Foundation P0A bootstrap deployment seed is not pending");
+  }
+  return assertConfiguredExternalAuthorities({
+    p0aPolicy,
+    providerPolicy,
+    databaseContract,
+    storePolicy,
+    approvalPolicy,
+  });
+};
+
+export const assertConfiguredFoundationP0aAuthorities = ({
+  p0aPolicy,
+  providerPolicy,
+  databaseContract,
+  storePolicy,
+  approvalPolicy,
+  requireBootstrap = false,
+}) => {
+  assertFoundationP0aAuthoritiesPolicy(p0aPolicy, {
+    requireConfigured: true,
+  });
+  const configured = assertConfiguredExternalAuthorities({
+    p0aPolicy,
+    providerPolicy,
+    databaseContract,
+    storePolicy,
+    approvalPolicy,
+  });
+  if (requireBootstrap) {
+    const previewAliasSuffix = p0aPolicy.bootstrapRecovery.previewAliasSuffix;
+    const forbiddenProviderDomains = [
+      ...(providerPolicy.ownedProductionDomains ?? []),
+      ...(providerPolicy.productionDomains ?? []),
+      ...(providerPolicy.productionAliases ?? []),
+    ];
+    if (
+      !PREVIEW_ALIAS_SUFFIX.test(previewAliasSuffix ?? "") ||
+      PLACEHOLDER.test(previewAliasSuffix) ||
+      forbiddenProviderDomains.some(
+        (domain) =>
+          domain === previewAliasSuffix ||
+          previewAliasSuffix.endsWith(`.${domain}`) ||
+          domain.endsWith(`.${previewAliasSuffix}`),
+      )
+    ) {
+      throw new Error(
+        "Foundation bootstrap preview authority is not configured",
+      );
+    }
+  }
+  return configured;
 };
 
 export const assertFoundationP0aCa = (value, expectedSha256, label) => {

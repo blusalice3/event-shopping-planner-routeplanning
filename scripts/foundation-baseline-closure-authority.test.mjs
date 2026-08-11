@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { once } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import yazl from "yazl";
 import {
   canonicalJsonBytes,
   sha256Bytes,
@@ -30,6 +32,7 @@ import {
   putRemoteDbProviderObservationAuthority,
 } from "./db/remote-db-observation-authority.mjs";
 import { providerConfigurationHash } from "./provider/providerConfiguration.mjs";
+import { FOUNDATION_BOOTSTRAP_DEPLOYMENT_SEED_MEDIA_TYPE } from "./provider/foundation-bootstrap-deployment-seed.mjs";
 import {
   GITHUB_WORKFLOW_RUN_RESPONSE_MEDIA_TYPE,
   REVIEWED_WORKFLOW_RUN_RECEIPT_MEDIA_TYPE,
@@ -38,11 +41,13 @@ import {
   ARTIFACT_ARCHIVE_AVAILABILITY_MEDIA_TYPE,
   ARTIFACT_ARCHIVE_MEDIA_TYPE,
 } from "./release-state/releaseWorkflowValidation.mjs";
+import { collectReviewedWorkflowArtifactAuthority } from "./release-state/reviewedWorkflowArtifactAuthority.mjs";
 
 const NOW = Date.parse("2026-08-09T04:05:06.000Z");
 const NAMESPACE = "foundation-baseline-test";
 const CURRENT_RUN_ID = "100";
 const RECOVERY_RUN_ID = "90";
+const SEED_RUN_ID = "80";
 const RUN_ATTEMPT = "1";
 const CONTROL_CA = "control-store-ca";
 const APPLICATION_CA = "application-database-ca";
@@ -54,6 +59,7 @@ const [
   BASE_STORE_POLICY,
   BASE_APPROVAL_POLICY,
   HISTORICAL_BASELINE,
+  BASE_P0A_POLICY,
 ] = await Promise.all(
   [
     "../config/provider-policy.json",
@@ -61,6 +67,7 @@ const [
     "../config/release-state-store.json",
     "../config/approval-policy.json",
     "../config/foundation-baseline.json",
+    "../config/foundation-p0a-authorities.json",
   ].map(async (relativePath) =>
     JSON.parse(await readFile(new URL(relativePath, import.meta.url), "utf8")),
   ),
@@ -397,11 +404,15 @@ const createRawDist = (content = "bootstrap static bytes\n") => {
   return { bytes: canonicalJsonBytes(manifest), manifest };
 };
 
-const createReviewedRun = async ({ store, sourceSha }) => {
+const createReviewedRun = async ({
+  store,
+  sourceSha,
+  runId = RECOVERY_RUN_ID,
+}) => {
   const apiResponse = await putJson(
     store,
     {
-      id: Number(RECOVERY_RUN_ID),
+      id: Number(runId),
       run_attempt: Number(RUN_ATTEMPT),
       event: "workflow_dispatch",
       status: "completed",
@@ -419,7 +430,7 @@ const createReviewedRun = async ({ store, sourceSha }) => {
       schemaVersion: 1,
       kind: "reviewed-github-workflow-run/v1",
       repository: APPROVAL_POLICY.repository,
-      runId: RECOVERY_RUN_ID,
+      runId,
       runAttempt: RUN_ATTEMPT,
       workflowPath: ".github/workflows/release.yml",
       event: "workflow_dispatch",
@@ -431,6 +442,116 @@ const createReviewedRun = async ({ store, sourceSha }) => {
     },
     REVIEWED_WORKFLOW_RUN_RECEIPT_MEDIA_TYPE,
   );
+};
+
+const createZip = async (entries) => {
+  const zip = new yazl.ZipFile();
+  const chunks = [];
+  zip.outputStream.on("data", (chunk) => chunks.push(chunk));
+  for (const [name, bytes] of entries) {
+    zip.addBuffer(Buffer.from(bytes), name);
+  }
+  zip.end();
+  await once(zip.outputStream, "end");
+  return Buffer.concat(chunks);
+};
+
+const createReviewedRecoveryArtifact = async ({
+  store,
+  executorSourceSha,
+  recoveryReference,
+  recoveryOidcReference,
+}) => {
+  const fileName = "foundation-bootstrap-recovery.json";
+  const fileMediaType =
+    "application/vnd.event-shopping-planner.foundation-bootstrap-recovery+json;version=2";
+  const artifactId = "40001";
+  const artifactName = `foundation-bootstrap-recovery-${executorSourceSha}-${RUN_ATTEMPT}`;
+  const fileBytes = canonicalJsonBytes({
+    schemaVersion: 2,
+    kind: "foundation-bootstrap-recovery-observation/v2",
+    namespace: NAMESPACE,
+    sourceSha: executorSourceSha,
+    observedAt: new Date(NOW).toISOString(),
+    collectorIdentity: {
+      repository: APPROVAL_POLICY.repository,
+      workflowPath: ".github/workflows/release.yml",
+      sourceSha: executorSourceSha,
+      runId: RECOVERY_RUN_ID,
+      runAttempt: RUN_ATTEMPT,
+    },
+    rawAuthority: recoveryReference,
+    rehearsalAuthority: recoveryReference,
+    oidcReceipt: recoveryOidcReference,
+    stateInitializationSubject: {
+      initialized: false,
+      namespace: NAMESPACE,
+    },
+    result: { outcome: "succeeded" },
+  });
+  const archiveBytes = await createZip([[fileName, fileBytes]]);
+  const artifact = {
+    id: Number(artifactId),
+    name: artifactName,
+    expired: false,
+    size_in_bytes: archiveBytes.length,
+    digest: `sha256:${sha256Bytes(archiveBytes)}`,
+    archive_download_url:
+      `https://api.github.com/repos/${APPROVAL_POLICY.repository}/actions/` +
+      `artifacts/${artifactId}/zip`,
+    workflow_run: {
+      id: Number(RECOVERY_RUN_ID),
+      head_sha: executorSourceSha,
+    },
+  };
+  const fetchImpl = async (url) => {
+    if (url.endsWith(`/actions/runs/${RECOVERY_RUN_ID}`)) {
+      return new Response(
+        JSON.stringify({
+          id: Number(RECOVERY_RUN_ID),
+          run_attempt: Number(RUN_ATTEMPT),
+          event: "workflow_dispatch",
+          status: "completed",
+          conclusion: "success",
+          head_branch: "main",
+          head_sha: executorSourceSha,
+          path: ".github/workflows/release.yml",
+          repository: { full_name: APPROVAL_POLICY.repository },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (url.includes(`/actions/runs/${RECOVERY_RUN_ID}/artifacts?`)) {
+      return new Response(
+        JSON.stringify({ total_count: 1, artifacts: [artifact] }),
+        {
+          status: 200,
+          headers: { "content-type": "application/vnd.github+json" },
+        },
+      );
+    }
+    if (url.endsWith(`/actions/artifacts/${artifactId}/zip`)) {
+      return new Response(archiveBytes, {
+        status: 200,
+        headers: { "content-type": "application/zip" },
+      });
+    }
+    throw new Error(`Unexpected reviewed recovery artifact URL: ${url}`);
+  };
+  return collectReviewedWorkflowArtifactAuthority({
+    fetchImpl,
+    githubToken: "github-token-for-test",
+    namespace: NAMESPACE,
+    repository: APPROVAL_POLICY.repository,
+    expectedRunId: RECOVERY_RUN_ID,
+    expectedRunAttempt: RUN_ATTEMPT,
+    expectedSourceSha: executorSourceSha,
+    expectedWorkflowPath: ".github/workflows/release.yml",
+    expectedArtifactName: artifactName,
+    expectedFileName: fileName,
+    expectedFileMediaType: fileMediaType,
+    store,
+  });
 };
 
 const createBootstrapAuthorities = async ({
@@ -445,6 +566,15 @@ const createBootstrapAuthorities = async ({
   const rawDistReference = {
     uri: `artifact://sha256/${sha256Bytes(rawDist.bytes)}/raw-dist-manifest.json`,
     sha256: sha256Bytes(rawDist.bytes),
+  };
+  const rawDistStoreReceipt = await store.putEvidence({
+    bytes: rawDist.bytes,
+    mediaType:
+      "application/vnd.event-shopping-planner.raw-dist-manifest+json;version=1",
+  });
+  const rawDistStoreReference = {
+    uri: rawDistStoreReceipt.uri,
+    sha256: rawDistStoreReceipt.sha256,
   };
   const artifactManifest = await putJson(
     store,
@@ -587,10 +717,50 @@ const createBootstrapAuthorities = async ({
     runId: RECOVERY_RUN_ID,
     runAttempt: RUN_ATTEMPT,
   });
+  const seedOidc = await putRemoteDbObservationOidcAuthority({
+    store,
+    namespace: NAMESPACE,
+    receiptBytes: canonicalJsonBytes(
+      oidcReceipt({
+        sourceSha: bindingSourceSha,
+        runId: SEED_RUN_ID,
+        jti: "bootstrap-seed-fixture",
+      }),
+    ),
+    approvalPolicy: APPROVAL_POLICY,
+    sourceSha: bindingSourceSha,
+    runId: SEED_RUN_ID,
+    runAttempt: RUN_ATTEMPT,
+  });
   const reviewedWorkflowRun = await createReviewedRun({
     store,
-    sourceSha: executorSourceSha,
+    sourceSha: bindingSourceSha,
+    runId: SEED_RUN_ID,
   });
+  const bootstrapDeploymentSeed = await putJson(
+    store,
+    {
+      schemaVersion: 1,
+      kind: "foundation-bootstrap-deployment-seed/v1",
+      namespace: NAMESPACE,
+      repository: APPROVAL_POLICY.repository,
+      workflowPath: ".github/workflows/release.yml",
+      bootstrapSourceSha: bindingSourceSha,
+      workflowSourceSha: bindingSourceSha,
+      runId: SEED_RUN_ID,
+      runAttempt: RUN_ATTEMPT,
+      recordedAt: new Date(NOW).toISOString(),
+      oidcReceipt: seedOidc.reference,
+      bindingId: binding.bindingId,
+      binding: bindingReference,
+      packageIndex: binding.packageIndex,
+      rawDistManifest: rawDistStoreReference,
+      providerEvidence: binding.providerEvidence,
+      artifactArchive: binding.artifactArchive,
+      artifactArchiveAvailability: binding.artifactArchiveAvailability,
+    },
+    FOUNDATION_BOOTSTRAP_DEPLOYMENT_SEED_MEDIA_TYPE,
+  );
   const recovery = {
     schemaVersion: 1,
     evidenceKind: "foundation-bootstrap-recovery-rehearsal/v2",
@@ -602,6 +772,7 @@ const createBootstrapAuthorities = async ({
     repository: APPROVAL_POLICY.repository,
     runId: RECOVERY_RUN_ID,
     runAttempt: RUN_ATTEMPT,
+    bootstrapDeploymentSeed,
     reviewedWorkflowRun,
     producerOidc: recoveryOidc.reference,
     startedAt: new Date(NOW - 120_000).toISOString(),
@@ -620,7 +791,19 @@ const createBootstrapAuthorities = async ({
     recovery,
     FOUNDATION_BOOTSTRAP_RECOVERY_REHEARSAL_MEDIA_TYPE,
   );
-  return { binding, bindingReference, recovery, recoveryReference };
+  const reviewedRecoveryArtifact = await createReviewedRecoveryArtifact({
+    store,
+    executorSourceSha,
+    recoveryReference,
+    recoveryOidcReference: recoveryOidc.reference,
+  });
+  return {
+    binding,
+    bindingReference,
+    recovery,
+    recoveryReference,
+    reviewedRecoveryArtifact,
+  };
 };
 
 const createResolutionFixture = async ({
@@ -709,11 +892,38 @@ const createResolutionFixture = async ({
     providerPolicyReference: provider.policyReference,
     rawDistManifestBytes: rawDist.bytes,
     recoveryRehearsalReference: bootstrap.recoveryReference,
+    reviewedRecoveryArtifactReference:
+      bootstrap.reviewedRecoveryArtifact.reference,
     currentWorkflowRunId: CURRENT_RUN_ID,
     now: () => NOW,
   };
   return { bootstrap, common, git, harness, rawDist };
 };
+
+const configuredP0aPolicy = ({ bootstrap, git, rawDist }) => ({
+  ...structuredClone(BASE_P0A_POLICY),
+  bindingStatus: "configured",
+  blockerCodes: [],
+  applicationDatabase: {
+    provisioningStatus: "provisioned",
+    credentialOwner: "github-team:database-observers",
+    backupOwner: "github-team:database-backup",
+    restoreOwner: "github-team:database-restore",
+  },
+  controlStore: {
+    namespaceStatus: "uninitialized",
+    credentialOwner: "github-team:release-state",
+  },
+  bootstrapRecovery: {
+    ...BASE_P0A_POLICY.bootstrapRecovery,
+    bootstrapSourceSha: git.bootstrapSourceSha,
+    rawDistManifestSha256: sha256Bytes(rawDist.bytes),
+    deploymentBindingSha256: bootstrap.bindingReference.sha256,
+    deploymentSeedAuthoritySha256:
+      bootstrap.recovery.bootstrapDeploymentSeed.sha256,
+    previewAliasSuffix: "preview.foundation.dev",
+  },
+});
 
 test("closes P0A with an independent provider-bound bootstrap source before P0D", async (t) => {
   const fixture = await createResolutionFixture();
@@ -741,7 +951,7 @@ test("closes P0A with an independent provider-bound bootstrap source before P0D"
     fixture.harness.objects.get(stored.reference.sha256).mediaType,
     FOUNDATION_BASELINE_CLOSURE_MEDIA_TYPE,
   );
-  const phaseExitReadback = await readFoundationBaselineClosureForPhaseExit({
+  const phaseExitOptions = {
     store: fixture.harness.store,
     reference: stored.reference,
     expectedSourceSha: fixture.git.closureSourceSha,
@@ -750,13 +960,44 @@ test("closes P0A with an independent provider-bound bootstrap source before P0D"
     databaseContract: DATABASE_CONTRACT,
     controlStorePolicy: STORE_POLICY,
     approvalPolicy: APPROVAL_POLICY,
+    p0aPolicy: configuredP0aPolicy(fixture),
     currentWorkflowRunId: CURRENT_RUN_ID,
     now: () => NOW,
-  });
+  };
+  const phaseExitReadback =
+    await readFoundationBaselineClosureForPhaseExit(phaseExitOptions);
   assert.equal(
     phaseExitReadback.recoveryRehearsal.executorSourceSha,
     fixture.git.closureSourceSha,
   );
+  for (const [field, value, error] of [
+    ["bootstrapSourceSha", "f".repeat(40), /closure source binding differs/u],
+    [
+      "rawDistManifestSha256",
+      "e".repeat(64),
+      /closure source binding differs/u,
+    ],
+    [
+      "deploymentBindingSha256",
+      "d".repeat(64),
+      /closure source binding differs/u,
+    ],
+    [
+      "deploymentSeedAuthoritySha256",
+      "c".repeat(64),
+      /bootstrap seed binding differs/u,
+    ],
+  ]) {
+    const p0aPolicy = configuredP0aPolicy(fixture);
+    p0aPolicy.bootstrapRecovery[field] = value;
+    await assert.rejects(
+      readFoundationBaselineClosureForPhaseExit({
+        ...phaseExitOptions,
+        p0aPolicy,
+      }),
+      error,
+    );
+  }
   const phase0dPolicyResolution = resolveFoundationBaselinePolicyBindings({
     store: fixture.harness.store,
     namespace: NAMESPACE,
@@ -893,6 +1134,33 @@ test("readback rejects stale, wrong-source, extra-key, and tampered closure byte
     }),
     /shape or identity/u,
   );
+  const reviewedReceiptObject = fixture.harness.objects.get(
+    fixture.bootstrap.reviewedRecoveryArtifact.reference.sha256,
+  );
+  const reviewedReceipt = JSON.parse(
+    reviewedReceiptObject.bytes.toString("utf8"),
+  );
+  const reviewedFileObject = fixture.harness.objects.get(
+    reviewedReceipt.artifactFile.sha256,
+  );
+  const reviewedFileBytes = Buffer.from(reviewedFileObject.bytes);
+  reviewedFileObject.bytes = Buffer.concat([
+    reviewedFileObject.bytes,
+    Buffer.from(" "),
+  ]);
+  await assert.rejects(
+    readFoundationBaselineClosureAuthority({
+      store: fixture.harness.store,
+      reference: stored.reference,
+      sourceResolution: fixture.common.sourceResolution,
+      bootstrapSourceResolution: fixture.common.bootstrapSourceResolution,
+      policyBindingResolution: fixture.common.policyBindingResolution,
+      currentWorkflowRunId: CURRENT_RUN_ID,
+      now: () => NOW,
+    }),
+    /immutable object is absent or differs/u,
+  );
+  reviewedFileObject.bytes = reviewedFileBytes;
   await writeFile(
     path.join(fixture.git.root, "foundation.txt"),
     "third\n",

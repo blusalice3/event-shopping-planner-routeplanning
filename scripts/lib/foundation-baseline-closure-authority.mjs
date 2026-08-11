@@ -14,9 +14,15 @@ import {
 } from "../db/remote-db-observation-authority.mjs";
 import { assertRemoteDbObservationAuthority } from "../db/remote-db-observation.mjs";
 import { assertProviderPolicyConfigured } from "../provider/collect-vercel-observation.mjs";
+import {
+  FOUNDATION_BOOTSTRAP_DEPLOYMENT_SEED_MEDIA_TYPE,
+  assertFoundationBootstrapDeploymentSeedAuthority,
+} from "../provider/foundation-bootstrap-deployment-seed.mjs";
+import { assertConfiguredFoundationP0aAuthorities } from "../provider/foundation-p0a-authorities-policy.mjs";
 import { providerConfigurationHash } from "../provider/providerConfiguration.mjs";
 import { validateConnectionBinding } from "../release-state/postgresStore.mjs";
 import { readReviewedWorkflowRunAuthority } from "../release-state/reviewedWorkflowRunAuthority.mjs";
+import { readBoundReviewedWorkflowArtifactAuthority } from "../release-state/reviewedWorkflowArtifactAuthority.mjs";
 import {
   assertArtifactArchiveAvailable,
   assertDeploymentBinding,
@@ -24,7 +30,7 @@ import {
 } from "../release-state/releaseWorkflowValidation.mjs";
 
 export const FOUNDATION_BASELINE_CLOSURE_MEDIA_TYPE =
-  "application/vnd.event-shopping-planner.foundation-baseline-closure+json;version=1";
+  "application/vnd.event-shopping-planner.foundation-baseline-closure+json;version=2";
 export const FOUNDATION_HISTORICAL_BASELINE_EVIDENCE_MEDIA_TYPE =
   "application/vnd.event-shopping-planner.foundation-historical-baseline-evidence+json;version=1";
 export const FOUNDATION_DATABASE_PROVISIONING_POLICY_MEDIA_TYPE =
@@ -52,6 +58,8 @@ const HISTORICAL_BASELINE_OBJECT_SHA256 =
   "b4366d44633733233d307765f04c837eccc270cbe5ba13c519621eb7fbf1772d";
 const RELEASE_WORKFLOW_PATH = ".github/workflows/release.yml";
 const REHEARSAL_OPERATION = "rehearse-foundation-bootstrap-recovery";
+const FOUNDATION_BOOTSTRAP_RECOVERY_OBSERVATION_MEDIA_TYPE =
+  "application/vnd.event-shopping-planner.foundation-bootstrap-recovery+json;version=2";
 const CLOSURE_MAXIMUM_AGE_MILLISECONDS = 60 * 60 * 1_000;
 const REHEARSAL_MAXIMUM_AGE_MILLISECONDS = 30 * 24 * 60 * 60 * 1_000;
 const FUTURE_SKEW_MILLISECONDS = 30_000;
@@ -768,6 +776,7 @@ const assertRecoveryRehearsalShape = (rehearsal) => {
   if (
     !exactKeys(rehearsal, [
       "artifactArchiveSha256",
+      "bootstrapDeploymentSeed",
       "completedAt",
       "dataLossObserved",
       "evidenceKind",
@@ -836,6 +845,24 @@ const readRecoveryRehearsal = async ({
   });
   const rehearsal = stored.value;
   assertRecoveryRehearsalShape(rehearsal);
+  const seedStored = await readCanonicalStored({
+    store,
+    namespace,
+    reference: rehearsal.bootstrapDeploymentSeed,
+    mediaType: FOUNDATION_BOOTSTRAP_DEPLOYMENT_SEED_MEDIA_TYPE,
+    label: "Foundation bootstrap deployment seed authority",
+  });
+  const seed = assertFoundationBootstrapDeploymentSeedAuthority(
+    seedStored.value,
+    {
+      namespace,
+      bootstrapSourceSha: expectedSourceSha,
+      workflowSourceSha: seedStored.value?.workflowSourceSha,
+      repository: approvalPolicy.repository,
+      runId: seedStored.value?.runId,
+      runAttempt: seedStored.value?.runAttempt,
+    },
+  );
   const startedAt = canonicalTimestamp(
     rehearsal.startedAt,
     "Foundation recovery rehearsal start",
@@ -859,6 +886,9 @@ const readRecoveryRehearsal = async ({
     rehearsal.recoveryBindingId !== expectedBinding.bindingId ||
     rehearsal.recoveryDeploymentId !== expectedBinding.providerDeploymentId ||
     rehearsal.rawDistManifestSha256 !== expectedRawDistManifestSha256 ||
+    seed.binding.sha256 !== sha256Bytes(canonicalJsonBytes(expectedBinding)) ||
+    seed.bindingId !== expectedBinding.bindingId ||
+    seed.rawDistManifest.sha256 !== expectedRawDistManifestSha256 ||
     rehearsal.artifactArchiveSha256 !==
       expectedBinding.artifactArchive.sha256 ||
     rehearsal.restoredArtifactSha256 !== rehearsal.artifactArchiveSha256 ||
@@ -877,18 +907,100 @@ const readRecoveryRehearsal = async ({
       runId: rehearsal.runId,
       runAttempt: rehearsal.runAttempt,
     }),
+    readStoredRemoteDbObservationOidcAuthority({
+      store,
+      namespace,
+      reference: seed.oidcReceipt,
+      approvalPolicy,
+      sourceSha: seed.workflowSourceSha,
+      runId: seed.runId,
+      runAttempt: seed.runAttempt,
+    }),
     readReviewedWorkflowRunAuthority({
       namespace,
       repository: rehearsal.repository,
-      expectedRunId: rehearsal.runId,
-      expectedRunAttempt: rehearsal.runAttempt,
-      expectedSourceSha: rehearsal.executorSourceSha,
+      expectedRunId: seed.runId,
+      expectedRunAttempt: seed.runAttempt,
+      expectedSourceSha: seed.workflowSourceSha,
       expectedWorkflowPath: RELEASE_WORKFLOW_PATH,
       reference: rehearsal.reviewedWorkflowRun,
       store,
     }),
   ]);
   return rehearsal;
+};
+
+const readReviewedRecoveryArtifact = async ({
+  store,
+  namespace,
+  reference,
+  expectedSourceSha,
+  expectedRehearsalReference,
+  approvalPolicy,
+  currentWorkflowRunId,
+}) => {
+  const reviewed = await readBoundReviewedWorkflowArtifactAuthority({
+    namespace,
+    repository: approvalPolicy.repository,
+    expectedSourceSha,
+    expectedWorkflowPath: RELEASE_WORKFLOW_PATH,
+    expectedArtifactNameTemplate:
+      `foundation-bootstrap-recovery-${expectedSourceSha}-` + "{runAttempt}",
+    expectedFileName: "foundation-bootstrap-recovery.json",
+    expectedFileMediaType: FOUNDATION_BOOTSTRAP_RECOVERY_OBSERVATION_MEDIA_TYPE,
+    reference,
+    store,
+  });
+  const observation = parseJsonStrict(
+    reviewed.fileBytes.toString("utf8"),
+    "Reviewed foundation bootstrap recovery observation",
+  );
+  if (
+    !reviewed.fileBytes.equals(canonicalJsonBytes(observation)) ||
+    !exactKeys(observation, [
+      "collectorIdentity",
+      "kind",
+      "namespace",
+      "observedAt",
+      "oidcReceipt",
+      "rawAuthority",
+      "rehearsalAuthority",
+      "result",
+      "schemaVersion",
+      "sourceSha",
+      "stateInitializationSubject",
+    ]) ||
+    observation.schemaVersion !== 2 ||
+    observation.kind !== "foundation-bootstrap-recovery-observation/v2" ||
+    observation.namespace !== namespace ||
+    observation.sourceSha !== expectedSourceSha ||
+    !exactKeys(observation.collectorIdentity, [
+      "repository",
+      "runAttempt",
+      "runId",
+      "sourceSha",
+      "workflowPath",
+    ]) ||
+    observation.collectorIdentity.repository !== approvalPolicy.repository ||
+    observation.collectorIdentity.workflowPath !== RELEASE_WORKFLOW_PATH ||
+    observation.collectorIdentity.sourceSha !== expectedSourceSha ||
+    observation.collectorIdentity.runId !== reviewed.receipt.runId ||
+    observation.collectorIdentity.runAttempt !== reviewed.receipt.runAttempt ||
+    reviewed.receipt.runId === currentWorkflowRunId ||
+    !sameCanonicalValue(
+      observation.rehearsalAuthority,
+      expectedRehearsalReference,
+    )
+  ) {
+    throw new Error(
+      "Reviewed foundation bootstrap recovery artifact binding differs",
+    );
+  }
+  return Object.freeze({
+    observation: Object.freeze(structuredClone(observation)),
+    reference: Object.freeze({ ...reference }),
+    receipt: Object.freeze(structuredClone(reviewed.receipt)),
+  });
 };
 
 export const readFoundationBootstrapRecoveryRehearsalAuthority = (options) =>
@@ -965,8 +1077,8 @@ const assertClosureShape = ({
 }) => {
   if (
     !exactKeys(closure, closureKeys) ||
-    closure.schemaVersion !== 1 ||
-    closure.authorityKind !== "foundation-baseline-closure/v1" ||
+    closure.schemaVersion !== 2 ||
+    closure.authorityKind !== "foundation-baseline-closure/v2" ||
     closure.namespace !== namespace ||
     !sameCanonicalValue(closure.closureSource, closureSourceResolution) ||
     !exactKeys(closure.producer, ["oidc", "runAttempt", "runId"]) ||
@@ -1009,6 +1121,7 @@ const assertClosureShape = ({
       "commitTreeSha",
       "rawDistManifest",
       "recoveryRehearsal",
+      "reviewedRecoveryArtifact",
       "selectionBasis",
     ]) ||
     closure.bootstrap.bootstrapBaselineSourceSha !==
@@ -1032,6 +1145,7 @@ const assertClosureShape = ({
     [closure.approvalPolicy, "Approval policy"],
     [closure.bootstrap.rawDistManifest, "Raw dist manifest"],
     [closure.bootstrap.recoveryRehearsal, "Recovery rehearsal"],
+    [closure.bootstrap.reviewedRecoveryArtifact, "Reviewed recovery artifact"],
   ]) {
     assertReference({ namespace, reference, label });
   }
@@ -1049,6 +1163,7 @@ export const resolveFoundationBaselineClosure = async ({
   providerPolicyReference,
   rawDistManifestBytes,
   recoveryRehearsalReference,
+  reviewedRecoveryArtifactReference,
   currentWorkflowRunId,
   now = Date.now,
 }) => {
@@ -1075,6 +1190,10 @@ export const resolveFoundationBaselineClosure = async ({
     [providerObservationReference, "Foundation provider observation"],
     [providerPolicyReference, "Foundation provider policy"],
     [recoveryRehearsalReference, "Foundation recovery rehearsal"],
+    [
+      reviewedRecoveryArtifactReference,
+      "Foundation reviewed recovery artifact",
+    ],
   ]) {
     assertReference({ namespace, reference, label });
   }
@@ -1123,6 +1242,15 @@ export const resolveFoundationBaselineClosure = async ({
     currentWorkflowRunId,
     nowMilliseconds,
   });
+  await readReviewedRecoveryArtifact({
+    store,
+    namespace,
+    reference: reviewedRecoveryArtifactReference,
+    expectedSourceSha: sourceResolution.gitCommitSha,
+    expectedRehearsalReference: recoveryRehearsalReference,
+    approvalPolicy: policyBindingResolution.approvalPolicy,
+    currentWorkflowRunId,
+  });
   const supportObjects = [
     supportObject(
       namespace,
@@ -1159,8 +1287,8 @@ export const resolveFoundationBaselineClosure = async ({
     supportObjects.map((object) => [object.mediaType, object]),
   );
   const closure = {
-    schemaVersion: 1,
-    authorityKind: "foundation-baseline-closure/v1",
+    schemaVersion: 2,
+    authorityKind: "foundation-baseline-closure/v2",
     namespace,
     closureSource: { ...sourceResolution },
     observedAt: new Date(nowMilliseconds).toISOString(),
@@ -1212,6 +1340,9 @@ export const resolveFoundationBaselineClosure = async ({
         ...byMediaType.get(FOUNDATION_RAW_DIST_MANIFEST_MEDIA_TYPE).reference,
       },
       recoveryRehearsal: { ...recoveryRehearsalReference },
+      reviewedRecoveryArtifact: {
+        ...reviewedRecoveryArtifactReference,
+      },
     },
   };
   assertClosureShape({
@@ -1401,6 +1532,15 @@ export const readFoundationBaselineClosureAuthority = async ({
     currentWorkflowRunId,
     nowMilliseconds,
   });
+  const reviewedRecoveryArtifact = await readReviewedRecoveryArtifact({
+    store,
+    namespace,
+    reference: closure.bootstrap.reviewedRecoveryArtifact,
+    expectedSourceSha: sourceResolution.gitCommitSha,
+    expectedRehearsalReference: closure.bootstrap.recoveryRehearsal,
+    approvalPolicy: policyBindingResolution.approvalPolicy,
+    currentWorkflowRunId,
+  });
   assertExactCleanSource(sourceResolution);
   assertBootstrapSource(bootstrapSourceResolution);
   return Object.freeze({
@@ -1410,6 +1550,7 @@ export const readFoundationBaselineClosureAuthority = async ({
     bootstrapBinding: Object.freeze(structuredClone(bootstrap.binding)),
     providerObservation: Object.freeze(structuredClone(provider.observation)),
     recoveryRehearsal: Object.freeze(structuredClone(recoveryRehearsal)),
+    reviewedRecoveryArtifact,
   });
 };
 
@@ -1477,6 +1618,7 @@ export const readFoundationBaselineClosureForPhaseExit = async ({
   databaseContract,
   controlStorePolicy,
   approvalPolicy,
+  p0aPolicy,
   currentWorkflowRunId,
   now = Date.now,
 }) => {
@@ -1485,6 +1627,14 @@ export const readFoundationBaselineClosureForPhaseExit = async ({
   }
   const namespace = store?.namespace;
   assertStore(store, namespace);
+  assertConfiguredFoundationP0aAuthorities({
+    p0aPolicy,
+    providerPolicy,
+    databaseContract,
+    storePolicy: controlStorePolicy,
+    approvalPolicy,
+    requireBootstrap: true,
+  });
   const stored = await readCanonicalStored({
     store,
     namespace,
@@ -1496,7 +1646,12 @@ export const readFoundationBaselineClosureForPhaseExit = async ({
   const bootstrapSourceSha = closure?.bootstrap?.bootstrapBaselineSourceSha;
   if (
     closure?.closureSource?.gitCommitSha !== expectedSourceSha ||
-    !SOURCE_SHA_PATTERN.test(bootstrapSourceSha ?? "")
+    !SOURCE_SHA_PATTERN.test(bootstrapSourceSha ?? "") ||
+    bootstrapSourceSha !== p0aPolicy.bootstrapRecovery.bootstrapSourceSha ||
+    closure.bootstrap.rawDistManifest?.sha256 !==
+      p0aPolicy.bootstrapRecovery.rawDistManifestSha256 ||
+    closure.provider?.deploymentBinding?.sha256 !==
+      p0aPolicy.bootstrapRecovery.deploymentBindingSha256
   ) {
     throw new Error("Foundation phase exit closure source binding differs");
   }
@@ -1540,7 +1695,7 @@ export const readFoundationBaselineClosureForPhaseExit = async ({
     controlStoreBinding: Object.freeze({ ...connectionProjection.control }),
   });
   policyBindingResolutions.set(policyBindingResolution, { store });
-  return readFoundationBaselineClosureAuthority({
+  const readback = await readFoundationBaselineClosureAuthority({
     store,
     reference,
     sourceResolution,
@@ -1549,6 +1704,13 @@ export const readFoundationBaselineClosureForPhaseExit = async ({
     currentWorkflowRunId,
     now,
   });
+  if (
+    readback.recoveryRehearsal.bootstrapDeploymentSeed?.sha256 !==
+    p0aPolicy.bootstrapRecovery.deploymentSeedAuthoritySha256
+  ) {
+    throw new Error("Foundation phase exit bootstrap seed binding differs");
+  }
+  return readback;
 };
 
 export const putFoundationBaselineClosureAuthority = async ({

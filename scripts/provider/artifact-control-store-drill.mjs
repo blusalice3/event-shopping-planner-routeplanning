@@ -45,7 +45,7 @@ import {
 } from "./collect-vercel-observation.mjs";
 
 export const ARTIFACT_CONTROL_STORE_DRILL_RAW_MEDIA_TYPE =
-  "application/vnd.event-shopping-planner.artifact-provider-control-store-drill-raw+json;version=1";
+  "application/vnd.event-shopping-planner.artifact-provider-control-store-drill-raw+json;version=2";
 
 export {
   assertProductionRequestGraphProtectedWorkflow as assertArtifactControlStoreDrillProtectedWorkflow,
@@ -231,8 +231,8 @@ export const assertArtifactControlStoreDrillRaw = (
     "Artifact drill raw transcript",
   );
   if (
-    raw.schemaVersion !== 1 ||
-    raw.kind !== "artifact-provider-control-store-drill-raw/v1" ||
+    raw.schemaVersion !== 2 ||
+    raw.kind !== "artifact-provider-control-store-drill-raw/v2" ||
     raw.productionNamespace !== productionNamespace ||
     raw.drillNamespace === productionNamespace ||
     !NAMESPACE.test(raw.drillNamespace ?? "") ||
@@ -360,9 +360,10 @@ export const assertArtifactControlStoreDrillRaw = (
     raw.controlStore,
     [
       "casConflictDenied",
-      "credentialDenialVerified",
       "idempotencyVerified",
       "putReadbackVerified",
+      "readerVisibilityDenied",
+      "readerWriteDenied",
       "receiptSha256",
     ],
     "Artifact drill control store",
@@ -373,9 +374,10 @@ export const assertArtifactControlStoreDrillRaw = (
   );
   for (const key of [
     "casConflictDenied",
-    "credentialDenialVerified",
     "idempotencyVerified",
     "putReadbackVerified",
+    "readerVisibilityDenied",
+    "readerWriteDenied",
   ]) {
     if (raw.controlStore[key] !== true)
       throw new Error(`Artifact drill control store ${key} failed`);
@@ -513,8 +515,10 @@ export const readArtifactDrillOperationReceipts = async ({
             operations.authority.databaseEndpointSha256 ||
           operations.controlStore.casConflictDenied !==
             (receipt.casConflict.sqlstate === "40001") ||
-          operations.controlStore.credentialDenialVerified !==
-            (receipt.credentialDenial.sqlstate === "42501") ||
+          operations.controlStore.readerVisibilityDenied !==
+            (receipt.readerVisibilityDenial.sqlstate === "42501") ||
+          operations.controlStore.readerWriteDenied !==
+            (receipt.readerWriteDenial.sqlstate === "42501") ||
           operations.controlStore.idempotencyVerified !==
             (receipt.idempotency.appendReplayObserved === true &&
               receipt.idempotency.evidenceReplayObserved === true) ||
@@ -788,7 +792,8 @@ export const summarizeArtifactControlStoreDrill = (raw, authority) => {
     collectorIdentitySha256: sha256Json(raw.authority.collectorIdentity),
     routeProbeCount: raw.routeProbes.length,
     casConflictDenied: raw.controlStore.casConflictDenied,
-    credentialDenialVerified: raw.controlStore.credentialDenialVerified,
+    readerVisibilityDenied: raw.controlStore.readerVisibilityDenied,
+    readerWriteDenied: raw.controlStore.readerWriteDenied,
     multiDomainAssignmentVerified: true,
     packageRedeployVerified: raw.redeploy.verified,
     reconcileVerified: raw.reconcile.verified,
@@ -893,9 +898,9 @@ export const assertArtifactControlStoreDrillObservation = (observation) => {
     "Artifact drill observation",
   );
   if (
-    observation.schemaVersion !== 1 ||
+    observation.schemaVersion !== 2 ||
     observation.kind !==
-      "artifact-provider-control-store-drill-observation/v1" ||
+      "artifact-provider-control-store-drill-observation/v2" ||
     observation.drillNamespace === observation.productionNamespace ||
     !NAMESPACE.test(observation.drillNamespace ?? "") ||
     !NAMESPACE.test(observation.productionNamespace ?? "") ||
@@ -929,7 +934,6 @@ export const assertArtifactControlStoreDrillObservation = (observation) => {
       "casConflictDenied",
       "collectorIdentitySha256",
       "controlStoreReceiptSha256",
-      "credentialDenialVerified",
       "drillNamespace",
       "extractedManifestSha256",
       "generatedArchiveSha256",
@@ -939,6 +943,8 @@ export const assertArtifactControlStoreDrillObservation = (observation) => {
       "providerDeploymentReceiptSha256",
       "providerObservationSha256",
       "rawSha256",
+      "readerVisibilityDenied",
+      "readerWriteDenied",
       "reconcileVerified",
       "regeneratedArchiveSha256",
       "routeProbeCount",
@@ -953,10 +959,11 @@ export const assertArtifactControlStoreDrillObservation = (observation) => {
     observation.result.generatedArchiveSha256 !==
       observation.result.regeneratedArchiveSha256 ||
     observation.result.casConflictDenied !== true ||
-    observation.result.credentialDenialVerified !== true ||
     observation.result.multiDomainAssignmentVerified !== true ||
     observation.result.packageRedeployVerified !== true ||
     observation.result.reconcileVerified !== true ||
+    observation.result.readerVisibilityDenied !== true ||
+    observation.result.readerWriteDenied !== true ||
     observation.result.outcome !== "succeeded" ||
     !Number.isSafeInteger(observation.result.routeProbeCount) ||
     observation.result.routeProbeCount < 1
@@ -1088,8 +1095,8 @@ export const collectAndStoreArtifactControlStoreDrill = async (
   });
   const completedAt = new Date(Number(now())).toISOString();
   const raw = {
-    schemaVersion: 1,
-    kind: "artifact-provider-control-store-drill-raw/v1",
+    schemaVersion: 2,
+    kind: "artifact-provider-control-store-drill-raw/v2",
     productionNamespace,
     drillNamespace,
     sourceSha,
@@ -1114,8 +1121,8 @@ export const collectAndStoreArtifactControlStoreDrill = async (
     authority,
   });
   const observation = {
-    schemaVersion: 1,
-    kind: "artifact-provider-control-store-drill-observation/v1",
+    schemaVersion: 2,
+    kind: "artifact-provider-control-store-drill-observation/v2",
     productionNamespace,
     productionProviderObservation: { ...productionProviderObservation },
     drillNamespace,

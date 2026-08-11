@@ -258,8 +258,8 @@ const genericFixtureAuthorities = implementedAuthorities.filter(
 );
 
 const expectedReaderBranchByAuthority = Object.freeze({
-  "external-bindings": "derived-reviewed-artifact",
-  "bootstrap-recovery-drill": "derived-reviewed-artifact",
+  "external-bindings": "foundation-baseline-closure",
+  "bootstrap-recovery-drill": "foundation-baseline-closure",
   "quality-run": "generic-reviewed-artifact",
   "physical-performance": "physical-performance-artifact",
   "artifact-provider-control-store-drill": "derived-reviewed-artifact",
@@ -535,9 +535,27 @@ const configuredPolicies = () => {
     blockerCodes: [],
   });
   const foundationBaseline = structuredClone(foundationBaselineBase);
-  foundationBaseline.bootstrapBaselineSourceSha = bootstrapSourceSha;
-  foundationBaseline.baselineEvidence.artifactObservation.rawDistManifestSha256 =
-    hash("9");
+  const p0aPolicy = structuredClone(p0aBase);
+  Object.assign(p0aPolicy, {
+    bindingStatus: "configured",
+    applicationDatabase: {
+      provisioningStatus: "provisioned",
+      credentialOwner: "github-team:database-observers",
+      backupOwner: "github-team:database-backup",
+      restoreOwner: "github-team:database-restore",
+    },
+    controlStore: {
+      namespaceStatus: "uninitialized",
+      credentialOwner: "github-team:release-state",
+    },
+    blockerCodes: [],
+  });
+  Object.assign(p0aPolicy.bootstrapRecovery, {
+    bootstrapSourceSha,
+    rawDistManifestSha256: hash("9"),
+    deploymentBindingSha256: hash("8"),
+    deploymentSeedAuthoritySha256: hash("7"),
+  });
   return {
     providerPolicy,
     approvalPolicy,
@@ -553,7 +571,7 @@ const configuredPolicies = () => {
     releasePolicy: structuredClone(releasePolicyBase),
     toolchainPolicy: structuredClone(toolchainPolicyBase),
     foundationBaseline,
-    p0aPolicy: structuredClone(p0aBase),
+    p0aPolicy,
   };
 };
 
@@ -984,9 +1002,10 @@ const customResults = ({ policies, current, releaseContext }) => ({
     controlStoreReceiptSha256: hash("e"),
     routeProbeCount: 8,
     casConflictDenied: true,
-    credentialDenialVerified: true,
     multiDomainAssignmentVerified: true,
     packageRedeployVerified: true,
+    readerVisibilityDenied: true,
+    readerWriteDenied: true,
     reconcileVerified: true,
     outcome: "succeeded",
   },
@@ -1137,7 +1156,7 @@ const kinds = {
   "quality-run": "phase-exit-quality-run/v1",
   "artifact-provider-control-store-drill":
     "phase-exit-artifact-provider-control-store-drill/v1",
-  "backup-restore-rehearsal": "phase-exit-backup-restore-rehearsal/v1",
+  "backup-restore-rehearsal": "phase-exit-backup-restore-rehearsal/v2",
   "startup-waf-observation": "phase-exit-startup-waf-observation/v1",
   "pwa-multiclient-drill": "phase-exit-pwa-multiclient-drill/v1",
   "production-request-graph": "phase-exit-production-request-graph/v1",
@@ -1167,6 +1186,12 @@ const createExternalBindingsReviewedArtifactFixture = async () => {
     blockerCodes: [],
   });
   policies.p0aPolicy.bootstrapRecovery.deploymentBindingSha256 = hash("b");
+  policies.p0aPolicy.bootstrapRecovery.deploymentSeedAuthoritySha256 =
+    hash("c");
+  policies.p0aPolicy.bootstrapRecovery.bootstrapSourceSha = bootstrapSourceSha;
+  policies.p0aPolicy.bootstrapRecovery.rawDistManifestSha256 = hash("9");
+  policies.p0aPolicy.bootstrapRecovery.previewAliasSuffix =
+    "preview.blusalice3-foundation.dev";
   Object.assign(policies.databaseContract.remote.observationAuthority, {
     bindingStatus: "configured",
     allowedHosts: ["database.example.test"],
@@ -1326,27 +1351,14 @@ const configureBackupRestoreFixture = (policies) => {
   prerequisitePolicy.blockerCodes = prerequisitePolicy.blockerCodes.filter(
     (code) => !code.startsWith("backup-"),
   );
-  const response = (recoveryPoint) => ({
-    resourceIdPointer: "/id",
-    statePointer: "/state",
-    recoveryPointAtPointer: recoveryPoint ? "/recovery_point_at" : null,
-  });
-  const operation = (
+  const operation = (method, pathTemplate, successStatusCodes) => ({
     method,
     pathTemplate,
-    requestBodyTemplate,
-    recoveryPoint,
-    status,
-  ) => ({
-    method,
-    pathTemplate,
-    requestBodyTemplate,
-    successStatusCodes: [status],
-    response: response(recoveryPoint),
+    successStatusCodes,
   });
   const providerContract = {
-    schemaVersion: 1,
-    kind: "backup-restore-provider-contract/v1",
+    schemaVersion: 2,
+    kind: "backup-restore-provider-contract/v2",
     bindingStatus: "configured",
     provider: "supabase",
     api: {
@@ -1354,62 +1366,38 @@ const configureBackupRestoreFixture = (policies) => {
         scheme: "bearer",
         credentialEnvironmentName: "FOUNDATION_BACKUP_API_TOKEN",
       },
-      backupMode: "pitr",
+      backupReadyState: "COMPLETED",
+      cleanupPolling: { intervalMilliseconds: 100, maximumAttempts: 4 },
       maximumResponseBytes: 64 * 1024,
+      projectReadyState: "ACTIVE_HEALTHY",
       requestTimeoutMilliseconds: 5_000,
-      polling: { intervalMilliseconds: 100, maximumAttempts: 4 },
+      restoreMode: "dashboard-new-project",
       operations: {
-        cleanupRestore: operation(
+        confirmRestoreDeleted: operation(
+          "GET",
+          "/v1/projects/{restoreProjectRef}",
+          [200, 404],
+        ),
+        deleteRestoreProject: operation(
           "DELETE",
-          "/v1/projects/{restoreProjectRef}/restores/{restoreId}",
-          null,
-          false,
-          202,
+          "/v1/projects/{restoreProjectRef}",
+          [200],
         ),
-        createBackup: operation(
-          "POST",
-          "/v1/projects/{sourceProjectRef}/backups",
-          { type: "pitr" },
-          true,
-          202,
-        ),
-        getBackup: operation(
+        getRestoreProject: operation(
           "GET",
-          "/v1/projects/{sourceProjectRef}/backups/{backupId}",
-          null,
-          true,
-          200,
+          "/v1/projects/{restoreProjectRef}",
+          [200],
         ),
-        getCleanup: operation(
+        getSourceProject: operation(
           "GET",
-          "/v1/projects/{restoreProjectRef}/restores/{restoreId}",
-          null,
-          false,
-          200,
+          "/v1/projects/{sourceProjectRef}",
+          [200],
         ),
-        getRestore: operation(
+        listSourceBackups: operation(
           "GET",
-          "/v1/projects/{restoreProjectRef}/restores/{restoreId}",
-          null,
-          false,
-          200,
+          "/v1/projects/{sourceProjectRef}/database/backups",
+          [200],
         ),
-        restoreBackup: operation(
-          "POST",
-          "/v1/projects/{restoreProjectRef}/restores",
-          { backup_id: "{backupId}" },
-          false,
-          202,
-        ),
-      },
-      states: {
-        backupPending: ["backup-pending"],
-        backupReady: "backup-ready",
-        cleanupPending: ["cleanup-pending"],
-        cleanupReady: "cleanup-ready",
-        failed: ["failed"],
-        restorePending: ["restore-pending"],
-        restoreReady: "restore-ready",
       },
     },
     database: {
@@ -1418,21 +1406,24 @@ const configureBackupRestoreFixture = (policies) => {
       postgresMajor: 17,
       tlsMode: "verify-full",
       integrityFunction: "read_foundation_backup_restore_integrity",
-      queryName: "foundation-backup-restore-integrity-v1",
+      integrityMigrationVersion: "20260810010000",
+      queryName: "foundation-backup-restore-integrity-v2",
       source: {
         databaseUrlEnvironmentName: "FOUNDATION_BACKUP_SOURCE_DATABASE_URL",
         databaseCaEnvironmentName: "FOUNDATION_BACKUP_SOURCE_DATABASE_CA_PEM",
         allowedHosts: ["source.db.example.test"],
-        allowedDatabases: ["app_source"],
-        allowedRoles: ["backup_source"],
+        allowedPorts: [5432],
+        allowedDatabases: ["postgres"],
+        allowedRoles: ["foundation_backup_source_reader"],
         caSha256: sha256Bytes(Buffer.from(sourceCa, "utf8")),
       },
       restore: {
         databaseUrlEnvironmentName: "FOUNDATION_BACKUP_RESTORE_DATABASE_URL",
         databaseCaEnvironmentName: "FOUNDATION_BACKUP_RESTORE_DATABASE_CA_PEM",
         allowedHosts: ["restore.db.example.test"],
-        allowedDatabases: ["app_restore"],
-        allowedRoles: ["backup_restore"],
+        allowedPorts: [5432],
+        allowedDatabases: ["postgres"],
+        allowedRoles: ["foundation_backup_restore_reader"],
         caSha256: sha256Bytes(Buffer.from(restoreCa, "utf8")),
       },
     },
@@ -1447,63 +1438,91 @@ const configureBackupRestoreFixture = (policies) => {
       GITHUB_SHA: sourceSha,
       FOUNDATION_BACKUP_API_TOKEN: "fixture-backup-token",
       FOUNDATION_BACKUP_SOURCE_DATABASE_URL:
-        "postgresql://backup_source:secret@source.db.example.test/app_source?sslmode=verify-full",
+        "postgresql://foundation_backup_source_reader:fixture-backup-source-secret@source.db.example.test/postgres?sslmode=verify-full",
       FOUNDATION_BACKUP_SOURCE_DATABASE_CA_PEM: sourceCa,
       FOUNDATION_BACKUP_RESTORE_DATABASE_URL:
-        "postgresql://backup_restore:secret@restore.db.example.test/app_restore?sslmode=verify-full",
+        "postgresql://foundation_backup_restore_reader:fixture-backup-restore-secret@restore.db.example.test/postgres?sslmode=verify-full",
       FOUNDATION_BACKUP_RESTORE_DATABASE_CA_PEM: restoreCa,
     },
   };
 };
 
-const createBackupProviderResult = ({ contract, operationName, variables }) => {
+const createBackupProviderResult = ({
+  contract,
+  occurrence = 1,
+  operationName,
+  variables,
+}) => {
   const descriptor = contract.api.operations[operationName];
-  const offsets = {
-    createBackup: [95, 94],
-    getBackup: [90, 89],
-    restoreBackup: [85, 84],
-    getRestore: [50, 49],
-    cleanupRestore: [48, 47],
-    getCleanup: [45, 44],
+  let offsets = {
+    listSourceBackups: [95, 94],
+    getSourceProject: [93, 92],
+    getRestoreProject: [85, 84],
+    deleteRestoreProject: [47, 46],
+    confirmRestoreDeleted: [45, 44],
   }[operationName];
-  const state = {
-    createBackup: "backup-pending",
-    getBackup: "backup-ready",
-    restoreBackup: "restore-pending",
-    getRestore: "restore-ready",
-    cleanupRestore: "cleanup-pending",
-    getCleanup: "cleanup-ready",
-  }[operationName];
-  const resourceId = ["createBackup", "getBackup"].includes(operationName)
-    ? "backup-id-immutable"
-    : "restore-id-immutable";
-  const render = (value) => {
-    if (
-      typeof value === "string" &&
-      /^\{[A-Za-z][A-Za-z0-9]*\}$/u.test(value)
-    ) {
-      return variables[value.slice(1, -1)];
-    }
-    if (Array.isArray(value)) return value.map(render);
-    if (value !== null && typeof value === "object") {
-      return Object.fromEntries(
-        Object.entries(value).map(([key, entry]) => [key, render(entry)]),
-      );
-    }
-    return value;
+  if (operationName === "getRestoreProject" && occurrence > 1) {
+    offsets = [47.8, 47.5];
+  }
+  const recoveryPointAt = new Date(now - 120_000).toISOString();
+  const sourceProject = {
+    ref: variables.sourceProjectRef,
+    organizationSlug: "organization-authority-1",
+    name: "event-shopping-production",
+    region: "ap-northeast-1",
+    createdAt: new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString(),
+    databaseHost: "source.db.example.test",
+    status: "ACTIVE_HEALTHY",
   };
-  const requestBytes =
-    descriptor.requestBodyTemplate === null
-      ? Buffer.alloc(0)
-      : canonicalJsonBytes(render(descriptor.requestBodyTemplate));
-  const recoveryPointAt = descriptor.response.recoveryPointAtPointer
-    ? new Date(now - 120_000).toISOString()
-    : null;
-  const responseBytes = canonicalJsonBytes({
-    id: resourceId,
-    state,
-    ...(recoveryPointAt === null ? {} : { recovery_point_at: recoveryPointAt }),
-  });
+  const restoreProject = {
+    ref: variables.restoreProjectRef,
+    organizationSlug: sourceProject.organizationSlug,
+    name: "phase-exit-backup-restore-run-62001",
+    region: sourceProject.region,
+    createdAt: new Date(now - 90_000).toISOString(),
+    databaseHost: "restore.db.example.test",
+    status: "ACTIVE_HEALTHY",
+  };
+  let normalized;
+  let status = descriptor.successStatusCodes[0];
+  if (operationName === "listSourceBackups") {
+    normalized = {
+      resourceId: "backup-id-immutable",
+      state: "COMPLETED",
+      backup: {
+        id: "backup-id-immutable",
+        insertedAt: new Date(now - 180_000).toISOString(),
+        isPhysicalBackup: true,
+        region: sourceProject.region,
+        recoveryPointAt,
+      },
+      project: null,
+    };
+  } else if (operationName === "getSourceProject") {
+    normalized = {
+      resourceId: sourceProject.ref,
+      state: sourceProject.status,
+      backup: null,
+      project: sourceProject,
+    };
+  } else if (operationName === "getRestoreProject") {
+    normalized = {
+      resourceId: restoreProject.ref,
+      state: restoreProject.status,
+      backup: null,
+      project: restoreProject,
+    };
+  } else {
+    status = operationName === "confirmRestoreDeleted" ? 404 : 200;
+    normalized = {
+      resourceId: variables.restoreProjectRef,
+      state: "deleted",
+      backup: null,
+      project: null,
+    };
+  }
+  const requestBytes = Buffer.alloc(0);
+  const responseBytes = canonicalJsonBytes({ operationName, status });
   const path = descriptor.pathTemplate.replace(
     /\{([A-Za-z][A-Za-z0-9]*)\}/gu,
     (_match, name) => encodeURIComponent(variables[name]),
@@ -1515,7 +1534,7 @@ const createBackupProviderResult = ({ contract, operationName, variables }) => {
       url: new URL(path, "https://api.supabase.com").href,
       startedAt: new Date(now - offsets[0] * 1_000).toISOString(),
       completedAt: new Date(now - offsets[1] * 1_000).toISOString(),
-      status: descriptor.successStatusCodes[0],
+      status,
       contentType: "application/json",
       providerRequestId: `request-${operationName}`,
       requestBodySha256: sha256Bytes(requestBytes),
@@ -1523,7 +1542,7 @@ const createBackupProviderResult = ({ contract, operationName, variables }) => {
       responseBodySha256: sha256Bytes(responseBytes),
       responseBodyByteLength: responseBytes.length,
     },
-    normalized: { resourceId, state, recoveryPointAt },
+    normalized,
   };
 };
 
@@ -1536,12 +1555,16 @@ const createBackupDatabaseReceipt = ({
   target,
   projectRef: target === "source" ? sourceProjectRef : restoreProjectRef,
   host: `${target}.db.example.test`,
-  database: target === "source" ? "app_source" : "app_restore",
-  role: target === "source" ? "backup_source" : "backup_restore",
+  port: 5432,
+  database: "postgres",
+  role:
+    target === "source"
+      ? "foundation_backup_source_reader"
+      : "foundation_backup_restore_reader",
   tlsMode: "verify-full",
   transactionReadOnly: true,
   postgresMajor: 17,
-  queryName: "foundation-backup-restore-integrity-v1",
+  queryName: "foundation-backup-restore-integrity-v2",
   observedAt: new Date(now - 48_000).toISOString(),
   authorization: {
     roleAttributes: {
@@ -1558,7 +1581,7 @@ const createBackupDatabaseReceipt = ({
       schemaCreate: false,
       databaseCreate: false,
       tableCount: 4,
-      allTablesSelect: true,
+      anyTableSelect: false,
       anyTableInsert: false,
       anyTableUpdate: false,
       anyTableDelete: false,
@@ -1567,6 +1590,9 @@ const createBackupDatabaseReceipt = ({
       anyTableTrigger: false,
       integrityFunctionExecute: true,
       integrityFunctionSecurityDefiner: true,
+      executablePublicFunctions: [
+        "public.read_foundation_backup_restore_integrity()",
+      ],
     },
     denialProbes: [
       {
@@ -1582,6 +1608,7 @@ const createBackupDatabaseReceipt = ({
     ],
   },
   databaseHead: hash("3"),
+  migrationVersion: "20260810010000",
   compatibilityFingerprint: current.snapshot.currentDbCompatibility.fingerprint,
   integritySha256: hash("4"),
 });
@@ -1603,6 +1630,7 @@ const collectBackupRestoreReviewedArtifactFixture = async ({
     }),
     GITHUB_OIDC_RECEIPT_MEDIA_TYPE,
   );
+  const providerOperationCounts = new Map();
   const observation = await collectAndStoreBackupRestoreRehearsal(
     {
       current,
@@ -1619,12 +1647,16 @@ const collectBackupRestoreReviewedArtifactFixture = async ({
       store,
     },
     {
-      executeProviderOperation: async ({ operation, variables }) =>
-        createBackupProviderResult({
+      executeProviderOperation: async ({ operation, variables }) => {
+        const occurrence = (providerOperationCounts.get(operation) ?? 0) + 1;
+        providerOperationCounts.set(operation, occurrence);
+        return createBackupProviderResult({
           contract: configured.providerContract,
+          occurrence,
           operationName: operation,
           variables,
-        }),
+        });
+      },
       observeDatabase: async ({ target }) =>
         createBackupDatabaseReceipt({
           target,
@@ -1649,7 +1681,7 @@ const collectBackupRestoreReviewedArtifactFixture = async ({
     current,
     targetGate: "P0-DATA",
     sourceSha,
-    foundationBaseline: policies.foundationBaseline,
+    p0aPolicy: policies.p0aPolicy,
   });
   const releaseContext = projectPhaseExitAuthorityReleaseContext({ current });
   const raw = await readPhaseExitArtifactCollectorEvidence({
@@ -1902,7 +1934,7 @@ const createStartupWafReviewedArtifactFixture = async () => {
     current,
     targetGate: "P0-DATA",
     sourceSha,
-    foundationBaseline: policies.foundationBaseline,
+    p0aPolicy: policies.p0aPolicy,
   });
   const releaseContext = projectPhaseExitAuthorityReleaseContext({ current });
   const raw = await readPhaseExitArtifactCollectorEvidence({
@@ -2142,7 +2174,7 @@ const createFixture = async ({
     current,
     targetGate,
     sourceSha,
-    foundationBaseline: policies.foundationBaseline,
+    p0aPolicy: policies.p0aPolicy,
   });
   const results = customResults({ policies, current, releaseContext });
   const fixtureAuthorities = genericFixtureAuthorities.filter(
@@ -2606,7 +2638,7 @@ test("projects a closed target-gate subject without leaking live production stat
       current: productionCurrent,
       targetGate: "P0-TOOLCHAIN",
       sourceSha,
-      foundationBaseline: policies.foundationBaseline,
+      p0aPolicy: policies.p0aPolicy,
     }),
     { kind: "repository-phase-subject/v1", sourceSha },
   );
@@ -2615,7 +2647,7 @@ test("projects a closed target-gate subject without leaking live production stat
       current: productionCurrent,
       targetGate: "P2A-LOCAL",
       sourceSha,
-      foundationBaseline: policies.foundationBaseline,
+      p0aPolicy: policies.p0aPolicy,
     }),
     {
       kind: "release-state-subject/v1",
@@ -2641,7 +2673,7 @@ test("projects a closed target-gate subject without leaking live production stat
     current: preRelease,
     targetGate: "P0-DATA",
     sourceSha,
-    foundationBaseline: policies.foundationBaseline,
+    p0aPolicy: policies.p0aPolicy,
   });
   assert.deepEqual(dataSubject, {
     kind: "state-initialized-bootstrap-subject/v1",
@@ -2656,8 +2688,7 @@ test("projects a closed target-gate subject without leaking live production stat
       sourceSha: bootstrapSourceSha,
     },
     rawDistManifestSha256:
-      policies.foundationBaseline.baselineEvidence.artifactObservation
-        .rawDistManifestSha256,
+      policies.p0aPolicy.bootstrapRecovery.rawDistManifestSha256,
     releaseStateHead: { sequence: 1, eventHash: hash("e") },
   });
   assert.equal(JSON.stringify(dataSubject).includes("activeProduction"), false);
@@ -2673,7 +2704,7 @@ test("projects a closed target-gate subject without leaking live production stat
         current: pendingSubstitution,
         targetGate: "P0-DATA",
         sourceSha,
-        foundationBaseline: policies.foundationBaseline,
+        p0aPolicy: policies.p0aPolicy,
       }),
     /dual-source initialized bootstrap state/u,
   );
@@ -2686,7 +2717,7 @@ test("projects a closed target-gate subject without leaking live production stat
         current: standardBootstrap,
         targetGate: "P0-DATA",
         sourceSha,
-        foundationBaseline: policies.foundationBaseline,
+        p0aPolicy: policies.p0aPolicy,
       }),
     /baseline bootstrap recovery binding/u,
   );

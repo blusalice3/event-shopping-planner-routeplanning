@@ -463,7 +463,11 @@ const buildBootstrapPackage = async ({
   packageRoot,
   scratchRoot,
   rawDistRoot,
-  foundationBaseline,
+  sourceSha,
+  nodeVersion,
+  npmVersion,
+  lockfileSha256,
+  expectedRawDistManifestSha256,
   releasePolicy,
   providerPolicy,
   releaseContext,
@@ -471,7 +475,6 @@ const buildBootstrapPackage = async ({
   vercelCliPath,
   environment = process.env,
 }) => {
-  const sourceSha = foundationBaseline.bootstrapBaselineSourceSha;
   if (typeof sourceSha !== "string" || !/^[0-9a-f]{40}$/.test(sourceSha)) {
     throw new Error(
       "Bootstrap baseline source is not provider-bound; production bootstrap is blocked",
@@ -479,11 +482,8 @@ const buildBootstrapPackage = async ({
   }
   const rawDistManifest = await buildRawDistManifest(rawDistRoot);
   const rawDistManifestBytes = canonicalJsonBytes(rawDistManifest);
-  const expectedRawDistManifestSha256 =
-    foundationBaseline.baselineEvidence?.artifactObservation
-      ?.rawDistManifestSha256;
   if (
-    typeof expectedRawDistManifestSha256 !== "string" ||
+    expectedRawDistManifestSha256 !== null &&
     expectedRawDistManifestSha256 !== sha256Bytes(rawDistManifestBytes)
   ) {
     throw new Error(
@@ -529,9 +529,9 @@ const buildBootstrapPackage = async ({
   );
   const bootstrapInput = createBootstrapInput({
     sourceSha,
-    nodeVersion: foundationBaseline.baselineEvidence.runtime.node,
-    npmVersion: foundationBaseline.baselineEvidence.runtime.npm,
-    lockfileSha256: foundationBaseline.baselineEvidence.lockfileSha256,
+    nodeVersion,
+    npmVersion,
+    lockfileSha256,
     rawDistManifestReference: rawDistReference,
     metricsDisabledTemplateBytes,
     apiNotFoundTemplateBytes,
@@ -672,6 +672,7 @@ export const buildNonPromotableArtifactDrillPackage = async ({
   scratchRoot: scratchRootArgument,
   rawDistRoot,
   sourceSha,
+  p0aPolicy,
   foundationBaseline,
   releasePolicy,
   toolchainPolicy,
@@ -755,7 +756,12 @@ export const buildNonPromotableArtifactDrillPackage = async ({
     packageRoot: bootstrapPackageRoot,
     scratchRoot: bootstrapScratchRoot,
     rawDistRoot: resolvedRawDistRoot,
-    foundationBaseline,
+    sourceSha: p0aPolicy?.bootstrapRecovery?.bootstrapSourceSha,
+    nodeVersion: toolchainPolicy.runtime.node,
+    npmVersion: toolchainPolicy.runtime.npm,
+    lockfileSha256: sha256Bytes(packageLockBytes),
+    expectedRawDistManifestSha256:
+      p0aPolicy?.bootstrapRecovery?.rawDistManifestSha256,
     releasePolicy,
     providerPolicy,
     releaseContext,
@@ -772,6 +778,7 @@ export const buildNonPromotableArtifactDrillPackage = async ({
     dbContract,
     cspPolicy,
     foundationBaseline,
+    p0aPolicy,
     root: repositoryRoot,
     environment,
   });
@@ -865,14 +872,19 @@ export const buildNonPromotableArtifactDrillPackage = async ({
 const run = async () => {
   const outputArgument = option("--output");
   const providerObservationArgument = option("--provider-observation");
-  const bootstrap = process.argv.includes("--bootstrap");
+  const configuredBootstrap = process.argv.includes("--bootstrap");
+  const seedBootstrap = process.argv.includes("--bootstrap-seed");
+  if (configuredBootstrap && seedBootstrap) {
+    throw new Error("Only one bootstrap package mode may be selected");
+  }
+  const bootstrap = configuredBootstrap || seedBootstrap;
   const rawDistArgument = option("--raw-dist");
   const dimensionsArgument = option("--standard-dimensions");
   const requirementsArgument = option("--build-requirements");
   const requirementsSha256Argument = option("--build-requirements-sha256");
   if (!outputArgument || !providerObservationArgument) {
     throw new Error(
-      "Usage: node scripts/build-release-artifact.mjs --output <outside-checkout-directory> --provider-observation <json> [--build-requirements <json> --build-requirements-sha256 <sha256> | --bootstrap --raw-dist <directory>]",
+      "Usage: node scripts/build-release-artifact.mjs --output <outside-checkout-directory> --provider-observation <json> [--build-requirements <json> --build-requirements-sha256 <sha256> | (--bootstrap | --bootstrap-seed) --raw-dist <directory>]",
     );
   }
   if (bootstrap !== Boolean(rawDistArgument)) {
@@ -904,7 +916,7 @@ const run = async () => {
     providerObservation,
     dbContract,
     archivePolicy,
-    foundationBaseline,
+    p0aPolicy,
     cspPolicy,
     storePolicy,
   ] = await Promise.all([
@@ -923,7 +935,7 @@ const run = async () => {
       path.join(repositoryRoot, "config", "artifact-archive-policy.json"),
     ),
     readJsonStrict(
-      path.join(repositoryRoot, "config", "foundation-baseline.json"),
+      path.join(repositoryRoot, "config", "foundation-p0a-authorities.json"),
     ),
     readJsonStrict(path.join(repositoryRoot, "config", "csp-policy.json")),
     readJsonStrict(
@@ -991,6 +1003,48 @@ const run = async () => {
     const packageLockBytes = await readFile(
       path.join(repositoryRoot, "package-lock.json"),
     );
+    const configuredBootstrapSourceSha =
+      p0aPolicy.bootstrapRecovery?.bootstrapSourceSha;
+    const configuredRawDistManifestSha256 =
+      p0aPolicy.bootstrapRecovery?.rawDistManifestSha256;
+    if (
+      configuredBootstrap &&
+      (!/^[0-9a-f]{40}$/.test(configuredBootstrapSourceSha ?? "") ||
+        !/^[0-9a-f]{64}$/.test(configuredRawDistManifestSha256 ?? ""))
+    ) {
+      throw new Error(
+        "Configured bootstrap source and raw dist are not P0A-bound",
+      );
+    }
+    if (
+      seedBootstrap &&
+      (configuredBootstrapSourceSha !== null ||
+        configuredRawDistManifestSha256 !== null ||
+        process.env.REQUESTED_OPERATION !==
+          "seed-foundation-bootstrap-deployment-binding" ||
+        process.env.GITHUB_SHA !== sourceSha ||
+        process.env.GITHUB_REF !== "refs/heads/main" ||
+        process.env.GITHUB_REF_PROTECTED !== "true")
+    ) {
+      throw new Error(
+        "Bootstrap seed requires the unbound baseline on protected exact main",
+      );
+    }
+    const bootstrapIdentity = seedBootstrap
+      ? {
+          sourceSha,
+          nodeVersion: toolchainPolicy.runtime.node,
+          npmVersion: toolchainPolicy.runtime.npm,
+          lockfileSha256: sha256Bytes(packageLockBytes),
+          expectedRawDistManifestSha256: null,
+        }
+      : {
+          sourceSha: configuredBootstrapSourceSha,
+          nodeVersion: toolchainPolicy.runtime.node,
+          npmVersion: toolchainPolicy.runtime.npm,
+          lockfileSha256: sha256Bytes(packageLockBytes),
+          expectedRawDistManifestSha256: configuredRawDistManifestSha256,
+        };
     const effectivePublicEnvironment = {
       ...process.env,
       VITE_APP_BUILD_ID: sourceSha,
@@ -1013,7 +1067,7 @@ const run = async () => {
           packageRoot,
           scratchRoot,
           rawDistRoot: path.resolve(rawDistArgument),
-          foundationBaseline,
+          ...bootstrapIdentity,
           releasePolicy,
           providerPolicy,
           releaseContext,
