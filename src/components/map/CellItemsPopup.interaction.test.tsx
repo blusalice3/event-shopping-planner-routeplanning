@@ -36,7 +36,6 @@ const renderPopup = (
       onAddToVisitList={onAddToVisitList}
       onRemoveFromVisitList={vi.fn()}
       onBatchAddToVisitList={onBatchAddToVisitList}
-      position={{ x: 100, y: 100 }}
       {...props}
     />,
   );
@@ -63,6 +62,22 @@ const pointerClick = (element: HTMLElement) => {
 };
 
 describe("CellItemsPopup opening-click guard", () => {
+  it("renders in a body portal at the viewport center", () => {
+    renderPopup();
+
+    const popup = screen.getByRole("dialog", {
+      name: "A-1のアイテム一覧",
+    });
+    expect(popup).toHaveClass(
+      "left-1/2",
+      "top-1/2",
+      "-translate-x-1/2",
+      "-translate-y-1/2",
+    );
+    expect(popup).not.toHaveClass("left-4", "right-4");
+    expect(popup.parentElement).toBe(document.body);
+  });
+
   it("allows an immediate pointer click on an item", () => {
     const { onAddToVisitList } = renderPopup();
     const itemRow = screen

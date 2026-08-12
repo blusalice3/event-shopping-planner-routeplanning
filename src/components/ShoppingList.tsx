@@ -2436,17 +2436,19 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     : limitedMessage;
   const limitedPurchaseOverlays = (
     <>
-      {limitedToastMessage && (
-        <div
-          className={`fixed left-1/2 top-20 z-[95] -translate-x-1/2 rounded px-4 py-2 text-sm font-medium shadow-lg ${
-            limitedToastMessage.tone === "warning"
-              ? "bg-red-600 text-white dark:bg-red-700 dark:text-white"
-              : "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
-          }`}
-        >
-          {limitedToastMessage.message}
-        </div>
-      )}
+      {limitedToastMessage &&
+        ReactDOM.createPortal(
+          <div
+            className={`fixed left-1/2 top-20 z-[95] -translate-x-1/2 rounded px-4 py-2 text-sm font-medium shadow-lg ${
+              limitedToastMessage.tone === "warning"
+                ? "bg-red-600 text-white dark:bg-red-700 dark:text-white"
+                : "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
+            }`}
+          >
+            {limitedToastMessage.message}
+          </div>,
+          document.body,
+        )}
       <LimitedPurchaseDialog
         isOpen={!isInspecting && limitedBulkDialogContext !== null}
         itemId={limitedBulkDialogItemSnapshot?.id}

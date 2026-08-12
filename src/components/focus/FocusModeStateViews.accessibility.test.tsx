@@ -27,6 +27,15 @@ describe("focus mode accessible white-text backgrounds", () => {
     const heading = screen.getByRole("heading", {
       name: "集中モードを再開しますか？",
     });
+    const dialog = screen.getByRole("dialog", {
+      name: "集中モードを再開しますか？",
+    });
+    expect(dialog.parentElement).toHaveClass(
+      "fixed",
+      "inset-0",
+      "items-center",
+    );
+    expect(dialog.parentElement?.parentElement).toBe(document.body);
     expect(heading.parentElement).toHaveClass(
       "from-teal-700",
       "to-indigo-600",

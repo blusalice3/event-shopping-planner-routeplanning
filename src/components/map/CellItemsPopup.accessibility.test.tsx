@@ -34,7 +34,6 @@ const renderPopup = (
       onAddToVisitList={vi.fn()}
       onRemoveFromVisitList={vi.fn()}
       eventDate="1日目"
-      position={{ x: 100, y: 100 }}
       {...props}
     />,
   );

@@ -5,6 +5,7 @@ import React, {
   useEffect,
   useRef,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   ShoppingItem,
   PurchaseStatus,
@@ -3049,6 +3050,18 @@ const FocusMode: React.FC<FocusModeProps> = ({
     visibleNotification?.tone === "warning"
       ? "bg-red-600 attention-outline-red"
       : "bg-blue-600 attention-outline-blue";
+  const visibleNotificationJSX = visibleNotification
+    ? createPortal(
+        <div
+          className={`fixed left-1/2 z-50 -translate-x-1/2 rounded-lg px-6 py-3 text-white shadow-lg animate-attention-outline ${
+            layoutMode === "smartphone" ? "top-4" : "top-20"
+          } ${visibleNotificationColorClass}`}
+        >
+          {visibleNotification.message}
+        </div>,
+        document.body,
+      )
+    : null;
   // フェーズ切り替え確認ダイアログ
   const phaseChangeDialogJSX = (
     <PhaseChangeDialogView
@@ -3124,13 +3137,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         className="esp-layout-height relative flex flex-col"
         data-focus-inspecting={isInspecting || undefined}
       >
-        {visibleNotification && (
-          <div
-            className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-attention-outline ${visibleNotificationColorClass}`}
-          >
-            {visibleNotification.message}
-          </div>
-        )}
+        {visibleNotificationJSX}
         <div
           data-layout-height={`${splitRatio}%`}
           className="esp-layout-height relative flex min-h-0 flex-col"
@@ -3281,13 +3288,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         className="esp-layout-height relative flex"
         data-focus-inspecting={isInspecting || undefined}
       >
-        {visibleNotification && (
-          <div
-            className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-attention-outline ${visibleNotificationColorClass}`}
-          >
-            {visibleNotification.message}
-          </div>
-        )}
+        {visibleNotificationJSX}
         <div className="w-1/2 flex flex-col border-r border-slate-200 dark:border-slate-700">
           <FocusModeMapControls
             mapZoomLevel={mapZoomLevel}
@@ -3439,13 +3440,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
-      {visibleNotification && (
-        <div
-          className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-attention-outline ${visibleNotificationColorClass}`}
-        >
-          {visibleNotification.message}
-        </div>
-      )}
+      {visibleNotificationJSX}
       <FocusModeHeader
         layoutMode={layoutMode}
         isMapVisible={isMapVisible}

@@ -208,11 +208,12 @@ type LimitedDialogSource = "current" | "singleQuantityChoice";
 
 const PurchaseStatusRadialMenu: React.FC<PurchaseStatusRadialMenuProps> = ({
   itemId,
-  anchorRef: _anchorRef,
+  anchorRef,
   currentStatus,
   onSelect,
   onCancel,
 }) => {
+  const [center, setCenter] = useState<{ x: number; y: number } | null>(null);
   const itemButtonRefs = useRef<
     Partial<Record<PurchaseStatus, HTMLButtonElement | null>>
   >({});
@@ -246,11 +247,34 @@ const PurchaseStatusRadialMenu: React.FC<PurchaseStatusRadialMenuProps> = ({
     onCancel();
   }, [clearScheduledCancel, onCancel]);
 
+  useLayoutEffect(() => {
+    const updateCenter = () => {
+      const rect = anchorRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setCenter({
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+      });
+    };
+
+    updateCenter();
+    window.addEventListener("resize", updateCenter);
+    window.addEventListener("scroll", updateCenter, true);
+
+    return () => {
+      window.removeEventListener("resize", updateCenter);
+      window.removeEventListener("scroll", updateCenter, true);
+    };
+  }, [anchorRef]);
+
   useEffect(() => {
+    if (!center) return;
     itemButtonRefs.current[currentStatus]?.focus();
-  }, [currentStatus]);
+  }, [center, currentStatus]);
 
   useEffect(() => clearScheduledCancel, [clearScheduledCancel]);
+
+  if (!center) return null;
 
   // Known a11y debt: this is a non-modal dialog without focus trapping. Tab can
   // leave the dialog and reach background UI. The radiogroup uses tabbable
@@ -277,6 +301,8 @@ const PurchaseStatusRadialMenu: React.FC<PurchaseStatusRadialMenuProps> = ({
     >
       <div
         data-purchase-status-menu={itemId}
+        data-layout-left={`${center.x}px`}
+        data-layout-top={`${center.y}px`}
         className="purchase-status-radial-menu absolute"
         role="dialog"
         aria-label="購入状態を選択"
@@ -1191,9 +1217,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             ? purchaseStatusMenuOpen
             : undefined
         }
-        className={`flex h-8 min-w-8 items-center justify-center gap-0.5 rounded-md bg-slate-100 px-1 transition-colors hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 ${
-          purchaseStatusMenuOpen ? "purchase-status-radial-anchor" : ""
-        }`}
+        className="flex h-8 min-w-8 items-center justify-center gap-0.5 rounded-md bg-slate-100 px-1 transition-colors hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600"
         aria-label={`Current status: ${currentStatus.label}. Click to change.`}
         title={currentStatus.label}
       >
@@ -1733,9 +1757,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
               ? purchaseStatusMenuOpen
               : undefined
           }
-          className={`relative z-10 flex items-center justify-start space-x-2 rounded-md bg-slate-100 p-2 transition-colors hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 ${
-            purchaseStatusMenuOpen ? "purchase-status-radial-anchor" : ""
-          }`}
+          className="relative z-10 flex items-center justify-start space-x-2 rounded-md bg-slate-100 p-2 transition-colors hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600"
           aria-label={`Current status: ${currentStatus.label}. Click to change.`}
         >
           <IconComponent
