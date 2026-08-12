@@ -71,4 +71,31 @@ describe("HallDefinitionPanel accessibility", () => {
     view.rerender(renderPanel(false));
     expect(opener).toHaveFocus();
   });
+
+  it("keeps new-hall color swatches inside their buttons", () => {
+    const view = render(
+      <HallDefinitionPanel
+        isOpen
+        onClose={vi.fn()}
+        mapData={mapData}
+        halls={halls}
+        onUpdateHalls={vi.fn()}
+        onStartVertexSelection={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(view.getByRole("button", { name: "+ 新規" }));
+
+    const colorButtons = view.getAllByRole("button", { name: /^色: #/ });
+    expect(colorButtons).toHaveLength(12);
+    colorButtons.forEach((button) => {
+      expect(button).toHaveClass("relative", "h-8", "w-8", "overflow-hidden");
+      expect(button.querySelector("svg")).toHaveClass(
+        "absolute",
+        "inset-0",
+        "h-full",
+        "w-full",
+      );
+    });
+  });
 });
