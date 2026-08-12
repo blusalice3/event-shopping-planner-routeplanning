@@ -556,15 +556,17 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                     <div className="flex flex-wrap gap-2">
                       {HALL_COLORS.map((color) => (
                         <button
+                          type="button"
                           key={color}
                           onClick={() =>
                             setEditingHall((prev) => ({ ...prev, color }))
                           }
-                          className={`h-8 w-8 rounded border-2 ${
+                          className={`relative h-8 w-8 overflow-hidden rounded border-2 ${
                             editingHall.color === color
                               ? "border-blue-500"
                               : "border-transparent"
                           }`}
+                          aria-label={`色: ${color}`}
                         >
                           <svg
                             className="absolute inset-0 h-full w-full"
