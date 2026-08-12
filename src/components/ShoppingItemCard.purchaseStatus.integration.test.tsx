@@ -368,6 +368,33 @@ describe("ShoppingItemCard purchase status control", () => {
     ).toBeInTheDocument();
   });
 
+  it("positions the radial dialog at the status button center", () => {
+    renderCard({ purchaseStatusControlMode: "radial" });
+
+    const button = getStatusButton();
+    vi.spyOn(button, "getBoundingClientRect").mockReturnValue({
+      bottom: 260,
+      height: 60,
+      left: 100,
+      right: 180,
+      top: 200,
+      width: 80,
+      x: 100,
+      y: 200,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.click(button);
+
+    const menu = document.querySelector<HTMLElement>(
+      '[data-purchase-status-menu="item-1"]',
+    );
+    expect(menu).not.toBeNull();
+    expect(menu).toHaveAttribute("data-layout-left", "140px");
+    expect(menu).toHaveAttribute("data-layout-top", "230px");
+    expect(menu).not.toHaveAttribute("style");
+  });
+
   it("selects an arbitrary status directly and closes", () => {
     const { onUpdate } = renderCard({ purchaseStatusControlMode: "radial" });
 

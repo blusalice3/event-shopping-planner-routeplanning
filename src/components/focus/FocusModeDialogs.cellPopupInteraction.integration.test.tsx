@@ -85,6 +85,14 @@ describe("CellItemPopup opening-click guard", () => {
     );
   });
 
+  it("portals the centered popup to the document body", () => {
+    renderOpenPopup();
+
+    const popup = screen.getByRole("dialog", { name: "A-1のアイテム" });
+    expect(popup).toHaveClass("fixed", "inset-0", "items-center");
+    expect(popup.parentElement).toBe(document.body);
+  });
+
   it.each<PopupAction>(["temporary", "add"])(
     "blocks an opening gesture click for the %s action when the popup received no pointerdown",
     async (action) => {
@@ -159,6 +167,12 @@ describe("focus dialog accessible white-text backgrounds", () => {
     });
     const descriptionId = dialog.getAttribute("aria-describedby");
     expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog.parentElement).toHaveClass(
+      "fixed",
+      "inset-0",
+      "items-center",
+    );
+    expect(dialog.parentElement?.parentElement).toBe(document.body);
     expect(dialog).toHaveAttribute("aria-labelledby", heading.id);
     expect(descriptionId).not.toBeNull();
     expect(document.getElementById(descriptionId!)).toHaveTextContent(

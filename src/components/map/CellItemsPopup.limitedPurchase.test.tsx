@@ -38,7 +38,6 @@ const renderPopup = (
       onAddToVisitList={onAddToVisitList}
       onRemoveFromVisitList={vi.fn()}
       onEditRequest={onEditRequest}
-      position={{ x: 100, y: 100 }}
       {...props}
     />,
   );

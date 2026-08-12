@@ -282,7 +282,6 @@ const MapView: React.FC<MapViewProps> = ({
     blockName: string;
     number: number;
     items: ShoppingItem[];
-    position: { x: number; y: number };
   }>({
     isOpen: false,
     row: 0,
@@ -290,7 +289,6 @@ const MapView: React.FC<MapViewProps> = ({
     blockName: "",
     number: 0,
     items: [],
-    position: { x: 0, y: 0 },
   });
 
   const executeModeItemIdsSet = useMemo(
@@ -898,11 +896,6 @@ const MapView: React.FC<MapViewProps> = ({
 
       if (!foundBlock && matchingItems.length === 0) return;
 
-      const position = {
-        x: window.innerWidth / 2 - 160,
-        y: window.innerHeight / 3,
-      };
-
       if (foundBlock) {
         setPopupState({
           isOpen: true,
@@ -911,7 +904,6 @@ const MapView: React.FC<MapViewProps> = ({
           blockName: foundBlock.name,
           number: foundBlock.number,
           items: matchingItems,
-          position,
         });
       } else if (matchingItems.length > 0) {
         const firstItem = matchingItems[0];
@@ -925,7 +917,6 @@ const MapView: React.FC<MapViewProps> = ({
           blockName: firstItem.block,
           number: numValue,
           items: matchingItems,
-          position,
         });
       }
     },
@@ -2022,7 +2013,6 @@ const MapView: React.FC<MapViewProps> = ({
         onAddItem={onAddItem}
         onEditRequest={onEditRequest}
         eventDate={mapDayName || normalizeDisplayText(mapName)}
-        position={popupState.position}
       />
       {/* Visit list panel */}
       <MapVisitListPanel

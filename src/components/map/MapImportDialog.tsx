@@ -10,7 +10,6 @@ import {
   DEFAULT_BLOCK_DETECTION_SETTINGS,
   DayMapData,
   BlockDefinition,
-  CellData,
 } from "../../types/map";
 import type { ParseMapFileResult } from "../../xlsx/domain/mapWorkbook";
 import type { XlsxExecutionPort } from "../../xlsx/port/XlsxExecutionPort";
@@ -160,15 +159,6 @@ const MiniMapPreview: React.FC<MiniMapPreviewProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // セルマップを作成
-  const cellMap = useMemo(() => {
-    const map = new Map<string, CellData>();
-    mapData.cells.forEach((cell) => {
-      map.set(`${cell.row}-${cell.col}`, cell);
-    });
-    return map;
-  }, [mapData.cells]);
-
   // ブロックごとのセル集合（cellGroupsがある場合はそれを使う）
   const blockCellSets = useMemo(() => {
     const result = new Map<string, Set<string>>();
@@ -308,7 +298,7 @@ const MiniMapPreview: React.FC<MiniMapPreviewProps> = ({
         }
       }
     });
-  }, [mapData, blocks, highlightBlockName, cellMap, blockCellSets]);
+  }, [mapData, blocks, highlightBlockName, blockCellSets]);
 
   return (
     <div>

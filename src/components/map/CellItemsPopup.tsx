@@ -7,6 +7,7 @@ import React, {
   useCallback,
   useId,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   ShoppingItem,
   PurchaseStatus,
@@ -58,7 +59,6 @@ interface CellItemsPopupProps {
   ) => void;
   onEditRequest?: (item: ShoppingItem) => void;
   eventDate?: string;
-  position: { x: number; y: number };
 }
 
 const statusLabels: Record<PurchaseStatus, string> = {
@@ -99,7 +99,6 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   onUpdateItemPriority,
   onEditRequest,
   eventDate,
-  position,
 }) => {
   const fieldIdPrefix = useId();
   const editDialogIds = {
@@ -341,9 +340,6 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     }
   }, [isOpen]);
 
-  const popupHorizontalClass =
-    position.x < window.innerWidth / 2 ? "left-4" : "right-4";
-
   useEffect(() => {
     const handleClickOutside = (e: PointerEvent) => {
       if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
@@ -480,11 +476,13 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   const labelClass =
     "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
 
-  return (
+  return createPortal(
     <>
       <div
         ref={popupRef}
-        className={`fixed top-[calc(50%+52px)] z-50 max-h-[calc(100vh-120px)] w-80 max-w-sm -translate-y-1/2 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl transition-all duration-150 dark:border-slate-700 dark:bg-slate-800 ${popupHorizontalClass}`}
+        className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100vh-2rem)] w-80 max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl transition-all duration-150 dark:border-slate-700 dark:bg-slate-800"
+        role="dialog"
+        aria-label={`${blockName}-${number}のアイテム一覧`}
         onClickCapture={handlePopupClickCapture}
         onPointerDownCapture={handlePopupInteractionStart}
         onTouchStartCapture={handlePopupInteractionStart}
@@ -1480,7 +1478,8 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
           </div>
         </div>
       )}
-    </>
+    </>,
+    document.body,
   );
 };
 

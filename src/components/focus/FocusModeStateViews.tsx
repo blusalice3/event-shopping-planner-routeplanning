@@ -1,5 +1,6 @@
 import type { ShoppingItem } from "../../types/item";
 import type React from "react";
+import { createPortal } from "react-dom";
 import type { ResumeChoiceDialogState } from "./resumeChoice";
 import {
   getChargeableQuantity,
@@ -27,7 +28,7 @@ export function ResumeChoiceDialogView({
 }) {
   const lastPhaseName = resumePhaseNameMap[dialog.lastPhase];
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
       <div
         className="w-full max-w-md overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-800"
@@ -78,7 +79,8 @@ export function ResumeChoiceDialogView({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

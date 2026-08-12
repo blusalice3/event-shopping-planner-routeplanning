@@ -44,6 +44,11 @@ export interface PersistenceSynchronousFingerprint {
   value: string;
 }
 
+export interface PersistenceIntegrityDescriptors {
+  digest: PersistenceDigestDescriptor;
+  fingerprint: PersistenceSynchronousFingerprint;
+}
+
 export interface RuntimeFallbackCandidate<T = unknown> {
   schemaVersion: typeof FALLBACK_SCHEMA_VERSION;
   storeName: string;
@@ -327,9 +332,22 @@ export function canonicalStringifyPersistencePayload(value: unknown): string {
 const encodeHex = (bytes: Uint8Array): string =>
   Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 
-export async function createPersistenceDigest(
+interface EncodedCanonicalPersistencePayload {
+  canonical: string;
+  bytes: Uint8Array<ArrayBuffer>;
+}
+
+const encodeCanonicalPersistencePayload = (
   payload: unknown,
-): Promise<PersistenceDigestDescriptor> {
+): EncodedCanonicalPersistencePayload => {
+  const canonical = canonicalStringifyPersistencePayload(payload);
+  return {
+    canonical,
+    bytes: new TextEncoder().encode(canonical),
+  };
+};
+
+const requirePersistenceSubtleCrypto = (): SubtleCrypto => {
   const subtle = globalThis.crypto?.subtle;
   if (!subtle) {
     const error = new Error(
@@ -338,35 +356,66 @@ export async function createPersistenceDigest(
     error.name = "NotSupportedError";
     throw error;
   }
+  return subtle;
+};
 
-  const canonical = canonicalStringifyPersistencePayload(payload);
-  const digest = await subtle.digest(
-    DIGEST_ALGORITHM,
-    new TextEncoder().encode(canonical),
-  );
+const createPersistenceDigestFromBytes = async (
+  bytes: Uint8Array<ArrayBuffer>,
+  subtle: SubtleCrypto,
+): Promise<PersistenceDigestDescriptor> => {
+  const digest = await subtle.digest(DIGEST_ALGORITHM, bytes);
   return {
     algorithm: DIGEST_ALGORITHM,
     canonicalization: CANONICALIZATION_VERSION,
     value: encodeHex(new Uint8Array(digest)),
   };
-}
+};
 
-export function createSynchronousFingerprint(
-  payload: unknown,
-): PersistenceSynchronousFingerprint {
-  const canonical = canonicalStringifyPersistencePayload(payload);
-  const bytes = new TextEncoder().encode(canonical);
+const createSynchronousFingerprintFromEncoded = ({
+  canonical,
+  bytes,
+}: EncodedCanonicalPersistencePayload): PersistenceSynchronousFingerprint => {
   let hash = FNV_64_OFFSET_BASIS;
-  bytes.forEach((byte) => {
+  for (const byte of bytes) {
     hash ^= BigInt(byte);
     hash = (hash * FNV_64_PRIME) & FNV_64_MASK;
-  });
+  }
   return {
     algorithm: "FNV-1A-64",
     canonicalization: CANONICALIZATION_VERSION,
     canonicalLength: canonical.length,
     value: hash.toString(16).padStart(16, "0"),
   };
+};
+
+export async function createPersistenceDigest(
+  payload: unknown,
+): Promise<PersistenceDigestDescriptor> {
+  const subtle = requirePersistenceSubtleCrypto();
+  return createPersistenceDigestFromBytes(
+    encodeCanonicalPersistencePayload(payload).bytes,
+    subtle,
+  );
+}
+
+export function createSynchronousFingerprint(
+  payload: unknown,
+): PersistenceSynchronousFingerprint {
+  return createSynchronousFingerprintFromEncoded(
+    encodeCanonicalPersistencePayload(payload),
+  );
+}
+
+export async function createPersistenceIntegrityDescriptors(
+  payload: unknown,
+): Promise<PersistenceIntegrityDescriptors> {
+  const encoded = encodeCanonicalPersistencePayload(payload);
+  const fingerprint = createSynchronousFingerprintFromEncoded(encoded);
+  const digest = await createPersistenceDigestFromBytes(
+    encoded.bytes,
+    requirePersistenceSubtleCrypto(),
+  );
+  return { digest, fingerprint };
 }
 
 export function createStartupRecoveryCandidateId(

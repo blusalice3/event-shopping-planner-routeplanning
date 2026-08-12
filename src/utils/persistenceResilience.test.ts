@@ -7,6 +7,7 @@ import {
   canonicalStringifyPersistencePayload,
   createPersistenceCheckpointKey,
   createPersistenceDigest,
+  createPersistenceIntegrityDescriptors,
   createRuntimeFallbackCandidate,
   createRuntimeFallbackKey,
   createStartupRecoveryBundle,
@@ -254,6 +255,22 @@ describe("canonicalStringifyPersistencePayload", () => {
 });
 
 describe("persistence digest and synchronous fingerprint", () => {
+  it("共有canonical表現から個別生成時と完全に同一のdescriptorを作る", async () => {
+    const payload = {
+      z: [1, "日本語", { beta: false, alpha: null }],
+      a: "イベント",
+    };
+    const expectedDigest = await createPersistenceDigest(payload);
+    const expectedFingerprint = createSynchronousFingerprint(payload);
+
+    await expect(
+      createPersistenceIntegrityDescriptors(payload),
+    ).resolves.toEqual({
+      digest: expectedDigest,
+      fingerprint: expectedFingerprint,
+    });
+  });
+
   it("key順が異なる同一payloadから同じSHA-256 descriptorを作る", async () => {
     const first = await createPersistenceDigest({
       b: [2, { y: "値", x: 1 }],

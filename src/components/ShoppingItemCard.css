@@ -1,16 +1,4 @@
 .purchase-status-radial-menu {
-  left: 50%;
-  top: 50%;
-}
-
-@supports (left: anchor(center)) {
-  .purchase-status-radial-anchor {
-    anchor-name: --purchase-status-menu;
-  }
-
-  .purchase-status-radial-menu {
-    position-anchor: --purchase-status-menu;
-    left: anchor(center);
-    top: anchor(center);
-  }
+  left: attr(data-layout-left type(<length>), 0px);
+  top: attr(data-layout-top type(<length>), 0px);
 }
