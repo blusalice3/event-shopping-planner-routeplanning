@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from "react";
-import type { EventUpdateApplyOptions } from "../features/events/updateApply";
+import type {
+  AppFieldSyncMode,
+  EventUpdateApplyOptions,
+} from "../features/events/updateApply";
 import type { SpreadsheetSource } from "../features/events/updateFlow";
 import type {
+  AppFieldSyncCandidate,
   LimitedPurchaseQuantityConflict,
   PendingPurchasedQuantityChange,
   QuantitySyncWarning,
@@ -18,9 +22,20 @@ interface UpdateConfirmationModalProps {
   quantityWarnings?: QuantitySyncWarning[];
   pendingPurchasedQuantityChanges?: PendingPurchasedQuantityChange[];
   limitedPurchaseQuantityConflicts?: LimitedPurchaseQuantityConflict[];
+  appFieldSyncCandidates?: AppFieldSyncCandidate[];
   nextSource?: SpreadsheetSource;
   onConfirm: (options: EventUpdateApplyOptions) => void;
   onCancel: () => void;
+}
+
+const EMPTY_APP_FIELD_SYNC_CANDIDATES: AppFieldSyncCandidate[] = [];
+
+function formatPrice(value: number | null): string {
+  return value === null ? "価格未定" : `${value.toLocaleString("ja-JP")}円`;
+}
+
+function formatRemarks(value: string): string {
+  return value.trim() === "" ? "（空欄）" : `「${value}」`;
 }
 
 const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
@@ -32,17 +47,68 @@ const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
   quantityWarnings = [],
   pendingPurchasedQuantityChanges = [],
   limitedPurchaseQuantityConflicts = [],
+  appFieldSyncCandidates = EMPTY_APP_FIELD_SYNC_CANDIDATES,
   nextSource,
   onConfirm,
   onCancel,
 }) => {
   const [applyPurchasedQuantityChanges, setApplyPurchasedQuantityChanges] =
     useState(false);
+  const [fillEmptyAppFields, setFillEmptyAppFields] = useState(true);
+  const [overwritePrice, setOverwritePrice] = useState(false);
+  const [overwriteRemarks, setOverwriteRemarks] = useState(false);
   const hasProtectedItems = protectedFromDelete > 0 || protectedFromUpdate > 0;
+  const priceSyncCandidates = appFieldSyncCandidates.filter(
+    (candidate) => candidate.price !== undefined,
+  );
+  const remarksSyncCandidates = appFieldSyncCandidates.filter(
+    (candidate) => candidate.remarks !== undefined,
+  );
+  const fillEmptyPriceCandidates = priceSyncCandidates.filter(
+    (candidate) => candidate.price?.canFillEmpty,
+  );
+  const fillEmptyRemarksCandidates = remarksSyncCandidates.filter(
+    (candidate) => candidate.remarks?.canFillEmpty,
+  );
+  const purchasedPriceCandidates = priceSyncCandidates.filter(
+    (candidate) =>
+      candidate.purchaseStatus === "Purchased" ||
+      candidate.purchaseStatus === "LimitedPurchase",
+  );
+  const hasAppFieldSyncCandidates =
+    priceSyncCandidates.length > 0 || remarksSyncCandidates.length > 0;
+  const hasFillEmptyCandidates =
+    fillEmptyPriceCandidates.length > 0 ||
+    fillEmptyRemarksCandidates.length > 0;
 
   useEffect(() => {
     setApplyPurchasedQuantityChanges(false);
   }, [pendingPurchasedQuantityChanges.length]);
+
+  useEffect(() => {
+    setFillEmptyAppFields(true);
+    setOverwritePrice(false);
+    setOverwriteRemarks(false);
+  }, [appFieldSyncCandidates]);
+
+  const priceSyncMode: AppFieldSyncMode = overwritePrice
+    ? "overwrite"
+    : fillEmptyAppFields && fillEmptyPriceCandidates.length > 0
+      ? "fill-empty"
+      : "preserve";
+  const remarksSyncMode: AppFieldSyncMode = overwriteRemarks
+    ? "overwrite"
+    : fillEmptyAppFields && fillEmptyRemarksCandidates.length > 0
+      ? "fill-empty"
+      : "preserve";
+  const purchasedPriceCandidatesToApply =
+    priceSyncMode === "overwrite"
+      ? purchasedPriceCandidates
+      : priceSyncMode === "fill-empty"
+        ? purchasedPriceCandidates.filter(
+            (candidate) => candidate.price?.canFillEmpty,
+          )
+        : [];
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -126,6 +192,175 @@ const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
                   )}
                 </ul>
               </div>
+            )}
+
+            {hasAppFieldSyncCandidates && (
+              <section
+                className="mt-4 p-3 bg-sky-50 dark:bg-sky-900/20 rounded-md border border-sky-200 dark:border-sky-700"
+                aria-labelledby="app-field-sync-heading"
+              >
+                <h3
+                  id="app-field-sync-heading"
+                  className="text-sm font-semibold text-sky-800 dark:text-sky-300 mb-1"
+                >
+                  利用者欄へのシート値反映
+                </h3>
+                <p className="text-sm text-sky-700 dark:text-sky-300 mb-3">
+                  保護された品目は対象外です。上書きを選んだ欄では上書きを優先し、
+                  シート側が空欄の場合も購入金額は「価格未定」、利用者メモは空欄にします。
+                </p>
+
+                <div className="space-y-4">
+                  {hasFillEmptyCandidates && (
+                    <div>
+                      <label className="flex items-start gap-2 text-sm font-medium text-sky-900 dark:text-sky-200 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={fillEmptyAppFields}
+                          onChange={(event) =>
+                            setFillEmptyAppFields(event.target.checked)
+                          }
+                        />
+                        <span>
+                          今回新しく設定されたシート値を空欄へ補完する
+                          <span className="block font-normal mt-0.5">
+                            購入金額 {fillEmptyPriceCandidates.length}件、
+                            利用者メモ {fillEmptyRemarksCandidates.length}件
+                          </span>
+                        </span>
+                      </label>
+
+                      {fillEmptyPriceCandidates.length > 0 && (
+                        <ul
+                          className="mt-2 ml-6 text-sm text-sky-700 dark:text-sky-300 space-y-1"
+                          aria-label="空欄を補完する購入金額の候補"
+                        >
+                          {fillEmptyPriceCandidates
+                            .slice(0, 5)
+                            .map((candidate) => (
+                              <li key={`fill-price-${candidate.itemId}`}>
+                                • 購入金額：{candidate.circle} -{" "}
+                                {candidate.title || "（タイトルなし）"}：
+                                {formatPrice(candidate.price!.currentValue)} →{" "}
+                                {formatPrice(candidate.price!.sheetValue)}
+                              </li>
+                            ))}
+                          {fillEmptyPriceCandidates.length > 5 && (
+                            <li>
+                              ...他 {fillEmptyPriceCandidates.length - 5}件
+                            </li>
+                          )}
+                        </ul>
+                      )}
+
+                      {fillEmptyRemarksCandidates.length > 0 && (
+                        <ul
+                          className="mt-2 ml-6 text-sm text-sky-700 dark:text-sky-300 space-y-1"
+                          aria-label="空欄を補完する利用者メモの候補"
+                        >
+                          {fillEmptyRemarksCandidates
+                            .slice(0, 5)
+                            .map((candidate) => (
+                              <li key={`fill-remarks-${candidate.itemId}`}>
+                                • 利用者メモ：{candidate.circle} -{" "}
+                                {candidate.title || "（タイトルなし）"}：
+                                {formatRemarks(candidate.remarks!.currentValue)}{" "}
+                                → {formatRemarks(candidate.remarks!.sheetValue)}
+                              </li>
+                            ))}
+                          {fillEmptyRemarksCandidates.length > 5 && (
+                            <li>
+                              ...他 {fillEmptyRemarksCandidates.length - 5}件
+                            </li>
+                          )}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {priceSyncCandidates.length > 0 && (
+                    <div>
+                      <label className="flex items-start gap-2 text-sm font-medium text-sky-900 dark:text-sky-200 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={overwritePrice}
+                          onChange={(event) =>
+                            setOverwritePrice(event.target.checked)
+                          }
+                        />
+                        購入金額をカタログ価格で上書きする（
+                        {priceSyncCandidates.length}件）
+                      </label>
+                      <ul
+                        className="mt-2 ml-6 text-sm text-sky-700 dark:text-sky-300 space-y-1"
+                        aria-label="購入金額を上書きする候補"
+                      >
+                        {priceSyncCandidates.slice(0, 5).map((candidate) => (
+                          <li key={`overwrite-price-${candidate.itemId}`}>
+                            • {candidate.circle} -{" "}
+                            {candidate.title || "（タイトルなし）"}：
+                            {formatPrice(candidate.price!.currentValue)} →{" "}
+                            {formatPrice(candidate.price!.sheetValue)}
+                          </li>
+                        ))}
+                        {priceSyncCandidates.length > 5 && (
+                          <li>...他 {priceSyncCandidates.length - 5}件</li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+
+                  {remarksSyncCandidates.length > 0 && (
+                    <div>
+                      <label className="flex items-start gap-2 text-sm font-medium text-sky-900 dark:text-sky-200 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={overwriteRemarks}
+                          onChange={(event) =>
+                            setOverwriteRemarks(event.target.checked)
+                          }
+                        />
+                        利用者メモをシート備考で上書きする（
+                        {remarksSyncCandidates.length}件）
+                      </label>
+                      <ul
+                        className="mt-2 ml-6 text-sm text-sky-700 dark:text-sky-300 space-y-1"
+                        aria-label="利用者メモを上書きする候補"
+                      >
+                        {remarksSyncCandidates.slice(0, 5).map((candidate) => (
+                          <li key={`overwrite-remarks-${candidate.itemId}`}>
+                            • {candidate.circle} -{" "}
+                            {candidate.title || "（タイトルなし）"}：
+                            {formatRemarks(candidate.remarks!.currentValue)} →{" "}
+                            {formatRemarks(candidate.remarks!.sheetValue)}
+                          </li>
+                        ))}
+                        {remarksSyncCandidates.length > 5 && (
+                          <li>...他 {remarksSyncCandidates.length - 5}件</li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+
+                  {purchasedPriceCandidatesToApply.length > 0 && (
+                    <div
+                      className="p-3 bg-amber-50 dark:bg-amber-900/20 rounded-md border border-amber-300 dark:border-amber-700"
+                      role="alert"
+                    >
+                      <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                        購入済み・限数品目の実購入金額が変更されます：
+                        {purchasedPriceCandidatesToApply.length}件
+                      </p>
+                      <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
+                        実際に支払った金額もカタログ価格へ置き換わります。
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </section>
             )}
 
             {hasProtectedItems && (
@@ -254,6 +489,8 @@ const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
               onClick={() =>
                 onConfirm({
                   applyPurchasedQuantityChanges,
+                  priceSyncMode,
+                  remarksSyncMode,
                 })
               }
               className="px-4 py-2 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors"

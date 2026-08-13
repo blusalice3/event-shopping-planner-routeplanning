@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ShoppingItem } from "../../types/item";
 import { applyEventUpdateToItems } from "./updateApply";
-import type { EventUpdateDiff, SpreadsheetItemToAdd } from "./updateDiff";
+import type {
+  AppFieldSyncCandidate,
+  EventUpdateDiff,
+  SpreadsheetItemToAdd,
+} from "./updateDiff";
 
 const item = (overrides: Partial<ShoppingItem> = {}): ShoppingItem => ({
   id: "item-1",
@@ -35,6 +39,7 @@ const payload = (
       | "itemsToDelete"
       | "itemsToUpdate"
       | "itemsToAdd"
+      | "appFieldSyncCandidates"
       | "pendingPurchasedQuantityChanges"
     >
   > = {},
@@ -42,7 +47,21 @@ const payload = (
   itemsToDelete: [],
   itemsToUpdate: [],
   itemsToAdd: [],
+  appFieldSyncCandidates: [],
   pendingPurchasedQuantityChanges: [],
+  ...overrides,
+});
+
+const syncCandidate = (
+  overrides: Partial<AppFieldSyncCandidate> = {},
+): AppFieldSyncCandidate => ({
+  itemId: "item-1",
+  circle: "サークルA",
+  eventDate: "1日目",
+  block: "東A",
+  number: "01a",
+  title: "旧タイトル",
+  purchaseStatus: "LimitedPurchase",
   ...overrides,
 });
 
@@ -117,6 +136,181 @@ describe("applyEventUpdateToItems allowlist", () => {
     expect(applied.quantity).toBe(5);
     expect(applied.purchaseStatus).toBe("LimitedPurchase");
     expect(applied.limitedPurchasedQuantity).toBe(2);
+  });
+
+  it("上書きモードなら、シート管理値に変更がなくても利用者欄へ反映する", () => {
+    const before = item({ protectionLevel: "none" });
+    const result = applyEventUpdateToItems(
+      [before],
+      payload({
+        appFieldSyncCandidates: [
+          syncCandidate({
+            price: {
+              currentValue: 900,
+              previousSheetValue: 1000,
+              sheetValue: 1000,
+              canFillEmpty: false,
+            },
+            remarks: {
+              currentValue: "利用者メモ",
+              previousSheetValue: "旧シート備考",
+              sheetValue: "旧シート備考",
+              canFillEmpty: false,
+            },
+          }),
+        ],
+      }),
+      { priceSyncMode: "overwrite", remarksSyncMode: "overwrite" },
+    );
+
+    expect(result[0]).toMatchObject({
+      price: 1000,
+      catalogPrice: 1000,
+      remarks: "旧シート備考",
+      sheetRemarks: "旧シート備考",
+    });
+  });
+
+  it("上書きモードはシート側の価格未定と空の備考もそのまま反映する", () => {
+    const before = item({ protectionLevel: "none" });
+    const sourceUpdate = item({
+      protectionLevel: "none",
+      catalogPrice: null,
+      sheetRemarks: "",
+      price: 1,
+      remarks: "通常更新からは反映しない値",
+    });
+    const result = applyEventUpdateToItems(
+      [before],
+      payload({
+        itemsToUpdate: [sourceUpdate],
+        appFieldSyncCandidates: [
+          syncCandidate({
+            price: {
+              currentValue: 900,
+              previousSheetValue: 1000,
+              sheetValue: null,
+              canFillEmpty: false,
+            },
+            remarks: {
+              currentValue: "利用者メモ",
+              previousSheetValue: "旧シート備考",
+              sheetValue: "",
+              canFillEmpty: false,
+            },
+          }),
+        ],
+      }),
+      { priceSyncMode: "overwrite", remarksSyncMode: "overwrite" },
+    );
+
+    expect(result[0].price).toBeNull();
+    expect(result[0].catalogPrice).toBeNull();
+    expect(result[0].remarks).toBe("");
+    expect(result[0].sheetRemarks).toBe("");
+  });
+
+  it("空欄補完モードは補完可能な候補だけを反映する", () => {
+    const before = item({
+      protectionLevel: "none",
+      price: null,
+      catalogPrice: null,
+      remarks: " \t",
+      sheetRemarks: " ",
+    });
+    const result = applyEventUpdateToItems(
+      [before],
+      payload({
+        appFieldSyncCandidates: [
+          syncCandidate({
+            price: {
+              currentValue: null,
+              previousSheetValue: null,
+              sheetValue: 0,
+              canFillEmpty: true,
+            },
+            remarks: {
+              currentValue: " \t",
+              previousSheetValue: " ",
+              sheetValue: "新しいシート備考",
+              canFillEmpty: true,
+            },
+          }),
+        ],
+      }),
+      { priceSyncMode: "fill-empty", remarksSyncMode: "fill-empty" },
+    );
+
+    expect(result[0].price).toBe(0);
+    expect(result[0].remarks).toBe("新しいシート備考");
+  });
+
+  it("以前のシート値があった明示的な空欄は、空欄補完モードで変更しない", () => {
+    const before = item({
+      protectionLevel: "none",
+      price: null,
+      catalogPrice: 1000,
+      remarks: "",
+      sheetRemarks: "旧シート備考",
+    });
+    const result = applyEventUpdateToItems(
+      [before],
+      payload({
+        appFieldSyncCandidates: [
+          syncCandidate({
+            price: {
+              currentValue: null,
+              previousSheetValue: 1000,
+              sheetValue: 1200,
+              canFillEmpty: false,
+            },
+            remarks: {
+              currentValue: "",
+              previousSheetValue: "旧シート備考",
+              sheetValue: "新シート備考",
+              canFillEmpty: false,
+            },
+          }),
+        ],
+      }),
+      { priceSyncMode: "fill-empty", remarksSyncMode: "fill-empty" },
+    );
+
+    expect(result[0].price).toBeNull();
+    expect(result[0].remarks).toBe("");
+  });
+
+  it("確認後に利用者欄か以前のシート値が変わった候補は反映しない", () => {
+    const changedWhileConfirming = item({
+      protectionLevel: "none",
+      price: 950,
+      sheetRemarks: "別のシート備考",
+    });
+    const result = applyEventUpdateToItems(
+      [changedWhileConfirming],
+      payload({
+        appFieldSyncCandidates: [
+          syncCandidate({
+            price: {
+              currentValue: 900,
+              previousSheetValue: 1000,
+              sheetValue: 1200,
+              canFillEmpty: false,
+            },
+            remarks: {
+              currentValue: "利用者メモ",
+              previousSheetValue: "旧シート備考",
+              sheetValue: "新シート備考",
+              canFillEmpty: false,
+            },
+          }),
+        ],
+      }),
+      { priceSyncMode: "overwrite", remarksSyncMode: "overwrite" },
+    );
+
+    expect(result[0].price).toBe(950);
+    expect(result[0].remarks).toBe("利用者メモ");
   });
 
   it("確認中に利用者が数量を変えた場合は、古い確認結果で上書きしない", () => {
