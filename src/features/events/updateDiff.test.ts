@@ -60,6 +60,24 @@ describe("createEventUpdateDiff quantity and field allowlist", () => {
     });
     expect(diff.quantityWarnings).toEqual([]);
     expect(diff.pendingPurchasedQuantityChanges).toEqual([]);
+    expect(diff.appFieldSyncCandidates).toEqual([
+      expect.objectContaining({
+        itemId: before.id,
+        purchaseStatus: "None",
+        price: {
+          currentValue: 900,
+          previousSheetValue: 1000,
+          sheetValue: 1200,
+          canFillEmpty: false,
+        },
+        remarks: {
+          currentValue: "利用者メモ",
+          previousSheetValue: "旧シート備考",
+          sheetValue: "新シート備考",
+          canFillEmpty: false,
+        },
+      }),
+    ]);
   });
 
   it("既存品目の空欄と旧データの数量21超をそのまま維持する", () => {
@@ -78,7 +96,69 @@ describe("createEventUpdateDiff quantity and field allowlist", () => {
 
     expect(diff.itemsToUpdate).toEqual([]);
     expect(diff.quantityWarnings).toEqual([]);
+    expect(diff.appFieldSyncCandidates).toEqual([
+      expect.objectContaining({
+        itemId: before.id,
+        price: {
+          currentValue: 900,
+          previousSheetValue: 1000,
+          sheetValue: 1000,
+          canFillEmpty: false,
+        },
+      }),
+    ]);
     expect(before.quantity).toBe(25);
+  });
+
+  it("旧シート値と利用者欄が空欄なら、今回のシート値を補完可能な候補にする", () => {
+    const before = currentItem({
+      price: null,
+      catalogPrice: undefined,
+      remarks: " \t",
+      sheetRemarks: undefined,
+      quantity: 3,
+    });
+    const diff = createEventUpdateDiff(
+      [before],
+      [sheetItem({ price: 0, remarks: " 新しい備考 ", quantity: 3 })],
+    );
+
+    expect(diff.appFieldSyncCandidates).toEqual([
+      expect.objectContaining({
+        itemId: before.id,
+        price: {
+          currentValue: null,
+          previousSheetValue: null,
+          sheetValue: 0,
+          canFillEmpty: true,
+        },
+        remarks: {
+          currentValue: " \t",
+          previousSheetValue: " \t",
+          sheetValue: " 新しい備考 ",
+          canFillEmpty: true,
+        },
+      }),
+    ]);
+  });
+
+  it("アプリ由来品目と更新保護品目は利用者欄の同期候補にしない", () => {
+    const appItem = currentItem({
+      id: "app-item",
+      source: "app",
+      protectionLevel: "none",
+    });
+    const protectedItem = currentItem({
+      id: "protected-item",
+      number: "02a",
+      protectionLevel: "deletable",
+    });
+    const diff = createEventUpdateDiff(
+      [appItem, protectedItem],
+      [sheetItem(), sheetItem({ number: "02a" })],
+    );
+
+    expect(diff.appFieldSyncCandidates).toEqual([]);
   });
 
   it("既存品目の不正数量を警告し、数量は変更しない", () => {

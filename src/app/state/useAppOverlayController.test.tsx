@@ -28,6 +28,7 @@ const pendingUpdate: PendingEventUpdate = {
     itemsToDelete: [],
     itemsToUpdate: [],
     itemsToAdd: [],
+    appFieldSyncCandidates: [],
     protectedFromDelete: 0,
     protectedFromUpdate: 0,
     quantityWarnings: [],
