@@ -514,7 +514,7 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
 
     return (
       <div
-        className={`relative flex-shrink-0 overflow-hidden ${rootClassName}`}
+        className={`sticky top-0 z-40 flex-shrink-0 overflow-hidden ${rootClassName}`}
         data-testid="focus-mode-header"
       >
         <svg

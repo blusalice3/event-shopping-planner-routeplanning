@@ -1325,7 +1325,7 @@ describe("FocusMode Space Navigator integration", () => {
         "space-aggregate:Z-99a",
       );
     });
-    expect(document.body).not.toHaveClass("esp-body-scroll-lock");
+    expect(document.body).toHaveClass("esp-body-scroll-lock");
     expect(screen.getByText("移動基準：通常")).toBeInTheDocument();
     expect(screen.getByTestId("navigator-history-length")).toHaveTextContent(
       "1",
@@ -1351,6 +1351,9 @@ describe("FocusMode Space Navigator integration", () => {
         name: "一時巡回を終了しました",
       }),
     ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(document.body).not.toHaveClass("esp-body-scroll-lock"),
+    );
     expect(screen.queryByText("すべて完了")).not.toBeInTheDocument();
     await expectLatestSession(onSessionStateChange, {
       phase: "normal",

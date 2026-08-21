@@ -87,11 +87,17 @@ describe("FocusModeItemList purchase status control mode", () => {
 
 describe("FocusModeHeader responsive layout", () => {
   it.each(["pc", "smartphone"] as const)(
-    "prevents the %s header from shrinking inside constrained layouts",
+    "keeps the %s header complete and sticky inside constrained layouts",
     (layoutMode) => {
-      renderHeader({ layoutMode, isMapVisible: true });
+      renderHeader({
+        layoutMode,
+        isMapVisible: true,
+      });
 
       expect(screen.getByTestId("focus-mode-header")).toHaveClass(
+        "sticky",
+        "top-0",
+        "z-40",
         "flex-shrink-0",
         "overflow-hidden",
       );
