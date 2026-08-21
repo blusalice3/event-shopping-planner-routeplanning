@@ -384,6 +384,154 @@ const consolidateViolations = (
     );
 };
 
+const expectFocusHeaderFullyVisible = async (page: Page) => {
+  const metrics = await page
+    .getByTestId("focus-mode-header")
+    .evaluate((headerElement) => {
+      const header = headerElement as HTMLElement;
+      const bulkRow = header.querySelector<HTMLElement>(
+        '[data-testid="focus-header-desktop-bulk-row"], [data-testid="focus-header-bulk-row"]',
+      );
+      if (!bulkRow) throw new Error("Focus header bulk status row is missing");
+
+      const headerRect = header.getBoundingClientRect();
+      const bulkRect = bulkRow.getBoundingClientRect();
+      return {
+        bulkBottom: bulkRect.bottom,
+        bulkHeight: bulkRect.height,
+        bulkTop: bulkRect.top,
+        clientHeight: header.clientHeight,
+        flexShrink: getComputedStyle(header).flexShrink,
+        headerBottom: headerRect.bottom,
+        headerTop: headerRect.top,
+        scrollHeight: header.scrollHeight,
+      };
+    });
+
+  expect(metrics.flexShrink).toBe("0");
+  expect(metrics.clientHeight).toBeGreaterThanOrEqual(metrics.scrollHeight - 1);
+  expect(metrics.bulkHeight).toBeGreaterThan(0);
+  expect(metrics.bulkTop).toBeGreaterThanOrEqual(metrics.headerTop - 1);
+  expect(metrics.bulkBottom).toBeLessThanOrEqual(metrics.headerBottom + 1);
+};
+
+test("@layout focus map keeps the complete space header visible across layouts and display zooms", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1180, height: 768 });
+  await waitForApplication(page);
+
+  const focusHeaderBackup = JSON.parse(JSON.stringify(representativeBackup));
+  const sourceItem = focusHeaderBackup.data.eventLists[EVENT_NAME][0];
+  const itemIds: string[] = [];
+  focusHeaderBackup.data.eventLists[EVENT_NAME] = Array.from(
+    { length: 3 },
+    (_, index) => {
+      const id = `focus-header-item-${index + 1}`;
+      itemIds.push(id);
+      return {
+        ...sourceItem,
+        id,
+        circle: `同一スペースサークル${index + 1}`,
+        number: "01a",
+        priorityLevel: "highest",
+        purchaseStatus: "None",
+        title: `ヘッダー表示確認アイテム${index + 1}`,
+      };
+    },
+  );
+  focusHeaderBackup.data.executeModeItems[EVENT_NAME][EVENT_DATE] = itemIds;
+  focusHeaderBackup.data.routeSettings[EVENT_NAME][MAP_NAME].visitOrder = [
+    {
+      row: 1,
+      col: 2,
+      blockName: "東A",
+      number: 1,
+      order: 0,
+      itemIds,
+    },
+  ];
+  focusHeaderBackup.data.hallRouteSettings[EVENT_NAME][MAP_NAME].hallOrder = [
+    "hall-east:highest",
+  ];
+  focusHeaderBackup.data.hallRouteSettings[EVENT_NAME][
+    MAP_NAME
+  ].hallVisitLists = [{ hallId: "hall-east", itemIds }];
+
+  await page
+    .locator('input[aria-label="バックアップファイルを選択"]')
+    .setInputFiles({
+      name: "focus-header-layout-backup.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(focusHeaderBackup), "utf8"),
+    });
+  const restoreDialog = page.getByRole("dialog", {
+    name: "バックアップからイベントを復元",
+  });
+  await expect(restoreDialog).toBeVisible();
+  await restoreDialog.getByRole("radio", { name: /同名で置換/ }).check();
+  await restoreDialog.getByRole("button", { name: "置換して復元" }).click();
+  await expect(restoreDialog).toBeHidden();
+  await expect(page.getByRole("heading", { name: EVENT_NAME })).toBeVisible();
+
+  await page.getByTitle("集中モード").click();
+  await expect(page.locator("#focus-mode-footer")).toBeVisible();
+  await expectFocusHeaderFullyVisible(page);
+  await page.getByTitle("マップを表示").click();
+  await expect(page.getByTitle("マップを非表示")).toBeVisible();
+
+  const settingsButton = page.getByTitle("表示項目の設定");
+  await settingsButton.click();
+  const zoomSelect = page.locator("#app-display-zoom");
+  await expect(zoomSelect).toBeVisible();
+  for (const zoom of [15, 30, 50, 75, 100, 125, 150]) {
+    await zoomSelect.selectOption(String(zoom));
+    await expect(zoomSelect).toHaveValue(String(zoom));
+    await expectFocusHeaderFullyVisible(page);
+  }
+  await page
+    .locator("div.fixed.inset-0.z-40")
+    .click({ position: { x: 1, y: 1 } });
+  await expect(zoomSelect).toBeHidden();
+
+  for (const zoom of [75, 100, 150]) {
+    await settingsButton.click();
+    await expect(zoomSelect).toBeVisible();
+    await zoomSelect.selectOption(String(zoom));
+    await expect(zoomSelect).toHaveValue(String(zoom));
+    await page
+      .locator("div.fixed.inset-0.z-40")
+      .click({ position: { x: 1, y: 1 } });
+
+    await page
+      .getByRole("button", { name: "スマートフォンモードに切替" })
+      .dispatchEvent("click");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(
+      page.getByRole("button", { name: "タブレット/PCモードに切替" }),
+    ).toBeVisible();
+    await expectFocusHeaderFullyVisible(page);
+
+    await page
+      .getByRole("button", { name: "タブレット/PCモードに切替" })
+      .dispatchEvent("click");
+    await page.setViewportSize({ width: 1180, height: 768 });
+    await expect(
+      page.getByRole("button", { name: "スマートフォンモードに切替" }),
+    ).toBeVisible();
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await settingsButton.click();
+  await zoomSelect.selectOption("100");
+  await expect(zoomSelect).toHaveValue("100");
+  await page
+    .locator("div.fixed.inset-0.z-40")
+    .click({ position: { x: 1, y: 1 } });
+  await expectFocusHeaderFullyVisible(page);
+});
+
 test("@a11y representative list, focus, map, and dialog flows have no moderate-or-higher violations", async ({
   page,
 }) => {
