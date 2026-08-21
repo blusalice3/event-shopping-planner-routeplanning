@@ -384,6 +384,245 @@ const consolidateViolations = (
     );
 };
 
+const expectFocusHeaderFullyVisible = async (page: Page) => {
+  const metrics = await page
+    .getByTestId("focus-mode-header")
+    .evaluate((headerElement) => {
+      const header = headerElement as HTMLElement;
+      const bulkRow = header.querySelector<HTMLElement>(
+        '[data-testid="focus-header-desktop-bulk-row"], [data-testid="focus-header-bulk-row"]',
+      );
+      if (!bulkRow) throw new Error("Focus header bulk status row is missing");
+
+      const headerRect = header.getBoundingClientRect();
+      const bulkRect = bulkRow.getBoundingClientRect();
+      return {
+        bulkBottom: bulkRect.bottom,
+        bulkHeight: bulkRect.height,
+        bulkTop: bulkRect.top,
+        clientHeight: header.clientHeight,
+        flexShrink: getComputedStyle(header).flexShrink,
+        headerBottom: headerRect.bottom,
+        headerTop: headerRect.top,
+        scrollHeight: header.scrollHeight,
+      };
+    });
+
+  expect(metrics.flexShrink).toBe("0");
+  expect(metrics.clientHeight).toBeGreaterThanOrEqual(metrics.scrollHeight - 1);
+  expect(metrics.bulkHeight).toBeGreaterThan(0);
+  expect(metrics.bulkTop).toBeGreaterThanOrEqual(metrics.headerTop - 1);
+  expect(metrics.bulkBottom).toBeLessThanOrEqual(metrics.headerBottom + 1);
+};
+
+const expectFocusHeaderPinnedAfterScroll = async (page: Page) => {
+  await expectFocusHeaderFullyVisible(page);
+  const header = page.getByTestId("focus-mode-header");
+  const scrollRegion = page.getByTestId("focus-mode-scroll-region");
+
+  const maxScroll = await scrollRegion.evaluate(
+    (region) => region.scrollHeight - region.clientHeight,
+  );
+  expect(maxScroll).toBeGreaterThan(40);
+
+  const captureAt = async (ratio: number) => {
+    await scrollRegion.evaluate((region, targetRatio) => {
+      region.scrollTop =
+        (region.scrollHeight - region.clientHeight) * targetRatio;
+    }, ratio);
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+
+    return header.evaluate((headerElement) => {
+      const focusHeader = headerElement as HTMLElement;
+      const bulkRow = focusHeader.querySelector<HTMLElement>(
+        '[data-testid="focus-header-desktop-bulk-row"], [data-testid="focus-header-bulk-row"]',
+      );
+      if (!bulkRow) throw new Error("Focus header bulk status row is missing");
+
+      const headerRect = focusHeader.getBoundingClientRect();
+      const bulkRect = bulkRow.getBoundingClientRect();
+      const region = document.querySelector<HTMLElement>(
+        '[data-testid="focus-mode-scroll-region"]',
+      );
+      if (!region) throw new Error("Focus mode scroll region is missing");
+      const regionRect = region?.getBoundingClientRect();
+      const visibleTop = Math.max(0, regionRect.top);
+      const visibleBottom = Math.min(window.innerHeight, regionRect.bottom);
+      const hitTarget = document.elementFromPoint(
+        headerRect.left + headerRect.width / 2,
+        headerRect.top + headerRect.height / 2,
+      );
+      const computedStyle = getComputedStyle(focusHeader);
+
+      return {
+        bulkBottom: bulkRect.bottom,
+        bulkTop: bulkRect.top,
+        bodyOverflow: getComputedStyle(document.body).overflow,
+        headerBottom: headerRect.bottom,
+        headerHeight: headerRect.height,
+        headerTop: headerRect.top,
+        hitWithinHeader: Boolean(
+          hitTarget &&
+          (hitTarget === focusHeader || focusHeader.contains(hitTarget)),
+        ),
+        pageScrollPosition:
+          document.scrollingElement?.scrollTop ?? window.scrollY,
+        position: computedStyle.position,
+        scrollPosition: region.scrollTop,
+        visibleBottom,
+        visibleTop,
+      };
+    });
+  };
+
+  const first = await captureAt(0.25);
+  const second = await captureAt(0.55);
+  for (const metrics of [first, second]) {
+    expect(metrics.bodyOverflow).toBe("hidden");
+    expect(metrics.pageScrollPosition).toBe(0);
+    expect(metrics.position).toBe("sticky");
+    expect(metrics.scrollPosition).toBeGreaterThan(20);
+    expect(metrics.headerHeight).toBeGreaterThan(0);
+    expect(metrics.headerTop).toBeGreaterThanOrEqual(metrics.visibleTop - 1);
+    expect(metrics.headerBottom).toBeLessThanOrEqual(metrics.visibleBottom + 1);
+    expect(metrics.bulkTop).toBeGreaterThanOrEqual(metrics.headerTop - 1);
+    expect(metrics.bulkBottom).toBeLessThanOrEqual(metrics.headerBottom + 1);
+    expect(metrics.hitWithinHeader).toBe(true);
+  }
+  expect(Math.abs(second.headerTop - first.headerTop)).toBeLessThanOrEqual(2);
+  expect(second.scrollPosition - first.scrollPosition).toBeGreaterThan(20);
+
+  await scrollRegion.evaluate((region) => {
+    region.scrollTop = 0;
+  });
+};
+
+test("@layout focus keeps the complete space header pinned across map, layout, and display zoom changes", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width: 1180, height: 768 });
+  await waitForApplication(page);
+
+  const focusHeaderBackup = JSON.parse(JSON.stringify(representativeBackup));
+  const sourceItem = focusHeaderBackup.data.eventLists[EVENT_NAME][0];
+  const itemIds: string[] = [];
+  focusHeaderBackup.data.eventLists[EVENT_NAME] = Array.from(
+    { length: 30 },
+    (_, index) => {
+      const id = `focus-header-item-${index + 1}`;
+      itemIds.push(id);
+      return {
+        ...sourceItem,
+        id,
+        circle: `同一スペースサークル${index + 1}`,
+        number: "01a",
+        priorityLevel: "highest",
+        purchaseStatus: "None",
+        title: `ヘッダー表示確認アイテム${index + 1}`,
+      };
+    },
+  );
+  focusHeaderBackup.data.executeModeItems[EVENT_NAME][EVENT_DATE] = itemIds;
+  focusHeaderBackup.data.routeSettings[EVENT_NAME][MAP_NAME].visitOrder = [
+    {
+      row: 1,
+      col: 2,
+      blockName: "東A",
+      number: 1,
+      order: 0,
+      itemIds,
+    },
+  ];
+  focusHeaderBackup.data.hallRouteSettings[EVENT_NAME][MAP_NAME].hallOrder = [
+    "hall-east:highest",
+  ];
+  focusHeaderBackup.data.hallRouteSettings[EVENT_NAME][
+    MAP_NAME
+  ].hallVisitLists = [{ hallId: "hall-east", itemIds }];
+
+  await page
+    .locator('input[aria-label="バックアップファイルを選択"]')
+    .setInputFiles({
+      name: "focus-header-layout-backup.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(focusHeaderBackup), "utf8"),
+    });
+  const restoreDialog = page.getByRole("dialog", {
+    name: "バックアップからイベントを復元",
+  });
+  await expect(restoreDialog).toBeVisible();
+  await restoreDialog.getByRole("radio", { name: /同名で置換/ }).check();
+  await restoreDialog.getByRole("button", { name: "置換して復元" }).click();
+  await expect(restoreDialog).toBeHidden();
+  await expect(page.getByRole("heading", { name: EVENT_NAME })).toBeVisible();
+
+  await page.getByTitle("集中モード").click();
+  await expect(page.locator("#focus-mode-footer")).toBeVisible();
+  await expectFocusHeaderFullyVisible(page);
+
+  const settingsButton = page.getByTitle("表示項目の設定");
+  const zoomSelect = page.locator("#app-display-zoom");
+  const setDisplayZoom = async (zoom: number) => {
+    await settingsButton.click();
+    await expect(zoomSelect).toBeVisible();
+    await zoomSelect.selectOption(String(zoom));
+    await expect(zoomSelect).toHaveValue(String(zoom));
+    await page
+      .locator("div.fixed.inset-0.z-40")
+      .click({ position: { x: 1, y: 1 } });
+    await expect(zoomSelect).toBeHidden();
+  };
+
+  for (const zoom of [15, 30, 50, 75, 100, 125, 150]) {
+    await setDisplayZoom(zoom);
+    await expectFocusHeaderPinnedAfterScroll(page);
+  }
+
+  await page.getByTitle("マップを表示").click();
+  await expect(page.getByTitle("マップを非表示")).toBeVisible();
+  for (const zoom of [15, 30, 50, 75, 100, 125, 150]) {
+    await setDisplayZoom(zoom);
+    await expectFocusHeaderPinnedAfterScroll(page);
+  }
+
+  for (const zoom of [75, 100, 150]) {
+    await setDisplayZoom(zoom);
+
+    await page
+      .getByRole("button", { name: "スマートフォンモードに切替" })
+      .dispatchEvent("click");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(
+      page.getByRole("button", { name: "タブレット/PCモードに切替" }),
+    ).toBeVisible();
+    await expectFocusHeaderPinnedAfterScroll(page);
+
+    await page.getByTitle("マップを非表示").dispatchEvent("click");
+    await expect(page.getByTitle("マップを表示")).toBeVisible();
+    await expectFocusHeaderPinnedAfterScroll(page);
+    await page.getByTitle("マップを表示").dispatchEvent("click");
+    await expect(page.getByTitle("マップを非表示")).toBeVisible();
+
+    await page
+      .getByRole("button", { name: "タブレット/PCモードに切替" })
+      .dispatchEvent("click");
+    await page.setViewportSize({ width: 1180, height: 768 });
+    await expect(
+      page.getByRole("button", { name: "スマートフォンモードに切替" }),
+    ).toBeVisible();
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setDisplayZoom(100);
+  await expectFocusHeaderPinnedAfterScroll(page);
+});
+
 test("@a11y representative list, focus, map, and dialog flows have no moderate-or-higher violations", async ({
   page,
 }) => {

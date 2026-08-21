@@ -11,6 +11,10 @@ import {
   type MovePlan,
 } from "../../lists/domain/movePlan";
 import { acquireBodyScrollLock } from "../../../utils/bodyScrollLock";
+import {
+  clearAppHeaderHeightAttribute,
+  setAppHeaderHeightAttribute,
+} from "../../../styles/runtimeLayoutAttributes";
 import type { ThemeMode } from "../../../hooks/useThemeMode";
 import type {
   UIVisibilityModeKey,
@@ -472,6 +476,30 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = ({ model, actions }) => {
     },
     ui: { onCloseUiSettingsPanel, onToggleUiSettingsPanel, setLayoutMode },
   } = actions;
+  const appHeaderRef = React.useRef<HTMLElement>(null);
+  const appHeaderHeightOwnerId = React.useId();
+
+  React.useEffect(() => {
+    const appHeader = appHeaderRef.current;
+    const updateAppHeaderHeight = () => {
+      const physicalHeight = appHeader?.getBoundingClientRect().height ?? 0;
+      setAppHeaderHeightAttribute(appHeaderHeightOwnerId, physicalHeight);
+    };
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (appHeader && typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(updateAppHeaderHeight);
+      resizeObserver.observe(appHeader);
+    }
+    updateAppHeaderHeight();
+    window.addEventListener("resize", updateAppHeaderHeight);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateAppHeaderHeight);
+      clearAppHeaderHeightAttribute(appHeaderHeightOwnerId);
+    };
+  }, [appHeaderHeightOwnerId, showHeaderBar, showTabBar]);
 
   React.useEffect(() => {
     if (!uiSettingsPanelOpen) return;
@@ -495,6 +523,8 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = ({ model, actions }) => {
     <>
       {(showHeaderBar || showTabBar) && (
         <header
+          ref={appHeaderRef}
+          data-testid="app-shell-header"
           className={`bg-white dark:bg-slate-800 shadow-sm sticky top-0 ${
             uiSettingsPanelOpen ? "z-[80]" : "z-10"
           }`}

@@ -75,6 +75,7 @@ import {
   type FocusRouteCalculation,
 } from "../utils/focusRouteCalculation";
 import { buildRouteDiagnostics } from "../utils/routeDiagnostics";
+import { acquireBodyScrollLock } from "../utils/bodyScrollLock";
 import {
   applyLimitedPurchase,
   applyPurchasedFromLimitedInput,
@@ -163,7 +164,6 @@ type PostEventDistributionCheckContext = {
 // スワイプ判定の閾値
 const SWIPE_THRESHOLD = 50;
 const FOOTER_HEIGHT_SP = 56;
-const HEADER_HEIGHT = 64;
 const FOOTER_HEIGHT_PC = 64;
 const FOOTER_OVERLAP_GUARD_PX = 1;
 const getVisitKey = (item: ShoppingItem): string => {
@@ -350,7 +350,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   useEffect(() => {
     if (typeof window === "undefined" || typeof document === "undefined")
       return;
-    if (!isMapVisible || isCompleted) return;
+    if (isCompleted) return;
     const footer = document.getElementById("focus-mode-footer");
     if (!footer) return;
     const updateHeight = () => {
@@ -371,7 +371,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       resizeObserver?.disconnect();
       window.removeEventListener("resize", updateHeight);
     };
-  }, [layoutMode, isMapVisible, isCompleted]);
+  }, [layoutMode, isCompleted]);
   const itemsById = useMemo(() => {
     return new Map(items.map((item) => [item.id, item]));
   }, [items]);
@@ -789,8 +789,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     16 + (activeNavigatorRailSide === "right" ? railClearance : 0);
   const completionPrevLeftPx =
     16 + (activeNavigatorRailSide === "left" ? railClearance : 0);
-  const smartphoneFocusHeight = `calc((100dvh - ${measuredFooterHeight + FOOTER_OVERLAP_GUARD_PX}px) / ${safeAppScale})`;
-  const desktopFocusHeight = `calc((100dvh - ${HEADER_HEIGHT + measuredFooterHeight + FOOTER_OVERLAP_GUARD_PX}px) / ${safeAppScale})`;
+  const focusViewportHeight = `calc((100dvh - ${measuredFooterHeight + FOOTER_OVERLAP_GUARD_PX}px - var(--app-header-height) - var(--app-main-content-padding)) / ${safeAppScale})`;
   useEffect(() => {
     if (!isInspecting) return;
     closeNavigatorEditableSurfaces();
@@ -2901,6 +2900,27 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const handleTemporaryPromoteRequest = useCallback(() => {
     void spaceNavigator?.promoteTemporary();
   }, [spaceNavigator]);
+  const usesStickyFocusHeader =
+    allVisits.length > 0 &&
+    !(isSpaceAggregate && temporarySubview === "ended") &&
+    !isCompleted &&
+    !isAutoAdvancing;
+  useEffect(() => {
+    if (!usesStickyFocusHeader) return;
+    const previousScrollPosition = { x: window.scrollX, y: window.scrollY };
+    const shouldRestoreWindowScroll =
+      previousScrollPosition.x !== 0 || previousScrollPosition.y !== 0;
+    if (shouldRestoreWindowScroll) window.scrollTo(0, 0);
+    const releaseBodyScrollLock = acquireBodyScrollLock({
+      lockOverscroll: true,
+    });
+    return () => {
+      releaseBodyScrollLock();
+      if (shouldRestoreWindowScroll) {
+        window.scrollTo(previousScrollPosition.x, previousScrollPosition.y);
+      }
+    };
+  }, [usesStickyFocusHeader]);
   const resumeChoiceDialogJSX = resumeChoiceDialog?.isOpen ? (
     <ResumeChoiceDialogView
       dialog={resumeChoiceDialog}
@@ -3133,7 +3153,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   ) {
     return (
       <div
-        data-layout-height={smartphoneFocusHeight}
+        data-layout-height={focusViewportHeight}
         className="esp-layout-height relative flex flex-col"
         data-focus-inspecting={isInspecting || undefined}
       >
@@ -3205,7 +3225,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
         </div>
         <div
           data-layout-height={`${100 - splitRatio}%`}
-          className="esp-layout-height min-h-0 overflow-y-auto"
+          data-testid="focus-mode-scroll-region"
+          className="esp-layout-height min-h-0 overflow-y-auto overscroll-contain"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
@@ -3284,7 +3305,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   if (layoutMode === "pc" && isMapVisible && currentMapData && !isCompleted) {
     return (
       <div
-        data-layout-height={desktopFocusHeight}
+        data-layout-height={focusViewportHeight}
         className="esp-layout-height relative flex"
         data-focus-inspecting={isInspecting || undefined}
       >
@@ -3338,7 +3359,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
             />
           </div>
         </div>
-        <div className="w-1/2 flex flex-col overflow-y-auto pb-20">
+        <div
+          className="w-1/2 flex flex-col overflow-y-auto overscroll-contain pb-20"
+          data-testid="focus-mode-scroll-region"
+        >
           <FocusModeHeader
             layoutMode={layoutMode}
             isMapVisible={isMapVisible}
@@ -3434,7 +3458,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
   return (
     <div
       ref={swipeContainerRef}
-      className="relative min-h-[calc(100vh-200px)] pb-20"
+      data-layout-height={focusViewportHeight}
+      data-testid="focus-mode-scroll-region"
+      className="esp-layout-height relative min-h-0 overflow-y-auto overscroll-contain pb-20"
       data-focus-inspecting={isInspecting || undefined}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}

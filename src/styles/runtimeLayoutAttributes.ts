@@ -2,8 +2,13 @@ const footerHeightOwners = new Map<
   string,
   { height: string; revision: number }
 >();
+const appHeaderHeightOwners = new Map<
+  string,
+  { height: string; revision: number }
+>();
 
 let footerHeightRevision = 0;
+let appHeaderHeightRevision = 0;
 
 const syncFooterHeightAttribute = (): void => {
   if (typeof document === "undefined") return;
@@ -15,6 +20,19 @@ const syncFooterHeightAttribute = (): void => {
     document.documentElement.dataset.footerHeight = activeOwner.height;
   } else {
     delete document.documentElement.dataset.footerHeight;
+  }
+};
+
+const syncAppHeaderHeightAttribute = (): void => {
+  if (typeof document === "undefined") return;
+
+  const activeOwner = Array.from(appHeaderHeightOwners.values()).sort(
+    (left, right) => right.revision - left.revision,
+  )[0];
+  if (activeOwner) {
+    document.documentElement.dataset.appHeaderHeight = activeOwner.height;
+  } else {
+    delete document.documentElement.dataset.appHeaderHeight;
   }
 };
 
@@ -38,4 +56,21 @@ export const setFooterHeightAttribute = (
 export const clearFooterHeightAttribute = (ownerId: string): void => {
   footerHeightOwners.delete(ownerId);
   syncFooterHeightAttribute();
+};
+
+export const setAppHeaderHeightAttribute = (
+  ownerId: string,
+  heightPx: number,
+): void => {
+  if (!Number.isFinite(heightPx)) return;
+  appHeaderHeightOwners.set(ownerId, {
+    height: `${Math.max(0, heightPx)}px`,
+    revision: ++appHeaderHeightRevision,
+  });
+  syncAppHeaderHeightAttribute();
+};
+
+export const clearAppHeaderHeightAttribute = (ownerId: string): void => {
+  appHeaderHeightOwners.delete(ownerId);
+  syncAppHeaderHeightAttribute();
 };

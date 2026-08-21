@@ -1,5 +1,19 @@
 :root {
   --footer-height: attr(data-footer-height type(<length>), 0px);
+  --app-header-height: attr(data-app-header-height type(<length>), 0px);
+  --app-main-content-padding: 1rem;
+}
+
+@media (min-width: 640px) {
+  :root {
+    --app-main-content-padding: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --app-main-content-padding: 2rem;
+  }
 }
 
 .esp-layout-left {

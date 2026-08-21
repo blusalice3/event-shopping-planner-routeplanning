@@ -86,6 +86,24 @@ describe("FocusModeItemList purchase status control mode", () => {
 });
 
 describe("FocusModeHeader responsive layout", () => {
+  it.each(["pc", "smartphone"] as const)(
+    "keeps the %s header complete and sticky inside constrained layouts",
+    (layoutMode) => {
+      renderHeader({
+        layoutMode,
+        isMapVisible: true,
+      });
+
+      expect(screen.getByTestId("focus-mode-header")).toHaveClass(
+        "sticky",
+        "top-0",
+        "z-40",
+        "flex-shrink-0",
+        "overflow-hidden",
+      );
+    },
+  );
+
   it("uses smartphone-specific compact layout and horizontal bulk status row", () => {
     renderHeader({ layoutMode: "smartphone" });
 
